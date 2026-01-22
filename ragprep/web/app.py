@@ -9,6 +9,7 @@ from typing import Any
 
 from fastapi import BackgroundTasks, FastAPI, File, HTTPException, Request, UploadFile
 from fastapi.responses import HTMLResponse, PlainTextResponse
+from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.responses import Response
 
@@ -16,9 +17,11 @@ from ragprep.config import get_settings
 from ragprep.pipeline import pdf_to_markdown
 
 TEMPLATES_DIR = Path(__file__).resolve().parent / "templates"
+STATIC_DIR = Path(__file__).resolve().parent / "static"
 templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
 
 app = FastAPI()
+app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
 
 class JobStatus(str, Enum):

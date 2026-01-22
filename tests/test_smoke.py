@@ -13,6 +13,11 @@ def test_root_renders_page() -> None:
     assert response.status_code == 200
     assert "PDF" in response.text
     assert "hx-post" in response.text
+    assert "/static/htmx.min.js" in response.text
+
+    htmx = client.get("/static/htmx.min.js")
+    assert htmx.status_code == 200
+    assert "htmx" in htmx.text
 
 
 def _extract_job_id(html: str) -> str:
