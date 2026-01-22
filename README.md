@@ -8,6 +8,20 @@ PDF → Markdown app scaffold (FastAPI + htmx) backed by `lightonai/LightOnOCR-2
 - Run server: `uv run uvicorn ragprep.web.app:app --reload`
 - Open: `http://127.0.0.1:8000`
 
+## Real OCR verification (manual)
+Runs PDF → images → LightOnOCR → markdown and writes an output file. The first run downloads model weights.
+
+- Run: `uv run python scripts/smoke-real-ocr.py path/to/file.pdf`
+- Output: `path/to/file.md` (use `--out ...` and `--overwrite`)
+
+Environment variables (optional):
+- `LIGHTONOCR_MODEL_ID` (default: `lightonai/LightOnOCR-2-1B`)
+- `LIGHTONOCR_DEVICE` (`cpu|cuda|mps|auto`, default: `cpu`)
+- `LIGHTONOCR_DTYPE` (`float32|bfloat16|float16`, optional)
+- `LIGHTONOCR_MAX_NEW_TOKENS` (default: `1024`)
+- `LIGHTONOCR_DRY_RUN` (truthy to skip real inference)
+- `HF_HOME` (controls the Hugging Face cache location)
+
 ## Standalone distribution (Windows reference)
 Builds a self-contained folder using `python-build-standalone` (no system Python required for end users).
 
