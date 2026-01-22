@@ -76,6 +76,12 @@ try {
         throw "python.exe not found under: $StandaloneDir/python"
     }
 
+    $noticesSource = Join-Path $repoRoot "THIRD_PARTY_NOTICES.md"
+    if (-not (Test-Path $noticesSource)) {
+        throw "Missing THIRD_PARTY_NOTICES.md at repo root: $noticesSource"
+    }
+    Copy-Item -Force $noticesSource (Join-Path $StandaloneDir "THIRD_PARTY_NOTICES.md")
+
     $commit = Get-GitCommitShort
     $builtAt = (Get-Date).ToString("yyyy-MM-ddTHH:mm:ssK")
     $pythonVersion = Get-PythonVersion -PythonExe $pythonExe
@@ -133,6 +139,7 @@ try {
         "run.ps1"
         "run.cmd"
         "requirements.txt"
+        "THIRD_PARTY_NOTICES.md"
         $MetadataFileName
     )
 

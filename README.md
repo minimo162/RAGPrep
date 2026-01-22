@@ -51,6 +51,10 @@ Outputs to `dist/standalone/`:
 - `powershell -ExecutionPolicy Bypass -File scripts/package-standalone.ps1 -Force`
 - Output: `dist/ragprep-standalone-<git-sha>.zip` (includes `BUILD_INFO.txt` at the zip root)
 
+### Third-party notices
+- Repo: `THIRD_PARTY_NOTICES.md`
+- Standalone output / zip: `THIRD_PARTY_NOTICES.md`
+
 ### Run (smoke test)
 - `powershell -ExecutionPolicy Bypass -File dist/standalone/run.ps1`
 - Visit `http://127.0.0.1:8000` and upload a PDF

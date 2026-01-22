@@ -174,6 +174,14 @@ try {
     New-Item -ItemType Directory -Force -Path $appDir | Out-Null
     Copy-Item -Recurse -Force (Join-Path $repoRoot "ragprep") $appDir
 
+    $noticesPath = Join-Path $repoRoot "THIRD_PARTY_NOTICES.md"
+    if (Test-Path $noticesPath) {
+        Copy-Item -Force $noticesPath (Join-Path $OutputDir "THIRD_PARTY_NOTICES.md")
+    }
+    else {
+        Write-Warning "THIRD_PARTY_NOTICES.md not found at repo root; standalone output will not include notices."
+    }
+
     $runPs1 = @"
 [CmdletBinding()]
 param(
