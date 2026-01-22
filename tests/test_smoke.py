@@ -1,4 +1,5 @@
 import re
+from typing import cast
 
 import pytest
 from fastapi.testclient import TestClient
@@ -20,36 +21,81 @@ def _extract_job_id(html: str) -> str:
     return match.group(1)
 
 
+def _make_pdf_bytes(page_count: int) -> bytes:
+    import fitz
+
+    doc = fitz.open()
+    for i in range(page_count):
+        page = doc.new_page()
+        page.insert_text((72, 72), f"Hello {i + 1}")
+    return cast(bytes, doc.tobytes())
+
+
 def test_convert_creates_job_and_downloads_markdown(monkeypatch: pytest.MonkeyPatch) -> None:
     client = TestClient(app)
+
+    pdf_bytes = _make_pdf_bytes(page_count=2)
+
     calls: dict[str, int] = {"n": 0}
 
-    def fake_pdf_to_markdown(_pdf_bytes: bytes) -> str:
+    def fake_ocr_image(_image: object) -> str:
         calls["n"] += 1
-        return "hello"
+        if calls["n"] == 1:
+            return "page1\r\n"
+        if calls["n"] == 2:
+            return "page2\r"
+        raise AssertionError("Unexpected extra page")
 
-    monkeypatch.setattr("ragprep.web.app.pdf_to_markdown", fake_pdf_to_markdown)
-    files = {"file": ("test.pdf", b"%PDF-1.4\n%fake\n", "application/pdf")}
+    monkeypatch.setenv("RAGPREP_RENDER_DPI", "72")
+    monkeypatch.setattr("ragprep.pipeline.ocr_image", fake_ocr_image)
+
+    files = {"file": ("test.pdf", pdf_bytes, "application/pdf")}
     response = client.post("/convert", files=files)
     assert response.status_code == 200
     job_id = _extract_job_id(response.text)
     assert f"/jobs/{job_id}/status" in response.text
 
-    status = client.get(f"/jobs/{job_id}/status")
-    assert status.status_code == 200
-    assert job_id in status.text
+    for _ in range(20):
+        result = client.get(f"/jobs/{job_id}/result")
+        if result.status_code == 200:
+            break
+        assert result.status_code == 409
+    else:
+        pytest.fail("job did not complete")
 
-    result = client.get(f"/jobs/{job_id}/result")
-    assert result.status_code == 200
-    assert "hello" in result.text
+    assert "page1" in result.text
+    assert "page2" in result.text
     assert f"/download/{job_id}.md" in result.text
 
     download = client.get(f"/download/{job_id}.md")
     assert download.status_code == 200
-    assert download.text == "hello"
+    assert download.text == "page1\n\npage2"
     assert "text/markdown" in download.headers["content-type"]
     assert f"{job_id}.md" in download.headers["content-disposition"]
-    assert calls["n"] == 1
+    assert calls["n"] == 2
+
+    _ = client.get(f"/jobs/{job_id}/status")
+    _ = client.get(f"/download/{job_id}.md")
+    assert calls["n"] == 2
+
+
+def test_bad_pdf_job_reports_error() -> None:
+    client = TestClient(app)
+    files = {"file": ("bad.pdf", b"not a pdf", "application/pdf")}
+    response = client.post("/convert", files=files)
+    assert response.status_code == 200
+    job_id = _extract_job_id(response.text)
+
+    for _ in range(20):
+        status = client.get(f"/jobs/{job_id}/status")
+        assert status.status_code == 200
+        if "Invalid PDF data" in status.text:
+            break
+    else:
+        pytest.fail("expected invalid pdf error")
+
+    download = client.get(f"/download/{job_id}.md")
+    assert download.status_code == 409
 
 
 def test_convert_rejects_large_upload(monkeypatch: pytest.MonkeyPatch) -> None:
