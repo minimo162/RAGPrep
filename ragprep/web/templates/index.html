@@ -72,13 +72,23 @@
         border-radius: 8px;
         overflow-x: auto;
       }
+      .toolbar {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+      }
+      a.link {
+        color: var(--fg);
+        text-decoration: underline;
+      }
     </style>
     <script src="https://unpkg.com/htmx.org@1.9.12"></script>
   </head>
   <body>
     <main class="container">
       <h1>PDF → Markdown</h1>
-      <p class="muted">Upload a PDF. The OCR pipeline is wired in a later task.</p>
+      <p class="muted">Upload a PDF and wait for conversion to finish.</p>
 
       <form
         hx-post="/convert"

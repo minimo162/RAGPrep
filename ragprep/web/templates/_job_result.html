@@ -1,0 +1,8 @@
+<div class="job" data-job-id="{{ job.id }}">
+  <div class="toolbar">
+    <div class="muted">Job {{ job.id }} — done</div>
+    <a class="link" href="/download/{{ job.id }}.md">Download .md</a>
+  </div>
+  <h2>Result</h2>
+  <pre class="markdown">{{ job.markdown }}</pre>
+</div>

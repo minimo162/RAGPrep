@@ -1,0 +1,27 @@
+{% if job.status in ["queued", "running"] %}
+  <div
+    class="job"
+    data-job-id="{{ job.id }}"
+    hx-get="/jobs/{{ job.id }}/status"
+    hx-trigger="load, every 1s"
+    hx-swap="outerHTML"
+  >
+    <p class="muted">Job {{ job.id }} — {{ job.status.value }}</p>
+    <p class="muted">Processing…</p>
+  </div>
+{% elif job.status == "done" %}
+  <div
+    class="job"
+    data-job-id="{{ job.id }}"
+    hx-get="/jobs/{{ job.id }}/result"
+    hx-trigger="load"
+    hx-swap="outerHTML"
+  >
+    <p class="muted">Job {{ job.id }} — done. Loading result…</p>
+  </div>
+{% else %}
+  <div class="job" data-job-id="{{ job.id }}">
+    <p class="muted">Job {{ job.id }} — {{ job.status.value }}</p>
+    <div class="error">{{ job.error or "Conversion failed." }}</div>
+  </div>
+{% endif %}
