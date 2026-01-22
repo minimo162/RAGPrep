@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>PDF → Markdown</title>
+    <style>
+      :root {
+        --fg: #111827;
+        --muted: #6b7280;
+        --bg: #ffffff;
+        --border: #e5e7eb;
+        --danger: #b91c1c;
+      }
+      body {
+        background: var(--bg);
+        color: var(--fg);
+        font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
+        margin: 0;
+      }
+      .container {
+        max-width: 900px;
+        margin: 0 auto;
+        padding: 24px 16px;
+      }
+      h1 {
+        font-size: 24px;
+        margin: 0 0 12px;
+      }
+      p {
+        margin: 8px 0;
+      }
+      form {
+        display: flex;
+        gap: 12px;
+        align-items: center;
+        padding: 12px;
+        border: 1px solid var(--border);
+        border-radius: 10px;
+      }
+      input[type="file"] {
+        flex: 1;
+      }
+      button {
+        appearance: none;
+        border: 1px solid var(--border);
+        background: #111827;
+        color: #fff;
+        padding: 8px 12px;
+        border-radius: 8px;
+        cursor: pointer;
+      }
+      #result {
+        margin-top: 16px;
+        padding: 12px;
+        border: 1px solid var(--border);
+        border-radius: 10px;
+      }
+      .muted {
+        color: var(--muted);
+      }
+      .error {
+        color: var(--danger);
+        font-weight: 600;
+      }
+      pre.markdown {
+        white-space: pre-wrap;
+        word-wrap: break-word;
+        background: #0b1020;
+        color: #e5e7eb;
+        padding: 12px;
+        border-radius: 8px;
+        overflow-x: auto;
+      }
+    </style>
+    <script src="https://unpkg.com/htmx.org@1.9.12"></script>
+  </head>
+  <body>
+    <main class="container">
+      <h1>PDF → Markdown</h1>
+      <p class="muted">Upload a PDF. The OCR pipeline is wired in a later task.</p>
+
+      <form
+        hx-post="/convert"
+        hx-target="#result"
+        hx-swap="innerHTML"
+        enctype="multipart/form-data"
+      >
+        <input type="file" name="file" accept="application/pdf,.pdf" required />
+        <button type="submit">Convert</button>
+      </form>
+
+      <section id="result">{% include "_result.html" %}</section>
+    </main>
+  </body>
+</html>

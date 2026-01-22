@@ -1,0 +1,8 @@
+{% if error %}
+  <div class="error">{{ error }}</div>
+{% elif markdown %}
+  <h2>Result</h2>
+  <pre class="markdown">{{ markdown }}</pre>
+{% else %}
+  <p class="muted">Converted Markdown will appear here.</p>
+{% endif %}
