@@ -5,6 +5,8 @@ param(
     [string]$TargetTriple = "x86_64-pc-windows-msvc",
     [string]$PbsRelease = "latest",
     [string]$PipTempRoot = "",
+    [string]$ModelId = "lightonai/LightOnOCR-2-1B",
+    [switch]$SkipModelPrefetch,
     [switch]$Clean
 )
 
@@ -180,6 +182,69 @@ try {
     }
     else {
         Write-Warning "THIRD_PARTY_NOTICES.md not found at repo root; standalone output will not include notices."
+    }
+
+    $dataDir = Join-Path $OutputDir "data"
+    $hfHomeDir = Join-Path $dataDir "hf"
+    New-Item -ItemType Directory -Force -Path $hfHomeDir | Out-Null
+
+    if (-not $SkipModelPrefetch) {
+        $modelIdTrimmed = $ModelId.Trim()
+        if ([string]::IsNullOrWhiteSpace($modelIdTrimmed)) {
+            throw "ModelId must be non-empty (got: $ModelId)"
+        }
+
+        Write-Host "Prefetching LightOnOCR model (this can take a while)..." -ForegroundColor Cyan
+        Write-Host "  model: $modelIdTrimmed" -ForegroundColor DarkGray
+        Write-Host "  HF_HOME: $hfHomeDir" -ForegroundColor DarkGray
+
+        $origHfHome = $env:HF_HOME
+        $origModelId = $env:LIGHTONOCR_MODEL_ID
+        $origPythonPath = $env:PYTHONPATH
+        $origNoUserSite = $env:PYTHONNOUSERSITE
+        $origPythonUtf8 = $env:PYTHONUTF8
+        try {
+            $env:HF_HOME = $hfHomeDir
+            $env:LIGHTONOCR_MODEL_ID = $modelIdTrimmed
+            $env:PYTHONNOUSERSITE = "1"
+            $env:PYTHONUTF8 = "1"
+            $env:PYTHONPATH = (Join-Path $OutputDir "app") + ";" + (Join-Path $OutputDir "site-packages")
+
+            $prefetchPy = @'
+import os
+
+model_id = os.environ.get("LIGHTONOCR_MODEL_ID") or "lightonai/LightOnOCR-2-1B"
+print(f"Prefetching LightOnOCR model: {model_id}")
+
+import transformers
+
+processor_cls = getattr(transformers, "LightOnOcrProcessor", None)
+model_cls = getattr(transformers, "LightOnOcrForConditionalGeneration", None)
+if processor_cls is None or model_cls is None:
+    raise RuntimeError(
+        "transformers does not expose LightOnOcr* classes. "
+        "LightOnOCR-2 requires transformers installed from source."
+    )
+
+processor_cls.from_pretrained(model_id)
+model_cls.from_pretrained(model_id)
+
+print("Prefetch complete.")
+'@
+
+            & $pythonExe -c $prefetchPy
+            Assert-LastExitCode "model prefetch"
+        }
+        finally {
+            if ($null -ne $origHfHome) { $env:HF_HOME = $origHfHome } else { Remove-Item env:HF_HOME -ErrorAction SilentlyContinue }
+            if ($null -ne $origModelId) { $env:LIGHTONOCR_MODEL_ID = $origModelId } else { Remove-Item env:LIGHTONOCR_MODEL_ID -ErrorAction SilentlyContinue }
+            if ($null -ne $origPythonPath) { $env:PYTHONPATH = $origPythonPath } else { Remove-Item env:PYTHONPATH -ErrorAction SilentlyContinue }
+            if ($null -ne $origNoUserSite) { $env:PYTHONNOUSERSITE = $origNoUserSite } else { Remove-Item env:PYTHONNOUSERSITE -ErrorAction SilentlyContinue }
+            if ($null -ne $origPythonUtf8) { $env:PYTHONUTF8 = $origPythonUtf8 } else { Remove-Item env:PYTHONUTF8 -ErrorAction SilentlyContinue }
+        }
+    }
+    else {
+        Write-Host "Skipping model prefetch (-SkipModelPrefetch)." -ForegroundColor Yellow
     }
 
     $runPs1 = @"

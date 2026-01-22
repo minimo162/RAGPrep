@@ -30,7 +30,7 @@ Builds a self-contained folder using `python-build-standalone` (no system Python
 - `uv` on PATH
 - `git` on PATH (required for the `transformers` Git dependency)
 - `tar` on PATH (Windows 10+ includes it)
-- Internet access (downloads python runtime + wheels)
+- Internet access (downloads python runtime + wheels + model weights unless skipped)
 
 ### Build
 - `powershell -ExecutionPolicy Bypass -File scripts/build-standalone.ps1 -Clean`
@@ -40,11 +40,14 @@ Optional parameters:
 - `-TargetTriple x86_64-pc-windows-msvc`
 - `-PbsRelease latest` (or a tag like `20260114` for repeatability)
 - `-PipTempRoot <path>` (defaults to `%LOCALAPPDATA%\\t`; use a very short path if you see path-length failures)
+- `-ModelId lightonai/LightOnOCR-2-1B` (prefetch this model into the standalone cache)
+- `-SkipModelPrefetch` (do not download model weights during build; they will download on first use at runtime)
 
 Outputs to `dist/standalone/`:
 - `python/` (runtime)
 - `site-packages/` (deps)
 - `app/` (source)
+- `data/hf/` (Hugging Face cache; includes model weights when prefetched)
 - `run.ps1` / `run.cmd` (launcher)
 
 ### Package (zip)
@@ -63,4 +66,4 @@ Outputs to `dist/standalone/`:
 - If build fails on the `transformers` line, confirm `git` is installed and on PATH.
 - If you see Windows path-length errors (e.g. `Filename too long`), set `-PipTempRoot` to a shorter path.
 - If `tar` is missing, install a recent Windows build or provide bsdtar.
-- Model weights download on first use; set `HF_HOME` to control the cache location.
+- By default, model weights are prefetched during `scripts/build-standalone.ps1` into `dist/standalone/data/hf`. Set `HF_HOME` to override the cache location, or pass `-SkipModelPrefetch` to download on first use instead.

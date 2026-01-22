@@ -23,7 +23,10 @@ each package's metadata (e.g. `*.dist-info/`) for license details.
 - The exact tag/asset used is recorded in `BUILD_INFO.txt` inside the standalone output.
 - Location in standalone output: `python/`
 
-## Not bundled
-- LightOnOCR model weights are downloaded at runtime (Hugging Face) and are not shipped inside the
-  standalone artifact by default.
+## Model weights (Hugging Face)
+- By default, `scripts/build-standalone.ps1` prefetches the LightOnOCR model weights and bundles
+  them into the standalone output under `data/hf/` (Hugging Face cache).
+- Model weights remain subject to their upstream license/terms; see:
+  https://huggingface.co/lightonai/LightOnOCR-2-1B
+- To avoid bundling weights, pass `-SkipModelPrefetch` and the app will download weights at runtime.
 

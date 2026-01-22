@@ -136,6 +136,7 @@ try {
         "python"
         "site-packages"
         "app"
+        "data"
         "run.ps1"
         "run.cmd"
         "requirements.txt"
