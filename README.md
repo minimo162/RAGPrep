@@ -1,6 +1,6 @@
 # RAGPrep
 
-PDF → Markdown app scaffold (FastAPI + htmx) backed by `lightonai/LightOnOCR-2-1B`.
+PDF to Markdown app scaffold (FastAPI + htmx) backed by `lightonai/LightOnOCR-2-1B`.
 
 ## Dev setup
 - Install `uv`: https://docs.astral.sh/uv/
@@ -9,7 +9,7 @@ PDF → Markdown app scaffold (FastAPI + htmx) backed by `lightonai/LightOnOCR-2
 - Open: `http://127.0.0.1:8000`
 
 ## Real OCR verification (manual)
-Runs PDF → images → LightOnOCR → markdown and writes an output file. The first run downloads model weights.
+Runs PDF -> images -> LightOnOCR -> markdown and writes an output file. The first run downloads model weights.
 
 - Run: `uv run python scripts/smoke-real-ocr.py path/to/file.pdf`
 - Output: `path/to/file.md` (use `--out ...` and `--overwrite`)
