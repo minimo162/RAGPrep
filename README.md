@@ -33,7 +33,7 @@ Builds a self-contained folder using `python-build-standalone` (no system Python
 - Internet access (downloads python runtime + wheels)
 
 ### Build
-- `pwsh -File scripts/build-standalone.ps1 -Clean`
+- `powershell -ExecutionPolicy Bypass -File scripts/build-standalone.ps1 -Clean`
 
 Optional parameters:
 - `-PythonVersion 3.11.14`
@@ -47,8 +47,12 @@ Outputs to `dist/standalone/`:
 - `app/` (source)
 - `run.ps1` / `run.cmd` (launcher)
 
+### Package (zip)
+- `powershell -ExecutionPolicy Bypass -File scripts/package-standalone.ps1 -Force`
+- Output: `dist/ragprep-standalone-<git-sha>.zip` (includes `BUILD_INFO.txt` at the zip root)
+
 ### Run (smoke test)
-- `pwsh -File dist/standalone/run.ps1`
+- `powershell -ExecutionPolicy Bypass -File dist/standalone/run.ps1`
 - Visit `http://127.0.0.1:8000` and upload a PDF
 
 ### Troubleshooting
