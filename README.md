@@ -30,6 +30,7 @@ Builds a self-contained folder using `python-build-standalone` (no system Python
 - `uv` on PATH
 - `git` on PATH (required for the `transformers` Git dependency)
 - `tar` on PATH (Windows 10+ includes it)
+- `7z` on PATH (7-Zip; required for packaging)
 - Internet access (downloads python runtime + wheels + model weights unless skipped)
 
 ### Build
@@ -51,7 +52,9 @@ Outputs to `dist/standalone/`:
 - `run.ps1` / `run.cmd` (launcher)
 
 ### Package (zip)
-- `powershell -ExecutionPolicy Bypass -File scripts/package-standalone.ps1 -Force`
+- Install 7-Zip: https://www.7-zip.org/
+- Run: `powershell -ExecutionPolicy Bypass -File scripts/package-standalone.ps1 -Force`
+- If `7z` is not on PATH: `powershell -ExecutionPolicy Bypass -File scripts/package-standalone.ps1 -SevenZipPath "C:\\Program Files\\7-Zip\\7z.exe" -Force`
 - Output: `dist/ragprep-standalone-<git-sha>.zip` (includes `BUILD_INFO.txt` at the zip root)
 
 ### Third-party notices

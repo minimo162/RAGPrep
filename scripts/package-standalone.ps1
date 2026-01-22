@@ -3,6 +3,7 @@ param(
     [string]$StandaloneDir = "",
     [string]$ZipPath = "",
     [string]$MetadataFileName = "BUILD_INFO.txt",
+    [string]$SevenZipPath = "",
     [switch]$Force
 )
 
@@ -11,6 +12,27 @@ $ErrorActionPreference = "Stop"
 $ProgressPreference = "SilentlyContinue"
 
 $repoRoot = Resolve-Path (Join-Path $PSScriptRoot "..")
+
+function Resolve-SevenZip {
+    param(
+        [Parameter(Mandatory = $true)][string]$ExplicitPath
+    )
+
+    if (-not [string]::IsNullOrWhiteSpace($ExplicitPath)) {
+        $resolved = [System.IO.Path]::GetFullPath($ExplicitPath)
+        if (-not (Test-Path $resolved)) {
+            throw "7-Zip executable not found at: $resolved"
+        }
+        return $resolved
+    }
+
+    $cmd = Get-Command 7z -ErrorAction SilentlyContinue
+    if ($cmd -and -not [string]::IsNullOrWhiteSpace($cmd.Source)) {
+        return $cmd.Source
+    }
+
+    throw "7z not found on PATH. Install 7-Zip (https://www.7-zip.org/) and ensure 7z.exe is on PATH, or pass -SevenZipPath."
+}
 
 function Get-GitCommitShort {
     if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
@@ -155,7 +177,11 @@ try {
             throw "No expected standalone items found in: $StandaloneDir"
         }
 
-        Compress-Archive -Path $existing -DestinationPath $ZipPath -CompressionLevel Optimal
+        $sevenZipExe = Resolve-SevenZip -ExplicitPath $SevenZipPath
+        & $sevenZipExe a -tzip -mx=9 $ZipPath $existing | Out-Null
+        if ($LASTEXITCODE -ne 0) {
+            throw "7z failed with exit code $LASTEXITCODE"
+        }
     }
     finally {
         Pop-Location
