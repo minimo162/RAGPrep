@@ -22,7 +22,13 @@ def _extract_job_id(html: str) -> str:
 
 def test_convert_creates_job_and_downloads_markdown(monkeypatch: pytest.MonkeyPatch) -> None:
     client = TestClient(app)
-    monkeypatch.setattr("ragprep.web.app.pdf_to_markdown", lambda _pdf_bytes: "hello")
+    calls: dict[str, int] = {"n": 0}
+
+    def fake_pdf_to_markdown(_pdf_bytes: bytes) -> str:
+        calls["n"] += 1
+        return "hello"
+
+    monkeypatch.setattr("ragprep.web.app.pdf_to_markdown", fake_pdf_to_markdown)
     files = {"file": ("test.pdf", b"%PDF-1.4\n%fake\n", "application/pdf")}
     response = client.post("/convert", files=files)
     assert response.status_code == 200
@@ -43,3 +49,13 @@ def test_convert_creates_job_and_downloads_markdown(monkeypatch: pytest.MonkeyPa
     assert download.text == "hello"
     assert "text/markdown" in download.headers["content-type"]
     assert f"{job_id}.md" in download.headers["content-disposition"]
+    assert calls["n"] == 1
+
+
+def test_convert_rejects_large_upload(monkeypatch: pytest.MonkeyPatch) -> None:
+    client = TestClient(app)
+    monkeypatch.setenv("RAGPREP_MAX_UPLOAD_BYTES", "1")
+    files = {"file": ("test.pdf", b"00", "application/pdf")}
+    response = client.post("/convert", files=files)
+    assert response.status_code == 413
+    assert "File too large" in response.text

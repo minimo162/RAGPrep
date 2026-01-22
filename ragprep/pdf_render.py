@@ -1,13 +1,11 @@
 from __future__ import annotations
 
 import io
-from typing import Any, Final
+from typing import Any
 
 from PIL import Image
 
-DEFAULT_DPI: Final[int] = 200
-MAX_PDF_BYTES: Final[int] = 10 * 1024 * 1024
-MAX_PAGES: Final[int] = 50
+from ragprep.config import get_settings
 
 
 def _import_fitz() -> Any:
@@ -22,10 +20,15 @@ def _import_fitz() -> Any:
 def render_pdf_to_images(
     pdf_bytes: bytes,
     *,
-    dpi: int = DEFAULT_DPI,
-    max_pages: int = MAX_PAGES,
-    max_bytes: int = MAX_PDF_BYTES,
+    dpi: int | None = None,
+    max_pages: int | None = None,
+    max_bytes: int | None = None,
 ) -> list[Image.Image]:
+    settings = get_settings()
+    dpi = settings.render_dpi if dpi is None else dpi
+    max_pages = settings.max_pages if max_pages is None else max_pages
+    max_bytes = settings.max_upload_bytes if max_bytes is None else max_bytes
+
     if not pdf_bytes:
         raise ValueError("pdf_bytes is empty")
     if dpi <= 0:

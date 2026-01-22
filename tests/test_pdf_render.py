@@ -39,3 +39,19 @@ def test_render_pdf_to_images_rejects_large_pdf_bytes() -> None:
     pdf_bytes = _make_pdf_bytes(page_count=1)
     with pytest.raises(ValueError, match="PDF too large"):
         render_pdf_to_images(pdf_bytes, max_bytes=1)
+
+
+def test_render_pdf_to_images_respects_env_max_pages(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("RAGPREP_MAX_PAGES", "1")
+    pdf_bytes = _make_pdf_bytes(page_count=2)
+    with pytest.raises(ValueError, match="max_pages"):
+        render_pdf_to_images(pdf_bytes)
+
+
+def test_render_pdf_to_images_respects_env_max_upload_bytes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("RAGPREP_MAX_UPLOAD_BYTES", "1")
+    pdf_bytes = _make_pdf_bytes(page_count=1)
+    with pytest.raises(ValueError, match="PDF too large"):
+        render_pdf_to_images(pdf_bytes)

@@ -4,7 +4,7 @@ import uuid
 from dataclasses import dataclass, replace
 from enum import Enum
 from pathlib import Path
-from threading import Lock
+from threading import Lock, Semaphore
 from typing import Any
 
 from fastapi import BackgroundTasks, FastAPI, File, HTTPException, Request, UploadFile
@@ -12,12 +12,11 @@ from fastapi.responses import HTMLResponse, PlainTextResponse
 from fastapi.templating import Jinja2Templates
 from starlette.responses import Response
 
+from ragprep.config import get_settings
 from ragprep.pipeline import pdf_to_markdown
 
 TEMPLATES_DIR = Path(__file__).resolve().parent / "templates"
 templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
-
-MAX_UPLOAD_BYTES = 10 * 1024 * 1024
 
 app = FastAPI()
 
@@ -66,14 +65,32 @@ class JobStore:
 jobs = JobStore()
 
 
+_job_semaphore_lock = Lock()
+_job_semaphore: Semaphore | None = None
+_job_semaphore_size: int | None = None
+
+
+def _get_job_semaphore() -> Semaphore:
+    global _job_semaphore, _job_semaphore_size
+
+    size = get_settings().max_concurrency
+    with _job_semaphore_lock:
+        if _job_semaphore is None or _job_semaphore_size != size:
+            _job_semaphore = Semaphore(size)
+            _job_semaphore_size = size
+        return _job_semaphore
+
+
 def _run_job(job_id: str, pdf_bytes: bytes) -> None:
-    jobs.update(job_id, status=JobStatus.running, error=None)
-    try:
-        markdown = pdf_to_markdown(pdf_bytes)
-    except Exception as exc:  # noqa: BLE001
-        jobs.update(job_id, status=JobStatus.error, error=str(exc))
-        return
-    jobs.update(job_id, status=JobStatus.done, markdown=markdown, error=None)
+    semaphore = _get_job_semaphore()
+    with semaphore:
+        jobs.update(job_id, status=JobStatus.running, error=None)
+        try:
+            markdown = pdf_to_markdown(pdf_bytes)
+        except Exception as exc:  # noqa: BLE001
+            jobs.update(job_id, status=JobStatus.error, error=str(exc))
+            return
+        jobs.update(job_id, status=JobStatus.done, markdown=markdown, error=None)
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -91,6 +108,7 @@ async def convert(
     background_tasks: BackgroundTasks,
     file: UploadFile = File(...),  # noqa: B008
 ) -> Response:
+    settings = get_settings()
     filename = file.filename or "upload"
     content = await file.read()
 
@@ -101,13 +119,13 @@ async def convert(
             {"markdown": None, "error": "Empty upload."},
             status_code=400,
         )
-    if len(content) > MAX_UPLOAD_BYTES:
+    if len(content) > settings.max_upload_bytes:
         return templates.TemplateResponse(
             request,
             "_result.html",
             {
                 "markdown": None,
-                "error": f"File too large (>{MAX_UPLOAD_BYTES} bytes).",
+                "error": f"File too large (>{settings.max_upload_bytes} bytes).",
             },
             status_code=413,
         )
