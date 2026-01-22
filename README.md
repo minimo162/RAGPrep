@@ -1,72 +1,72 @@
 # RAGPrep
 
-PDF to Markdown app scaffold (FastAPI + htmx) backed by `lightonai/LightOnOCR-2-1B`.
+`lightonai/LightOnOCR-2-1B` を使った PDF -> Markdown 変換アプリ（FastAPI + htmx）のスキャフォールドです。
 
-## Dev setup
-- Install `uv`: https://docs.astral.sh/uv/
-- Install deps: `uv sync --dev`
-- Run server: `uv run uvicorn ragprep.web.app:app --reload`
-- Open: `http://127.0.0.1:8000`
+## 開発環境
+- `uv` のインストール: https://docs.astral.sh/uv/
+- 依存関係のインストール: `uv sync --dev`
+- サーバ起動: `uv run uvicorn ragprep.web.app:app --reload`
+- ブラウザで開く: `http://127.0.0.1:8000`
 
-## Real OCR verification (manual)
-Runs PDF -> images -> LightOnOCR -> markdown and writes an output file. The first run downloads model weights.
+## 実機OCR検証（手動）
+PDF -> 画像 -> LightOnOCR -> Markdown を実行し、出力ファイルを書き込みます。初回実行時はモデル重みをダウンロードします。
 
-- Run: `uv run python scripts/smoke-real-ocr.py path/to/file.pdf`
-- Output: `path/to/file.md` (use `--out ...` and `--overwrite`)
+- 実行: `uv run python scripts/smoke-real-ocr.py path/to/file.pdf`
+- 出力: `path/to/file.md`（`--out ...` と `--overwrite` を使用）
 
-Environment variables (optional):
-- `LIGHTONOCR_MODEL_ID` (default: `lightonai/LightOnOCR-2-1B`)
-- `LIGHTONOCR_DEVICE` (`cpu|cuda|mps|auto`, default: `cpu`)
-- `LIGHTONOCR_DTYPE` (`float32|bfloat16|float16`, optional)
-- `LIGHTONOCR_MAX_NEW_TOKENS` (default: `1024`)
-- `LIGHTONOCR_DRY_RUN` (truthy to skip real inference)
-- `HF_HOME` (controls the Hugging Face cache location; standalone defaults to `dist/standalone/data/hf` unless overridden)
+環境変数（任意）:
+- `LIGHTONOCR_MODEL_ID`（デフォルト: `lightonai/LightOnOCR-2-1B`）
+- `LIGHTONOCR_DEVICE`（`cpu|cuda|mps|auto`, デフォルト: `cpu`）
+- `LIGHTONOCR_DTYPE`（`float32|bfloat16|float16`, 任意）
+- `LIGHTONOCR_MAX_NEW_TOKENS`（デフォルト: `1024`）
+- `LIGHTONOCR_DRY_RUN`（truthy で実推論をスキップ）
+- `HF_HOME`（Hugging Face のキャッシュ場所。スタンドアロンは未指定時に `dist/standalone/data/hf` を使用）
 
-## Standalone distribution (Windows reference)
-Builds a self-contained folder using `python-build-standalone` (no system Python required for end users).
+## スタンドアロン配布（Windows向け）
+`python-build-standalone` を使って自己完結したフォルダを作成します（エンドユーザはシステムPython不要）。
 
-### Prereqs (build machine)
+### 前提（ビルドマシン）
 - Windows x86_64
-- `uv` on PATH
-- `git` on PATH (required for the `transformers` Git dependency)
-- `tar` on PATH (Windows 10+ includes it)
-- `7z` on PATH (7-Zip; required for packaging)
-- Internet access (downloads python runtime + wheels + model weights unless skipped)
+- `uv` が PATH 上にあること
+- `git` が PATH 上にあること（`transformers` の Git 依存のため）
+- `tar` が PATH 上にあること（Windows 10+ で同梱）
+- `7z` が PATH 上にあること（7-Zip; パッケージ作成に必要）
+- インターネット接続（Python runtime + wheels をダウンロード。`-SkipModelPrefetch` を指定しない場合はモデル重みもダウンロード）
 
-### Build
+### ビルド
 - `powershell -ExecutionPolicy Bypass -File scripts/build-standalone.ps1 -Clean`
 
-Optional parameters:
+オプションパラメータ:
 - `-PythonVersion 3.11.14`
 - `-TargetTriple x86_64-pc-windows-msvc`
-- `-PbsRelease latest` (or a tag like `20260114` for repeatability)
-- `-PipTempRoot <path>` (defaults to `%LOCALAPPDATA%\\t`; use a very short path if you see path-length failures)
-- `-ModelId lightonai/LightOnOCR-2-1B` (prefetch this model into the standalone cache)
-- `-SkipModelPrefetch` (do not download model weights during build; they will download on first use at runtime)
+- `-PbsRelease latest`（再現性のために `20260114` のような tag も指定可能）
+- `-PipTempRoot <path>`（デフォルト: `%LOCALAPPDATA%\\t`; パス長エラーが出る場合は短いパスを指定）
+- `-ModelId lightonai/LightOnOCR-2-1B`（このモデルをスタンドアロンのキャッシュへプリフェッチ）
+- `-SkipModelPrefetch`（ビルド時にモデル重みをダウンロードしない。実行時の初回利用でダウンロード）
 
-Outputs to `dist/standalone/`:
-- `python/` (runtime)
-- `site-packages/` (deps)
-- `app/` (source)
-- `data/hf/` (Hugging Face cache; includes model weights when prefetched)
-- `run.ps1` / `run.cmd` (launcher)
+`dist/standalone/` への出力:
+- `python/`（ランタイム）
+- `site-packages/`（依存関係）
+- `app/`（ソース）
+- `data/hf/`（Hugging Face キャッシュ。プリフェッチ時はモデル重みを含む）
+- `run.ps1` / `run.cmd`（ランチャ）
 
-### Package (zip)
-- Install 7-Zip: https://www.7-zip.org/
-- Run: `powershell -ExecutionPolicy Bypass -File scripts/package-standalone.ps1 -Force`
-- If `7z` is not on PATH: `powershell -ExecutionPolicy Bypass -File scripts/package-standalone.ps1 -SevenZipPath "C:\\Program Files\\7-Zip\\7z.exe" -Force`
-- Output: `dist/ragprep-standalone-<git-sha>.zip` (includes `BUILD_INFO.txt` at the zip root)
+### パッケージ（zip）
+- 7-Zip のインストール: https://www.7-zip.org/
+- 実行: `powershell -ExecutionPolicy Bypass -File scripts/package-standalone.ps1 -Force`
+- `7z` が PATH 上にない場合: `powershell -ExecutionPolicy Bypass -File scripts/package-standalone.ps1 -SevenZipPath "C:\\Program Files\\7-Zip\\7z.exe" -Force`
+- 出力: `dist/ragprep-standalone-<git-sha>.zip`（zip ルートに `BUILD_INFO.txt` を含む）
 
-### Third-party notices
-- Repo: `THIRD_PARTY_NOTICES.md`
-- Standalone output / zip: `THIRD_PARTY_NOTICES.md`
+### サードパーティ通知
+- リポジトリ: `THIRD_PARTY_NOTICES.md`
+- スタンドアロン出力 / zip: `THIRD_PARTY_NOTICES.md`
 
-### Run (smoke test)
+### 実行（スモークテスト）
 - `powershell -ExecutionPolicy Bypass -File dist/standalone/run.ps1`
-- Visit `http://127.0.0.1:8000` and upload a PDF
+- `http://127.0.0.1:8000` にアクセスして PDF をアップロード
 
-### Troubleshooting
-- If build fails on the `transformers` line, confirm `git` is installed and on PATH.
-- If you see Windows path-length errors (e.g. `Filename too long`), set `-PipTempRoot` to a shorter path.
-- If `tar` is missing, install a recent Windows build or provide bsdtar.
-- By default, model weights are prefetched during `scripts/build-standalone.ps1` into `dist/standalone/data/hf`. Set `HF_HOME` to override the cache location, or pass `-SkipModelPrefetch` to download on first use instead.
+### トラブルシューティング
+- `transformers` の行でビルドが失敗する場合は、`git` がインストール済みで PATH にあることを確認してください。
+- Windows のパス長エラー（例: `Filename too long`）が出る場合は、`-PipTempRoot` に短いパスを指定してください。
+- `tar` が見つからない場合は、最近の Windows を利用するか bsdtar を用意してください。
+- デフォルトでは `scripts/build-standalone.ps1` 実行時にモデル重みを `dist/standalone/data/hf` にプリフェッチします。キャッシュ場所を変える場合は `HF_HOME` を設定するか、`-SkipModelPrefetch` を指定して初回利用時のダウンロードに切り替えてください。
