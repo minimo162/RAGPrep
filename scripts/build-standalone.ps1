@@ -198,6 +198,12 @@ if (-not (Test-Path `$pythonExe)) {
     throw "Missing `$pythonExe. Run scripts/build-standalone.ps1 first."
 }
 
+if (-not `$env:HF_HOME -or [string]::IsNullOrWhiteSpace(`$env:HF_HOME)) {
+    `$hfHome = Join-Path `$root "data/hf"
+    New-Item -ItemType Directory -Force -Path `$hfHome | Out-Null
+    `$env:HF_HOME = `$hfHome
+}
+
 `$env:PYTHONNOUSERSITE = "1"
 `$env:PYTHONUTF8 = "1"
 `$env:PYTHONPATH = (Join-Path `$root "app") + ";" + (Join-Path `$root "site-packages")
@@ -210,6 +216,10 @@ if (-not (Test-Path `$pythonExe)) {
 @echo off
 setlocal
 set ROOT=%~dp0
+if "%HF_HOME%"=="" (
+  set HF_HOME=%ROOT%data\hf
+  if not exist "%HF_HOME%" mkdir "%HF_HOME%"
+)
 set PYTHONNOUSERSITE=1
 set PYTHONUTF8=1
 set PYTHONPATH=%ROOT%app;%ROOT%site-packages

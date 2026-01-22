@@ -20,7 +20,7 @@ Environment variables (optional):
 - `LIGHTONOCR_DTYPE` (`float32|bfloat16|float16`, optional)
 - `LIGHTONOCR_MAX_NEW_TOKENS` (default: `1024`)
 - `LIGHTONOCR_DRY_RUN` (truthy to skip real inference)
-- `HF_HOME` (controls the Hugging Face cache location)
+- `HF_HOME` (controls the Hugging Face cache location; standalone defaults to `dist/standalone/data/hf` unless overridden)
 
 ## Standalone distribution (Windows reference)
 Builds a self-contained folder using `python-build-standalone` (no system Python required for end users).
