@@ -2,16 +2,23 @@
 requires = ["hatchling>=1.25"]
 build-backend = "hatchling.build"
 
+[tool.hatch.metadata]
+allow-direct-references = true
+
 [project]
 name = "ragprep"
 version = "0.1.0"
 description = "PDF-to-Markdown app scaffold (FastAPI + htmx)"
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.11,<3.13"
 dependencies = [
   "fastapi>=0.110",
   "jinja2>=3.1",
+  "pillow>=10",
   "python-multipart>=0.0.9",
+  "safetensors>=0.4",
+  "torch>=2.0",
+  "transformers @ git+https://github.com/huggingface/transformers",
   "uvicorn>=0.27",
 ]
 
