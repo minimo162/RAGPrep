@@ -7,6 +7,10 @@ param(
     [string]$PipTempRoot = "",
     [string]$ModelId = "lightonai/LightOnOCR-2-1B",
     [switch]$SkipModelPrefetch,
+    [string]$GgufRepoId = "wangjazz/LightOnOCR-2-1B-gguf",
+    [string]$GgufModelFile = "LightOnOCR-2-1B-Q4_K_M.gguf",
+    [string]$GgufMmprojFile = "LightOnOCR-2-1B-mmproj-f16.gguf",
+    [switch]$SkipGgufPrefetch,
     [switch]$Clean
 )
 
@@ -331,6 +335,143 @@ except Exception:
     }
     else {
         Write-Host "Skipping model prefetch (-SkipModelPrefetch)." -ForegroundColor Yellow
+    }
+
+    if (-not $SkipGgufPrefetch) {
+        $ggufRepoIdTrimmed = $GgufRepoId.Trim()
+        if ([string]::IsNullOrWhiteSpace($ggufRepoIdTrimmed)) {
+            throw "GgufRepoId must be non-empty (got: $GgufRepoId)"
+        }
+
+        $ggufModelFileTrimmed = $GgufModelFile.Trim()
+        if ([string]::IsNullOrWhiteSpace($ggufModelFileTrimmed)) {
+            throw "GgufModelFile must be non-empty (got: $GgufModelFile)"
+        }
+
+        $ggufMmprojFileTrimmed = $GgufMmprojFile.Trim()
+        if ([string]::IsNullOrWhiteSpace($ggufMmprojFileTrimmed)) {
+            throw "GgufMmprojFile must be non-empty (got: $GgufMmprojFile)"
+        }
+
+        $ggufOutDir = Join-Path $dataDir "models\\lightonocr-gguf"
+        New-Item -ItemType Directory -Force -Path $ggufOutDir | Out-Null
+
+        Write-Host "Prefetching LightOnOCR GGUF artifacts (this can take a while)..." -ForegroundColor Cyan
+        Write-Host "  repo:   $ggufRepoIdTrimmed" -ForegroundColor DarkGray
+        Write-Host "  model:  $ggufModelFileTrimmed" -ForegroundColor DarkGray
+        Write-Host "  mmproj: $ggufMmprojFileTrimmed" -ForegroundColor DarkGray
+        Write-Host "  out:    $ggufOutDir" -ForegroundColor DarkGray
+        Write-Host "  HF_HOME: $hfHomeDir" -ForegroundColor DarkGray
+
+        $origHfHome2 = $env:HF_HOME
+        $origPythonPath2 = $env:PYTHONPATH
+        $origNoUserSite2 = $env:PYTHONNOUSERSITE
+        $origPythonUtf82 = $env:PYTHONUTF8
+        try {
+            $env:HF_HOME = $hfHomeDir
+            $env:PYTHONNOUSERSITE = "1"
+            $env:PYTHONUTF8 = "1"
+            $env:PYTHONPATH = (Join-Path $OutputDir "app") + ";" + (Join-Path $OutputDir "site-packages")
+
+            $prefetchGgufPy = @'
+import argparse
+import os
+import shutil
+import sys
+import traceback
+from pathlib import Path
+
+
+def main() -> None:
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--repo-id", required=True)
+    ap.add_argument("--model-file", required=True)
+    ap.add_argument("--mmproj-file", required=True)
+    ap.add_argument("--out-dir", required=True)
+    args = ap.parse_args()
+
+    repo_id = args.repo_id
+    model_file = args.model_file
+    mmproj_file = args.mmproj_file
+    out_dir = Path(args.out_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    print(f"Prefetching GGUF files from: {repo_id}")
+    print(f"  model:  {model_file}")
+    print(f"  mmproj: {mmproj_file}")
+    print(f"  out:    {out_dir}")
+    print(f"  HF_HOME: {os.environ.get('HF_HOME')}")
+
+    try:
+        from huggingface_hub import hf_hub_download
+    except Exception as exc:
+        raise RuntimeError(
+            "huggingface_hub is required to prefetch GGUF files. "
+            "Install transformers dependencies or add huggingface_hub."
+        ) from exc
+
+    def stage(filename: str) -> Path:
+        cached_path = Path(hf_hub_download(repo_id=repo_id, filename=filename))
+        dest = out_dir / filename
+        try:
+            if dest.is_file() and dest.stat().st_size == cached_path.stat().st_size:
+                return dest
+        except OSError:
+            pass
+        shutil.copy2(cached_path, dest)
+        return dest
+
+    model_dest = stage(model_file)
+    mmproj_dest = stage(mmproj_file)
+
+    print("Prefetch complete.")
+    print(f"  model_path:  {model_dest}")
+    print(f"  mmproj_path: {mmproj_dest}")
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except Exception:
+        print("GGUF prefetch failed.", file=sys.stderr)
+        traceback.print_exc()
+        sys.exit(1)
+'@
+
+            $prefetchGgufScriptPath = Join-Path $cacheDir ("prefetch-gguf-" + [guid]::NewGuid().ToString("N") + ".py")
+            try {
+                Set-Content -Path $prefetchGgufScriptPath -Value $prefetchGgufPy -Encoding UTF8
+
+                & $pythonExe $prefetchGgufScriptPath `
+                    --repo-id $ggufRepoIdTrimmed `
+                    --model-file $ggufModelFileTrimmed `
+                    --mmproj-file $ggufMmprojFileTrimmed `
+                    --out-dir $ggufOutDir
+                if ($LASTEXITCODE -ne 0) {
+                    Write-Warning "GGUF prefetch failed. To skip, re-run with -SkipGgufPrefetch."
+                }
+                Assert-LastExitCode "gguf prefetch"
+            }
+            finally {
+                Remove-Item -LiteralPath $prefetchGgufScriptPath -Force -ErrorAction SilentlyContinue
+            }
+        }
+        finally {
+            if ($null -ne $origHfHome2) { $env:HF_HOME = $origHfHome2 } else { Remove-Item env:HF_HOME -ErrorAction SilentlyContinue }
+            if ($null -ne $origPythonPath2) { $env:PYTHONPATH = $origPythonPath2 } else { Remove-Item env:PYTHONPATH -ErrorAction SilentlyContinue }
+            if ($null -ne $origNoUserSite2) { $env:PYTHONNOUSERSITE = $origNoUserSite2 } else { Remove-Item env:PYTHONNOUSERSITE -ErrorAction SilentlyContinue }
+            if ($null -ne $origPythonUtf82) { $env:PYTHONUTF8 = $origPythonUtf82 } else { Remove-Item env:PYTHONUTF8 -ErrorAction SilentlyContinue }
+        }
+
+        $ggufModelPath = Join-Path $ggufOutDir $ggufModelFileTrimmed
+        $ggufMmprojPath = Join-Path $ggufOutDir $ggufMmprojFileTrimmed
+        Write-Host "To use the GGUF backend at runtime, set:" -ForegroundColor Cyan
+        Write-Host "  `$env:LIGHTONOCR_BACKEND=llama_cpp" -ForegroundColor DarkGray
+        Write-Host "  `$env:LIGHTONOCR_GGUF_MODEL_PATH=$ggufModelPath" -ForegroundColor DarkGray
+        Write-Host "  `$env:LIGHTONOCR_GGUF_MMPROJ_PATH=$ggufMmprojPath" -ForegroundColor DarkGray
+    }
+    else {
+        Write-Host "Skipping GGUF prefetch (-SkipGgufPrefetch)." -ForegroundColor Yellow
     }
 
     $runPs1 = @"
