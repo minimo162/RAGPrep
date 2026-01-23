@@ -277,28 +277,49 @@ try {
 
             $prefetchPy = @'
 import os
+import sys
+import traceback
 
 model_id = os.environ.get("LIGHTONOCR_MODEL_ID") or "lightonai/LightOnOCR-2-1B"
 print(f"Prefetching LightOnOCR model: {model_id}")
 
-import transformers
+try:
+    import transformers
 
-processor_cls = getattr(transformers, "LightOnOcrProcessor", None)
-model_cls = getattr(transformers, "LightOnOcrForConditionalGeneration", None)
-if processor_cls is None or model_cls is None:
-    raise RuntimeError(
-        "transformers does not expose LightOnOcr* classes. "
-        "LightOnOCR-2 requires transformers installed from source."
-    )
+    processor_cls = getattr(transformers, "LightOnOcrProcessor", None)
+    model_cls = getattr(transformers, "LightOnOcrForConditionalGeneration", None)
+    if processor_cls is None or model_cls is None:
+        raise RuntimeError(
+            "transformers does not expose LightOnOcr* classes. "
+            "LightOnOCR-2 requires transformers installed from source."
+        )
 
-processor_cls.from_pretrained(model_id)
-model_cls.from_pretrained(model_id)
+    processor_cls.from_pretrained(model_id)
+    model_cls.from_pretrained(model_id)
 
-print("Prefetch complete.")
+    print("Prefetch complete.")
+except Exception:
+    print("Prefetch failed.", file=sys.stderr)
+    print(f"  model_id: {model_id}", file=sys.stderr)
+    print(f"  HF_HOME: {os.environ.get('HF_HOME')}", file=sys.stderr)
+    print("  Hint: re-run build-standalone.ps1 with -SkipModelPrefetch to skip downloads.", file=sys.stderr)
+    traceback.print_exc()
+    sys.exit(1)
 '@
 
-            & $pythonExe -c $prefetchPy
-            Assert-LastExitCode "model prefetch"
+            $prefetchScriptPath = Join-Path $cacheDir ("prefetch-" + [guid]::NewGuid().ToString("N") + ".py")
+            try {
+                Set-Content -Path $prefetchScriptPath -Value $prefetchPy -Encoding UTF8
+
+                & $pythonExe $prefetchScriptPath
+                if ($LASTEXITCODE -ne 0) {
+                    Write-Warning "Model prefetch failed. To skip, re-run with -SkipModelPrefetch."
+                }
+                Assert-LastExitCode "model prefetch"
+            }
+            finally {
+                Remove-Item -LiteralPath $prefetchScriptPath -Force -ErrorAction SilentlyContinue
+            }
         }
         finally {
             if ($null -ne $origHfHome) { $env:HF_HOME = $origHfHome } else { Remove-Item env:HF_HOME -ErrorAction SilentlyContinue }
