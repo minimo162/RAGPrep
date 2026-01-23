@@ -24,9 +24,10 @@ each package's metadata (e.g. `*.dist-info/`) for license details.
 - Location in standalone output: `python/`
 
 ## Model weights (Hugging Face)
-- By default, `scripts/build-standalone.ps1` prefetches the LightOnOCR model weights and bundles
-  them into the standalone output under `data/hf/` (Hugging Face cache).
+- By default, `scripts/build-standalone.ps1` prefetches the LightOnOCR GGUF model + mmproj files and
+  stages them under `data/models/lightonocr-gguf/` in the standalone output. Downloads are cached
+  under `data/hf/` (Hugging Face cache).
 - Model weights remain subject to their upstream license/terms; see:
-  https://huggingface.co/lightonai/LightOnOCR-2-1B
-- To avoid bundling weights, pass `-SkipModelPrefetch` and the app will download weights at runtime.
+  https://huggingface.co/wangjazz/LightOnOCR-2-1B-gguf
+- To avoid bundling weights, pass `-SkipGgufPrefetch` and provide local GGUF paths at runtime.
 
