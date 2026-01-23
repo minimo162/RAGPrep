@@ -4,6 +4,31 @@
 - Standalone bundles llama.cpp binaries under `dist/standalone/bin/llama.cpp/` (includes `llava-cli.exe`).
 - `dist/standalone/run.ps1` / `run.cmd` set `LIGHTONOCR_LLAVA_CLI_PATH` automatically unless already set.
 
+## Troubleshooting: `llava-cli failed with exit code 1`
+
+Quick self-check (no network):
+- `powershell -ExecutionPolicy Bypass -File scripts/selfcheck-llava-cli-runtime.ps1`
+
+Required env vars (real OCR):
+- `LIGHTONOCR_GGUF_MODEL_PATH` (model .gguf)
+- `LIGHTONOCR_GGUF_MMPROJ_PATH` (mmproj .gguf)
+
+Optional env vars:
+- `LIGHTONOCR_LLAVA_CLI_PATH` (path to a working `llava-cli(.exe)` or `llama-llava-cli(.exe)`)
+- `LIGHTONOCR_IMAGE_TMP_DIR` (override temp dir for OCR images; helps with non-ASCII temp paths)
+- `LIGHTONOCR_DRY_RUN=1` (verify end-to-end flow without inference)
+
+If the error includes a deprecation warning like:
+
+```
+WARNING: The binary 'llava-cli.exe' is deprecated.
+Please use 'llama-mtmd-cli' instead.
+```
+
+Then you are pointing at a deprecated `llava-cli` shim. Fix options:
+- Point `LIGHTONOCR_LLAVA_CLI_PATH` to `llama-llava-cli.exe` from your llama.cpp release (this project already searches for it), or install/upgrade llama.cpp so `llava-cli` works.
+- For the standalone bundle, ensure the actual llama.cpp CLI + required DLLs are present under `dist/standalone/bin/llama.cpp/` (the self-check prints what it resolved).
+
 LightOnOCR-2-1B（GGUF + llama.cpp）を使った PDF -> Markdown 変換アプリ（FastAPI + htmx）のスキャフォールドです。
 
 ## 開発環境
