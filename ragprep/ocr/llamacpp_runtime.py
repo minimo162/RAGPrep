@@ -31,7 +31,7 @@ def _import_llama_cpp() -> tuple[Any, Any]:
         llama_cpp = importlib.import_module("llama_cpp")
     except Exception as exc:  # noqa: BLE001
         raise ImportError(
-            "llama-cpp-python is required for LIGHTONOCR_BACKEND=llama_cpp. "
+            "llama-cpp-python is required for the GGUF (llama.cpp) OCR runtime. "
             "Install it (e.g. `uv add llama-cpp-python` then `uv sync --dev`)."
         ) from exc
 
