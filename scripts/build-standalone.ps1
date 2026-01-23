@@ -105,11 +105,74 @@ try {
         throw "Could not locate python.exe in extracted archive."
     }
 
-    if (Test-Path $pythonDir) {
-        Remove-Item -Recurse -Force $pythonDir
+    $pythonSourceDir = $pythonExeCandidate.Directory.FullName
+    $pythonSourceExe = Join-Path $pythonSourceDir "python.exe"
+
+    Write-Host "Relocating extracted Python runtime..." -ForegroundColor Cyan
+    Write-Host "  source: $pythonSourceDir" -ForegroundColor DarkGray
+    Write-Host "  dest:   $pythonDir" -ForegroundColor DarkGray
+
+    if (-not (Test-Path $pythonSourceExe)) {
+        throw "Expected python.exe missing before Move-Item: $pythonSourceExe"
     }
-    Move-Item -Path $pythonExeCandidate.Directory.FullName -Destination $pythonDir
-    Remove-Item -Recurse -Force $extractDir
+
+    Write-Host "Source directory (top-level):" -ForegroundColor DarkGray
+    Get-ChildItem -Path $pythonSourceDir -Force |
+        Sort-Object Name |
+        Select-Object Mode, Length, LastWriteTime, Name |
+        Format-Table -AutoSize
+
+    try {
+        if (Test-Path $pythonDir) {
+            Remove-Item -Recurse -Force $pythonDir
+        }
+        Move-Item -Path $pythonSourceDir -Destination $pythonDir
+    }
+    catch {
+        $msg = $_.Exception.Message
+        $isAccessDenied =
+        ($_.Exception -is [System.UnauthorizedAccessException]) -or
+        (($_.Exception -is [System.IO.IOException]) -and (($msg -match "(?i)access is denied") -or ($msg -match "アクセス.*拒否")))
+
+        Write-Warning "Failed to move extracted Python runtime."
+        Write-Warning "  source: $pythonSourceDir"
+        Write-Warning "  dest:   $pythonDir"
+        Write-Warning "  error:  $msg"
+
+        try {
+            $sourceItem = Get-Item -LiteralPath $pythonSourceDir -Force
+            Write-Warning "  source_attrs: $($sourceItem.Attributes)"
+        }
+        catch {
+            Write-Warning "  source_attrs: (failed to read)"
+        }
+        try {
+            $acl = Get-Acl -LiteralPath $pythonSourceDir
+            Write-Warning "  source_owner: $($acl.Owner)"
+        }
+        catch {
+            Write-Warning "  source_owner: (failed to read)"
+        }
+
+        if ($isAccessDenied) {
+            Write-Warning "AccessDenied remediation hints:"
+            Write-Warning "  - Close any process using '$OutputDir' (Explorer panes can lock files)."
+            Write-Warning "  - Antivirus/indexer may temporarily lock newly extracted files; retry after a short wait."
+            Write-Warning "  - Re-run with -Clean."
+        }
+
+        throw
+    }
+    finally {
+        if (Test-Path $extractDir) {
+            try {
+                Remove-Item -Recurse -Force $extractDir
+            }
+            catch {
+                Write-Warning "Failed to clean up extract dir (best-effort): $extractDir"
+            }
+        }
+    }
 
     $pythonExe = Join-Path $pythonDir "python.exe"
     if (-not (Test-Path $pythonExe)) {
