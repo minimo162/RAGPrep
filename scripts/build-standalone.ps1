@@ -5,8 +5,6 @@ param(
     [string]$TargetTriple = "x86_64-pc-windows-msvc",
     [string]$PbsRelease = "latest",
     [string]$PipTempRoot = "",
-    [string]$ModelId = "lightonai/LightOnOCR-2-1B",
-    [switch]$SkipModelPrefetch,
     [string]$GgufRepoId = "wangjazz/LightOnOCR-2-1B-gguf",
     [string]$GgufModelFile = "LightOnOCR-2-1B-Q4_K_M.gguf",
     [string]$GgufMmprojFile = "LightOnOCR-2-1B-mmproj-f16.gguf",
@@ -257,85 +255,19 @@ try {
     $hfHomeDir = Join-Path $dataDir "hf"
     New-Item -ItemType Directory -Force -Path $hfHomeDir | Out-Null
 
-    if (-not $SkipModelPrefetch) {
-        $modelIdTrimmed = $ModelId.Trim()
-        if ([string]::IsNullOrWhiteSpace($modelIdTrimmed)) {
-            throw "ModelId must be non-empty (got: $ModelId)"
-        }
-
-        Write-Host "Prefetching LightOnOCR model (this can take a while)..." -ForegroundColor Cyan
-        Write-Host "  model: $modelIdTrimmed" -ForegroundColor DarkGray
-        Write-Host "  HF_HOME: $hfHomeDir" -ForegroundColor DarkGray
-
-        $origHfHome = $env:HF_HOME
-        $origModelId = $env:LIGHTONOCR_MODEL_ID
-        $origPythonPath = $env:PYTHONPATH
-        $origNoUserSite = $env:PYTHONNOUSERSITE
-        $origPythonUtf8 = $env:PYTHONUTF8
-        try {
-            $env:HF_HOME = $hfHomeDir
-            $env:LIGHTONOCR_MODEL_ID = $modelIdTrimmed
-            $env:PYTHONNOUSERSITE = "1"
-            $env:PYTHONUTF8 = "1"
-            $env:PYTHONPATH = (Join-Path $OutputDir "app") + ";" + (Join-Path $OutputDir "site-packages")
-
-            $prefetchPy = @'
-import os
-import sys
-import traceback
-
-model_id = os.environ.get("LIGHTONOCR_MODEL_ID") or "lightonai/LightOnOCR-2-1B"
-print(f"Prefetching LightOnOCR model: {model_id}")
-
-try:
-    import transformers
-
-    processor_cls = getattr(transformers, "LightOnOcrProcessor", None)
-    model_cls = getattr(transformers, "LightOnOcrForConditionalGeneration", None)
-    if processor_cls is None or model_cls is None:
-        raise RuntimeError(
-            "transformers does not expose LightOnOcr* classes. "
-            "LightOnOCR-2 requires transformers installed from source."
-        )
-
-    processor_cls.from_pretrained(model_id)
-    model_cls.from_pretrained(model_id)
-
-    print("Prefetch complete.")
-except Exception:
-    print("Prefetch failed.", file=sys.stderr)
-    print(f"  model_id: {model_id}", file=sys.stderr)
-    print(f"  HF_HOME: {os.environ.get('HF_HOME')}", file=sys.stderr)
-    print("  Hint: re-run build-standalone.ps1 with -SkipModelPrefetch to skip downloads.", file=sys.stderr)
-    traceback.print_exc()
-    sys.exit(1)
-'@
-
-            $prefetchScriptPath = Join-Path $cacheDir ("prefetch-" + [guid]::NewGuid().ToString("N") + ".py")
-            try {
-                Set-Content -Path $prefetchScriptPath -Value $prefetchPy -Encoding UTF8
-
-                & $pythonExe $prefetchScriptPath
-                if ($LASTEXITCODE -ne 0) {
-                    Write-Warning "Model prefetch failed. To skip, re-run with -SkipModelPrefetch."
-                }
-                Assert-LastExitCode "model prefetch"
-            }
-            finally {
-                Remove-Item -LiteralPath $prefetchScriptPath -Force -ErrorAction SilentlyContinue
-            }
-        }
-        finally {
-            if ($null -ne $origHfHome) { $env:HF_HOME = $origHfHome } else { Remove-Item env:HF_HOME -ErrorAction SilentlyContinue }
-            if ($null -ne $origModelId) { $env:LIGHTONOCR_MODEL_ID = $origModelId } else { Remove-Item env:LIGHTONOCR_MODEL_ID -ErrorAction SilentlyContinue }
-            if ($null -ne $origPythonPath) { $env:PYTHONPATH = $origPythonPath } else { Remove-Item env:PYTHONPATH -ErrorAction SilentlyContinue }
-            if ($null -ne $origNoUserSite) { $env:PYTHONNOUSERSITE = $origNoUserSite } else { Remove-Item env:PYTHONNOUSERSITE -ErrorAction SilentlyContinue }
-            if ($null -ne $origPythonUtf8) { $env:PYTHONUTF8 = $origPythonUtf8 } else { Remove-Item env:PYTHONUTF8 -ErrorAction SilentlyContinue }
-        }
+    $ggufModelFileTrimmed = $GgufModelFile.Trim()
+    if ([string]::IsNullOrWhiteSpace($ggufModelFileTrimmed)) {
+        throw "GgufModelFile must be non-empty (got: $GgufModelFile)"
     }
-    else {
-        Write-Host "Skipping model prefetch (-SkipModelPrefetch)." -ForegroundColor Yellow
+
+    $ggufMmprojFileTrimmed = $GgufMmprojFile.Trim()
+    if ([string]::IsNullOrWhiteSpace($ggufMmprojFileTrimmed)) {
+        throw "GgufMmprojFile must be non-empty (got: $GgufMmprojFile)"
     }
+
+    $ggufOutDir = Join-Path $dataDir "models\\lightonocr-gguf"
+    $ggufModelPath = Join-Path $ggufOutDir $ggufModelFileTrimmed
+    $ggufMmprojPath = Join-Path $ggufOutDir $ggufMmprojFileTrimmed
 
     if (-not $SkipGgufPrefetch) {
         $ggufRepoIdTrimmed = $GgufRepoId.Trim()
@@ -343,17 +275,6 @@ except Exception:
             throw "GgufRepoId must be non-empty (got: $GgufRepoId)"
         }
 
-        $ggufModelFileTrimmed = $GgufModelFile.Trim()
-        if ([string]::IsNullOrWhiteSpace($ggufModelFileTrimmed)) {
-            throw "GgufModelFile must be non-empty (got: $GgufModelFile)"
-        }
-
-        $ggufMmprojFileTrimmed = $GgufMmprojFile.Trim()
-        if ([string]::IsNullOrWhiteSpace($ggufMmprojFileTrimmed)) {
-            throw "GgufMmprojFile must be non-empty (got: $GgufMmprojFile)"
-        }
-
-        $ggufOutDir = Join-Path $dataDir "models\\lightonocr-gguf"
         New-Item -ItemType Directory -Force -Path $ggufOutDir | Out-Null
 
         Write-Host "Prefetching LightOnOCR GGUF artifacts (this can take a while)..." -ForegroundColor Cyan
@@ -407,7 +328,7 @@ def main() -> None:
     except Exception as exc:
         raise RuntimeError(
             "huggingface_hub is required to prefetch GGUF files. "
-            "Install transformers dependencies or add huggingface_hub."
+            "Install it (e.g. `uv add huggingface-hub` then `uv sync --dev`)."
         ) from exc
 
     def stage(filename: str) -> Path:
@@ -463,10 +384,7 @@ if __name__ == "__main__":
             if ($null -ne $origPythonUtf82) { $env:PYTHONUTF8 = $origPythonUtf82 } else { Remove-Item env:PYTHONUTF8 -ErrorAction SilentlyContinue }
         }
 
-        $ggufModelPath = Join-Path $ggufOutDir $ggufModelFileTrimmed
-        $ggufMmprojPath = Join-Path $ggufOutDir $ggufMmprojFileTrimmed
-        Write-Host "To use the GGUF backend at runtime, set:" -ForegroundColor Cyan
-        Write-Host "  `$env:LIGHTONOCR_BACKEND=llama_cpp" -ForegroundColor DarkGray
+        Write-Host "Standalone run scripts default to these GGUF paths:" -ForegroundColor Cyan
         Write-Host "  `$env:LIGHTONOCR_GGUF_MODEL_PATH=$ggufModelPath" -ForegroundColor DarkGray
         Write-Host "  `$env:LIGHTONOCR_GGUF_MMPROJ_PATH=$ggufMmprojPath" -ForegroundColor DarkGray
     }
@@ -496,6 +414,13 @@ if (-not `$env:HF_HOME -or [string]::IsNullOrWhiteSpace(`$env:HF_HOME)) {
     `$env:HF_HOME = `$hfHome
 }
 
+if (-not `$env:LIGHTONOCR_GGUF_MODEL_PATH -or [string]::IsNullOrWhiteSpace(`$env:LIGHTONOCR_GGUF_MODEL_PATH)) {
+    `$env:LIGHTONOCR_GGUF_MODEL_PATH = Join-Path `$root "data/models/lightonocr-gguf/$ggufModelFileTrimmed"
+}
+if (-not `$env:LIGHTONOCR_GGUF_MMPROJ_PATH -or [string]::IsNullOrWhiteSpace(`$env:LIGHTONOCR_GGUF_MMPROJ_PATH)) {
+    `$env:LIGHTONOCR_GGUF_MMPROJ_PATH = Join-Path `$root "data/models/lightonocr-gguf/$ggufMmprojFileTrimmed"
+}
+
 `$env:PYTHONNOUSERSITE = "1"
 `$env:PYTHONUTF8 = "1"
 `$env:PYTHONPATH = (Join-Path `$root "app") + ";" + (Join-Path `$root "site-packages")
@@ -511,6 +436,12 @@ set ROOT=%~dp0
 if "%HF_HOME%"=="" (
   set HF_HOME=%ROOT%data\hf
   if not exist "%HF_HOME%" mkdir "%HF_HOME%"
+)
+if "%LIGHTONOCR_GGUF_MODEL_PATH%"=="" (
+  set LIGHTONOCR_GGUF_MODEL_PATH=%ROOT%data\models\lightonocr-gguf\$ggufModelFileTrimmed
+)
+if "%LIGHTONOCR_GGUF_MMPROJ_PATH%"=="" (
+  set LIGHTONOCR_GGUF_MMPROJ_PATH=%ROOT%data\models\lightonocr-gguf\$ggufMmprojFileTrimmed
 )
 set PYTHONNOUSERSITE=1
 set PYTHONUTF8=1
