@@ -66,6 +66,7 @@ PDF -> 画像 -> LightOnOCR -> Markdown を実行し、出力ファイルを書�
 - `http://127.0.0.1:8000` にアクセスして PDF をアップロード
 
 ### トラブルシューティング
+- `Move-Item` が `dist/standalone/_extract/python` で `アクセスが拒否されました` になる場合は、`-Clean` で再実行し、`dist/standalone` を開いている Explorer/プロセスを閉じてください（ウイルス対策/インデクサの一時ロックなら少し待って再実行。スクリプトは診断ログとリトライ/フォールバックで回避を試みます）。
 - `transformers` の行でビルドが失敗する場合は、`git` がインストール済みで PATH にあることを確認してください。
 - Windows のパス長エラー（例: `Filename too long`）が出る場合は、`-PipTempRoot` に短いパスを指定してください。
 - `tar` が見つからない場合は、最近の Windows を利用するか bsdtar を用意してください。
