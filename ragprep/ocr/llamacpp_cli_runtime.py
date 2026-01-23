@@ -143,9 +143,7 @@ def ocr_image(*, image: Image.Image, settings: LlamaCppCliSettings, max_new_toke
 
     prompt = "Extract all text from this image and return it as Markdown."
 
-    with tempfile.NamedTemporaryFile(
-        prefix="ragprep_llava_", suffix=".png", delete=False
-    ) as tmp:
+    with tempfile.NamedTemporaryFile(prefix="ragprep_llava_", suffix=".png", delete=False) as tmp:
         image_path = Path(tmp.name)
     try:
         image.save(image_path, format="PNG")

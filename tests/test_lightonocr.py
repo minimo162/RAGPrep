@@ -37,7 +37,7 @@ def test_missing_gguf_paths_raise_actionable_error(monkeypatch: pytest.MonkeyPat
 
 
 def test_missing_llama_cpp_import_is_actionable(
-    monkeypatch: pytest.MonkeyPatch, tmp_path
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     import ragprep.ocr.llamacpp_cli_runtime as cli_runtime
 
@@ -57,7 +57,7 @@ def test_missing_llama_cpp_import_is_actionable(
 
 
 def test_gguf_env_paths_strip_quotes_and_angle_brackets(
-    monkeypatch: pytest.MonkeyPatch, tmp_path
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     model_path = tmp_path / "model.gguf"
     mmproj_path = tmp_path / "mmproj.gguf"
@@ -65,7 +65,7 @@ def test_gguf_env_paths_strip_quotes_and_angle_brackets(
     mmproj_path.write_text("y", encoding="utf-8")
 
     monkeypatch.delenv(lightonocr.ENV_DRY_RUN, raising=False)
-    monkeypatch.setenv(lightonocr.ENV_GGUF_MODEL_PATH, f"\"{model_path}\"")
+    monkeypatch.setenv(lightonocr.ENV_GGUF_MODEL_PATH, f'"{model_path}"')
     monkeypatch.setenv(lightonocr.ENV_GGUF_MMPROJ_PATH, f"<{mmproj_path}>")
 
     settings = lightonocr.get_settings()
@@ -73,7 +73,7 @@ def test_gguf_env_paths_strip_quotes_and_angle_brackets(
     assert settings.gguf_mmproj_path == str(mmproj_path)
 
 
-def test_gguf_env_paths_support_file_uri(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
+def test_gguf_env_paths_support_file_uri(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     model_path = tmp_path / "model.gguf"
     mmproj_path = tmp_path / "mmproj.gguf"
     model_path.write_text("x", encoding="utf-8")
@@ -89,7 +89,7 @@ def test_gguf_env_paths_support_file_uri(monkeypatch: pytest.MonkeyPatch, tmp_pa
 
 
 def test_llama_cpp_executes_with_mock_and_is_cached(
-    monkeypatch: pytest.MonkeyPatch, tmp_path
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     import subprocess
 
@@ -145,7 +145,9 @@ def test_llama_cpp_executes_with_mock_and_is_cached(
     assert argv[argv.index("-ngl") + 1] == "7"
 
 
-def test_llava_cli_nonzero_exit_is_actionable(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
+def test_llava_cli_nonzero_exit_is_actionable(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     import subprocess
 
     import ragprep.ocr.llamacpp_cli_runtime as cli_runtime
