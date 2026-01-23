@@ -159,6 +159,7 @@ try {
         "site-packages"
         "app"
         "data"
+        "bin"
         "run.ps1"
         "run.cmd"
         "requirements.txt"

@@ -1,5 +1,9 @@
 # RAGPrep
 
+## Standalone llama.cpp CLI
+- Standalone bundles llama.cpp binaries under `dist/standalone/bin/llama.cpp/` (includes `llava-cli.exe`).
+- `dist/standalone/run.ps1` / `run.cmd` set `LIGHTONOCR_LLAVA_CLI_PATH` automatically unless already set.
+
 LightOnOCR-2-1B（GGUF + llama.cpp）を使った PDF -> Markdown 変換アプリ（FastAPI + htmx）のスキャフォールドです。
 
 ## 開発環境

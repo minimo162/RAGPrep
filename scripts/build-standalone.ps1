@@ -40,7 +40,19 @@ try {
     $OutputDir = [System.IO.Path]::GetFullPath($OutputDir)
 
     if ($Clean -and (Test-Path $OutputDir)) {
-        Remove-Item -Recurse -Force $OutputDir
+        try {
+            Invoke-RetryIO -Step "Clean output dir" -Action {
+                Remove-Item -LiteralPath $OutputDir -Recurse -Force
+            } | Out-Null
+        }
+        catch [System.IO.IOException], [System.UnauthorizedAccessException] {
+            $suffix = (Get-Date).ToString("yyyyMMdd-HHmmss") + "-" + [guid]::NewGuid().ToString("N")
+            $trashDir = "$OutputDir.old-$suffix"
+            Write-Warning "Clean output dir failed. Renaming existing output dir to: $trashDir"
+            Invoke-RetryIO -Step "Rename output dir" -Action {
+                Move-Item -LiteralPath $OutputDir -Destination $trashDir -Force
+            } | Out-Null
+        }
     }
 
     New-Item -ItemType Directory -Force -Path $OutputDir | Out-Null
@@ -411,6 +423,58 @@ if __name__ == "__main__":
         Write-Host "Skipping GGUF prefetch (-SkipGgufPrefetch)." -ForegroundColor Yellow
     }
 
+    # Bundle llama.cpp (vision CLI) for standalone
+    # NOTE: We pin URL + SHA256 to avoid supply-chain drift.
+    $llamaCppTag = "b7815"
+    $llamaCppAsset = "llama-$llamaCppTag-bin-win-cpu-x64.zip"
+    $llamaCppSha256 = "7d0fea9f0879cff4a3b6ad16051d28d394566abe7870a20e7f8c14abf9973b57"
+    $llamaCppUrl = "https://github.com/ggerganov/llama.cpp/releases/download/$llamaCppTag/$llamaCppAsset"
+
+    $llamaCppArchivePath = Join-Path $cacheDir $llamaCppAsset
+    if (-not (Test-Path $llamaCppArchivePath)) {
+        Write-Host "Downloading llama.cpp $llamaCppTag ($llamaCppAsset)..." -ForegroundColor Cyan
+        Invoke-WebRequest -Uri $llamaCppUrl -OutFile $llamaCppArchivePath
+    }
+    else {
+        Write-Host "Using cached llama.cpp bundle ($llamaCppAsset)" -ForegroundColor Cyan
+    }
+
+    $llamaCppHash = (Get-FileHash -Algorithm SHA256 -Path $llamaCppArchivePath).Hash.ToLowerInvariant()
+    if ($llamaCppHash -ne $llamaCppSha256) {
+        throw "llama.cpp bundle checksum mismatch. expected=$llamaCppSha256 got=$llamaCppHash file=$llamaCppArchivePath"
+    }
+
+    $llamaCppExtractDir = Join-Path $extractDir ("llama.cpp-" + $llamaCppTag)
+    if (Test-Path $llamaCppExtractDir) {
+        Remove-Item -LiteralPath $llamaCppExtractDir -Recurse -Force -ErrorAction SilentlyContinue
+    }
+    New-Item -ItemType Directory -Force -Path $llamaCppExtractDir | Out-Null
+
+    Write-Host "Extracting llama.cpp bundle..." -ForegroundColor Cyan
+    Expand-Archive -LiteralPath $llamaCppArchivePath -DestinationPath $llamaCppExtractDir -Force
+
+    $llamaCppBinDir = Join-Path $OutputDir "bin/llama.cpp"
+    New-Item -ItemType Directory -Force -Path $llamaCppBinDir | Out-Null
+
+    $llavaCliCandidates = @(
+        (Join-Path $llamaCppExtractDir "llava-cli.exe"),
+        (Join-Path $llamaCppExtractDir "llama-llava-cli.exe")
+    )
+    $llavaCliExe = $llavaCliCandidates | Where-Object { Test-Path $_ } | Select-Object -First 1
+    if (-not $llavaCliExe) {
+        $available = (Get-ChildItem -Path $llamaCppExtractDir -File -Filter "*.exe" | Select-Object -ExpandProperty Name) -join ", "
+        throw "Could not locate a llava CLI executable in the llama.cpp bundle. Available: $available"
+    }
+
+    # Normalize to llava-cli.exe for runtime discovery.
+    Copy-Item -Force $llavaCliExe (Join-Path $llamaCppBinDir "llava-cli.exe")
+    Get-ChildItem -Path $llamaCppExtractDir -File -Filter "*.dll" | ForEach-Object {
+        Copy-Item -Force $_.FullName $llamaCppBinDir
+    }
+
+    Write-Host "Bundled llama.cpp binaries:" -ForegroundColor Cyan
+    Write-Host "  llava-cli: $(Join-Path $llamaCppBinDir "llava-cli.exe")" -ForegroundColor DarkGray
+
     $runPs1 = @"
 [CmdletBinding()]
 param(
@@ -440,6 +504,13 @@ if (-not `$env:LIGHTONOCR_GGUF_MMPROJ_PATH -or [string]::IsNullOrWhiteSpace(`$en
     `$env:LIGHTONOCR_GGUF_MMPROJ_PATH = Join-Path `$root "data/models/lightonocr-gguf/$ggufMmprojFileTrimmed"
 }
 
+if (-not `$env:LIGHTONOCR_LLAVA_CLI_PATH -or [string]::IsNullOrWhiteSpace(`$env:LIGHTONOCR_LLAVA_CLI_PATH)) {
+    `$candidate = Join-Path `$root "bin/llama.cpp/llava-cli.exe"
+    if (Test-Path `$candidate) {
+        `$env:LIGHTONOCR_LLAVA_CLI_PATH = `$candidate
+    }
+}
+
 `$env:PYTHONNOUSERSITE = "1"
 `$env:PYTHONUTF8 = "1"
 `$env:PYTHONPATH = (Join-Path `$root "app") + ";" + (Join-Path `$root "site-packages")
@@ -461,6 +532,9 @@ if "%LIGHTONOCR_GGUF_MODEL_PATH%"=="" (
 )
 if "%LIGHTONOCR_GGUF_MMPROJ_PATH%"=="" (
   set LIGHTONOCR_GGUF_MMPROJ_PATH=%ROOT%data\models\lightonocr-gguf\$ggufMmprojFileTrimmed
+)
+if "%LIGHTONOCR_LLAVA_CLI_PATH%"=="" (
+  set LIGHTONOCR_LLAVA_CLI_PATH=%ROOT%bin\llama.cpp\llava-cli.exe
 )
 set PYTHONNOUSERSITE=1
 set PYTHONUTF8=1

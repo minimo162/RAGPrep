@@ -37,13 +37,37 @@ def _validate_paths(settings: LlamaCppCliSettings) -> None:
         raise RuntimeError(f"GGUF mmproj file not found: {mmproj_path}")
 
 
+def _default_bundled_llava_cli() -> Path | None:
+    """
+    In the Windows standalone layout, build scripts bundle llama.cpp under:
+      <standalone_root>/bin/llama.cpp/llava-cli.exe
+
+    When running from the standalone `app/` directory, this module resolves to:
+      <standalone_root>/app/ragprep/ocr/llamacpp_cli_runtime.py
+    """
+
+    try:
+        standalone_root = Path(__file__).resolve().parents[3]
+    except Exception:  # noqa: BLE001
+        return None
+
+    candidate = standalone_root / "bin" / "llama.cpp" / "llava-cli.exe"
+    if candidate.is_file():
+        return candidate
+    return None
+
+
 def _resolve_llava_cli(settings: LlamaCppCliSettings) -> str:
     candidates: list[str] = []
 
     if settings.llava_cli_path:
         candidates.append(settings.llava_cli_path)
+    else:
+        bundled = _default_bundled_llava_cli()
+        if bundled is not None:
+            candidates.append(str(bundled))
 
-    candidates.extend(["llava-cli", "llava-cli.exe"])
+    candidates.extend(["llava-cli", "llava-cli.exe", "llama-llava-cli", "llama-llava-cli.exe"])
 
     for candidate in candidates:
         candidate_path = Path(candidate)
@@ -57,7 +81,7 @@ def _resolve_llava_cli(settings: LlamaCppCliSettings) -> str:
     raise RuntimeError(
         "llava-cli executable not found. "
         "Set LIGHTONOCR_LLAVA_CLI_PATH to the full path of llava-cli(.exe) "
-        "or ensure llava-cli is available on PATH."
+        "(or llama-llava-cli(.exe)), or ensure it is available on PATH."
     )
 
 
