@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 from PIL import Image
 
@@ -37,9 +39,7 @@ def test_missing_gguf_paths_raise_actionable_error(monkeypatch: pytest.MonkeyPat
 def test_missing_llama_cpp_import_is_actionable(
     monkeypatch: pytest.MonkeyPatch, tmp_path
 ) -> None:
-    import ragprep.ocr.llamacpp_runtime as llamacpp_runtime
-
-    llamacpp_runtime._get_runtime_cached.cache_clear()
+    import ragprep.ocr.llamacpp_cli_runtime as cli_runtime
 
     model_path = tmp_path / "model.gguf"
     mmproj_path = tmp_path / "mmproj.gguf"
@@ -48,14 +48,11 @@ def test_missing_llama_cpp_import_is_actionable(
 
     monkeypatch.setenv(lightonocr.ENV_GGUF_MODEL_PATH, str(model_path))
     monkeypatch.setenv(lightonocr.ENV_GGUF_MMPROJ_PATH, str(mmproj_path))
-
-    def fake_import_module(_name: str) -> object:
-        raise ModuleNotFoundError("nope")
-
-    monkeypatch.setattr(llamacpp_runtime.importlib, "import_module", fake_import_module)
+    monkeypatch.delenv(lightonocr.ENV_LLAVA_CLI_PATH, raising=False)
+    monkeypatch.setattr(cli_runtime.shutil, "which", lambda _name: None)
 
     image = Image.new("RGB", (2, 2), color=(0, 0, 0))
-    with pytest.raises(ImportError, match="llama-cpp-python"):
+    with pytest.raises(RuntimeError, match="llava-cli"):
         lightonocr.ocr_image(image)
 
 
@@ -94,44 +91,86 @@ def test_gguf_env_paths_support_file_uri(monkeypatch: pytest.MonkeyPatch, tmp_pa
 def test_llama_cpp_executes_with_mock_and_is_cached(
     monkeypatch: pytest.MonkeyPatch, tmp_path
 ) -> None:
-    import ragprep.ocr.llamacpp_runtime as llamacpp_runtime
+    import subprocess
 
-    llamacpp_runtime._get_runtime_cached.cache_clear()
-
-    created = []
-
-    class FakeChatHandler:
-        def __init__(self, clip_model_path: str) -> None:
-            self.clip_model_path = clip_model_path
-
-    class FakeLlama:
-        def __init__(self, model_path: str, chat_handler: object, **_kwargs: object) -> None:
-            self.model_path = model_path
-            self.chat_handler = chat_handler
-            self.calls = []
-            created.append(self)
-
-        def create_chat_completion(self, *, messages: object, max_tokens: int) -> dict[str, object]:
-            self.calls.append({"messages": messages, "max_tokens": max_tokens})
-            return {"choices": [{"message": {"content": "OK"}}]}
-
-    monkeypatch.setattr(llamacpp_runtime, "_import_llama_cpp", lambda: (FakeLlama, FakeChatHandler))
+    import ragprep.ocr.llamacpp_cli_runtime as cli_runtime
 
     model_path = tmp_path / "model.gguf"
     mmproj_path = tmp_path / "mmproj.gguf"
     model_path.write_text("x", encoding="utf-8")
     mmproj_path.write_text("y", encoding="utf-8")
 
+    llava_cli_path = tmp_path / "llava-cli.exe"
+    llava_cli_path.write_text("x", encoding="utf-8")
+
     monkeypatch.setenv(lightonocr.ENV_GGUF_MODEL_PATH, str(model_path))
     monkeypatch.setenv(lightonocr.ENV_GGUF_MMPROJ_PATH, str(mmproj_path))
+    monkeypatch.setenv(lightonocr.ENV_LLAVA_CLI_PATH, str(llava_cli_path))
+    monkeypatch.setenv(lightonocr.ENV_LLAMA_N_CTX, "1234")
+    monkeypatch.setenv(lightonocr.ENV_LLAMA_N_THREADS, "2")
+    monkeypatch.setenv(lightonocr.ENV_LLAMA_N_GPU_LAYERS, "7")
     monkeypatch.setenv(lightonocr.ENV_MAX_NEW_TOKENS, "7")
+
+    calls: list[list[str]] = []
+
+    def fake_run(
+        argv: list[str], capture_output: bool, text: bool, check: bool
+    ) -> subprocess.CompletedProcess[str]:
+        assert capture_output is True
+        assert text is True
+        assert check is False
+        calls.append(argv)
+
+        image_flag_idx = argv.index("--image")
+        image_path = Path(argv[image_flag_idx + 1])
+        assert image_path.is_file()
+
+        return subprocess.CompletedProcess(
+            args=argv, returncode=0, stdout="ASSISTANT: OK\n", stderr=""
+        )
+
+    monkeypatch.setattr(cli_runtime.subprocess, "run", fake_run)
 
     image = Image.new("RGB", (2, 2), color=(0, 0, 0))
     assert lightonocr.ocr_image(image) == "OK"
-    assert lightonocr.ocr_image(image) == "OK"
 
-    assert len(created) == 1
-    llama = created[0]
-    assert llama.model_path == str(model_path)
-    assert getattr(llama.chat_handler, "clip_model_path", None) == str(mmproj_path)
-    assert llama.calls[0]["max_tokens"] == 7
+    assert len(calls) == 1
+    argv = calls[0]
+    assert argv[0] == str(llava_cli_path)
+    assert argv[argv.index("-m") + 1] == str(model_path)
+    assert argv[argv.index("--mmproj") + 1] == str(mmproj_path)
+    assert argv[argv.index("-n") + 1] == "7"
+    assert argv[argv.index("-c") + 1] == "1234"
+    assert argv[argv.index("-t") + 1] == "2"
+    assert argv[argv.index("-ngl") + 1] == "7"
+
+
+def test_llava_cli_nonzero_exit_is_actionable(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
+    import subprocess
+
+    import ragprep.ocr.llamacpp_cli_runtime as cli_runtime
+
+    model_path = tmp_path / "model.gguf"
+    mmproj_path = tmp_path / "mmproj.gguf"
+    model_path.write_text("x", encoding="utf-8")
+    mmproj_path.write_text("y", encoding="utf-8")
+
+    llava_cli_path = tmp_path / "llava-cli.exe"
+    llava_cli_path.write_text("x", encoding="utf-8")
+
+    monkeypatch.setenv(lightonocr.ENV_GGUF_MODEL_PATH, str(model_path))
+    monkeypatch.setenv(lightonocr.ENV_GGUF_MMPROJ_PATH, str(mmproj_path))
+    monkeypatch.setenv(lightonocr.ENV_LLAVA_CLI_PATH, str(llava_cli_path))
+
+    def fake_run(
+        argv: list[str], capture_output: bool, text: bool, check: bool
+    ) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(
+            args=argv, returncode=2, stdout="", stderr="usage: llava-cli ..."
+        )
+
+    monkeypatch.setattr(cli_runtime.subprocess, "run", fake_run)
+
+    image = Image.new("RGB", (2, 2), color=(0, 0, 0))
+    with pytest.raises(RuntimeError, match=r"exit code 2"):
+        lightonocr.ocr_image(image)
