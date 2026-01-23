@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
+from urllib.parse import urlparse
+from urllib.request import url2pathname
 
 from PIL import Image
 
@@ -42,6 +44,29 @@ def _parse_optional_int_env(name: str) -> int | None:
         raise ValueError(f"{name} must be an int, got: {value!r}") from exc
 
 
+def _normalize_env_path(value: str) -> str:
+    raw = value.strip()
+    if not raw:
+        return raw
+
+    # Users sometimes include wrappers when copy/pasting examples.
+    # - CMD: `set VAR="C:\\path\\file.gguf"` includes quotes in the value.
+    # - Docs placeholders: `<C:\\path\\file.gguf>`
+    wrappers = [('"', '"'), ("'", "'"), ("<", ">")]
+    for start, end in wrappers:
+        if raw.startswith(start) and raw.endswith(end) and len(raw) >= 2:
+            raw = raw[1:-1].strip()
+
+    # Allow file:// URIs in env vars (common when copying from logs).
+    # Convert to a local path string for downstream Path(...).is_file checks.
+    if raw.lower().startswith("file://"):
+        parsed = urlparse(raw)
+        if parsed.scheme.lower() == "file":
+            raw = url2pathname(parsed.path).strip()
+
+    return raw
+
+
 def get_settings() -> LightOnOCRSettings:
     max_new_tokens_str = os.getenv(ENV_MAX_NEW_TOKENS, "1024").strip() or "1024"
     try:
@@ -52,12 +77,14 @@ def get_settings() -> LightOnOCRSettings:
         ) from exc
 
     gguf_model_path = os.getenv(ENV_GGUF_MODEL_PATH)
-    gguf_model_path = gguf_model_path.strip() if gguf_model_path is not None else None
+    gguf_model_path = _normalize_env_path(gguf_model_path) if gguf_model_path is not None else None
     if not gguf_model_path:
         gguf_model_path = None
 
     gguf_mmproj_path = os.getenv(ENV_GGUF_MMPROJ_PATH)
-    gguf_mmproj_path = gguf_mmproj_path.strip() if gguf_mmproj_path is not None else None
+    gguf_mmproj_path = (
+        _normalize_env_path(gguf_mmproj_path) if gguf_mmproj_path is not None else None
+    )
     if not gguf_mmproj_path:
         gguf_mmproj_path = None
 

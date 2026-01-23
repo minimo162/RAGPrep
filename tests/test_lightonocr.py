@@ -59,6 +59,38 @@ def test_missing_llama_cpp_import_is_actionable(
         lightonocr.ocr_image(image)
 
 
+def test_gguf_env_paths_strip_quotes_and_angle_brackets(
+    monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    model_path = tmp_path / "model.gguf"
+    mmproj_path = tmp_path / "mmproj.gguf"
+    model_path.write_text("x", encoding="utf-8")
+    mmproj_path.write_text("y", encoding="utf-8")
+
+    monkeypatch.delenv(lightonocr.ENV_DRY_RUN, raising=False)
+    monkeypatch.setenv(lightonocr.ENV_GGUF_MODEL_PATH, f"\"{model_path}\"")
+    monkeypatch.setenv(lightonocr.ENV_GGUF_MMPROJ_PATH, f"<{mmproj_path}>")
+
+    settings = lightonocr.get_settings()
+    assert settings.gguf_model_path == str(model_path)
+    assert settings.gguf_mmproj_path == str(mmproj_path)
+
+
+def test_gguf_env_paths_support_file_uri(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
+    model_path = tmp_path / "model.gguf"
+    mmproj_path = tmp_path / "mmproj.gguf"
+    model_path.write_text("x", encoding="utf-8")
+    mmproj_path.write_text("y", encoding="utf-8")
+
+    monkeypatch.delenv(lightonocr.ENV_DRY_RUN, raising=False)
+    monkeypatch.setenv(lightonocr.ENV_GGUF_MODEL_PATH, model_path.resolve().as_uri())
+    monkeypatch.setenv(lightonocr.ENV_GGUF_MMPROJ_PATH, mmproj_path.resolve().as_uri())
+
+    settings = lightonocr.get_settings()
+    assert settings.gguf_model_path == str(model_path)
+    assert settings.gguf_mmproj_path == str(mmproj_path)
+
+
 def test_llama_cpp_executes_with_mock_and_is_cached(
     monkeypatch: pytest.MonkeyPatch, tmp_path
 ) -> None:

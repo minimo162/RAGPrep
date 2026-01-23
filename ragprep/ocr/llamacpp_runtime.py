@@ -68,9 +68,18 @@ def _import_llama_cpp() -> tuple[Any, Any]:
 def _validate_paths(settings: LlamaCppSettings) -> None:
     model_path = Path(settings.model_path)
     mmproj_path = Path(settings.mmproj_path)
-    if not model_path.is_file():
+    try:
+        model_is_file = model_path.is_file()
+    except OSError as exc:
+        raise RuntimeError(f"Invalid GGUF model path: {model_path!s}") from exc
+    try:
+        mmproj_is_file = mmproj_path.is_file()
+    except OSError as exc:
+        raise RuntimeError(f"Invalid GGUF mmproj path: {mmproj_path!s}") from exc
+
+    if not model_is_file:
         raise RuntimeError(f"GGUF model file not found: {model_path}")
-    if not mmproj_path.is_file():
+    if not mmproj_is_file:
         raise RuntimeError(f"GGUF mmproj file not found: {mmproj_path}")
 
 

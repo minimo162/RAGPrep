@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import uuid
 from dataclasses import dataclass, replace
 from enum import Enum
@@ -22,6 +23,8 @@ templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
 
 app = FastAPI()
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
+
+logger = logging.getLogger(__name__)
 
 
 class JobStatus(str, Enum):
@@ -91,6 +94,7 @@ def _run_job(job_id: str, pdf_bytes: bytes) -> None:
         try:
             markdown = pdf_to_markdown(pdf_bytes)
         except Exception as exc:  # noqa: BLE001
+            logger.exception("Job %s failed", job_id)
             jobs.update(job_id, status=JobStatus.error, error=str(exc))
             return
         jobs.update(job_id, status=JobStatus.done, markdown=markdown, error=None)
