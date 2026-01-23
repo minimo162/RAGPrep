@@ -5,6 +5,7 @@ param(
     [string]$TargetTriple = "x86_64-pc-windows-msvc",
     [string]$PbsRelease = "latest",
     [string]$PipTempRoot = "",
+    [string]$LlamaCppPythonExtraIndexUrl = "https://abetlen.github.io/llama-cpp-python/whl/cpu",
     [string]$GgufRepoId = "wangjazz/LightOnOCR-2-1B-gguf",
     [string]$GgufModelFile = "LightOnOCR-2-1B-Q4_K_M.gguf",
     [string]$GgufMmprojFile = "LightOnOCR-2-1B-mmproj-f16.gguf",
@@ -224,8 +225,26 @@ try {
     $env:TMP = $pipTemp
     $env:GIT_CONFIG_PARAMETERS = "'core.longpaths=true'"
     $env:PIP_DISABLE_PIP_VERSION_CHECK = "1"
+
+    $pipArgs = @("install", "--no-deps", "--target", $sitePackagesDir, "-r", $requirementsPath)
+    $needsLlamaCppWheelIndex = Select-String -LiteralPath $requirementsPath -Pattern "^llama-cpp-python" -Quiet
+    if ($needsLlamaCppWheelIndex) {
+        $llamaExtraIndexUrl = $LlamaCppPythonExtraIndexUrl.Trim()
+        if ([string]::IsNullOrWhiteSpace($llamaExtraIndexUrl)) {
+            throw "LlamaCppPythonExtraIndexUrl must be non-empty because requirements include llama-cpp-python."
+        }
+
+        $pipArgs = @(
+            "install",
+            "--no-deps",
+            "--target", $sitePackagesDir,
+            "--only-binary", "llama-cpp-python",
+            "--extra-index-url", $llamaExtraIndexUrl,
+            "-r", $requirementsPath
+        )
+    }
     try {
-        & $pythonExe -m pip install --no-deps --target $sitePackagesDir -r $requirementsPath
+        & $pythonExe -m pip @pipArgs
         Assert-LastExitCode "pip install"
     }
     finally {
