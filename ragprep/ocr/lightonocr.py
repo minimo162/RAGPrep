@@ -7,6 +7,9 @@ from typing import Any
 
 from PIL import Image
 
+from .llamacpp_runtime import LlamaCppSettings
+from .llamacpp_runtime import ocr_image as ocr_image_llama_cpp
+
 DEFAULT_MODEL_ID = "lightonai/LightOnOCR-2-1B"
 DEFAULT_BACKEND = "transformers"
 
@@ -146,9 +149,25 @@ def ocr_image(image: Image.Image) -> str:
 
     settings = get_settings()
     if settings.backend == "llama_cpp":
-        raise RuntimeError(
-            f"{ENV_BACKEND}=llama_cpp is not implemented yet. "
-            f"Use {ENV_BACKEND}=transformers for now."
+        model_path = settings.gguf_model_path
+        mmproj_path = settings.gguf_mmproj_path
+        if model_path is None or mmproj_path is None:
+            raise RuntimeError(
+                f"When {ENV_BACKEND}=llama_cpp, set {ENV_GGUF_MODEL_PATH} and "
+                f"{ENV_GGUF_MMPROJ_PATH}."
+            )
+
+        llama_settings = LlamaCppSettings(
+            model_path=model_path,
+            mmproj_path=mmproj_path,
+            n_ctx=settings.llama_n_ctx,
+            n_threads=settings.llama_n_threads,
+            n_gpu_layers=settings.llama_n_gpu_layers,
+        )
+        return ocr_image_llama_cpp(
+            image=image,
+            settings=llama_settings,
+            max_new_tokens=settings.max_new_tokens,
         )
     runtime = _get_runtime_cached(settings.model_id, settings.device, settings.dtype)
     return _run_inference(runtime, image=image, max_new_tokens=settings.max_new_tokens)

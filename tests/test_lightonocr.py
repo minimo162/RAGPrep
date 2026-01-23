@@ -78,6 +78,51 @@ def test_dry_run_skips_settings_validation(monkeypatch: pytest.MonkeyPatch) -> N
     assert lightonocr.ocr_image(image) == lightonocr.DRY_RUN_OUTPUT
 
 
+def test_llama_cpp_backend_executes_with_mock(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
+    import ragprep.ocr.llamacpp_runtime as llamacpp_runtime
+
+    llamacpp_runtime._get_runtime_cached.cache_clear()
+
+    created = []
+
+    class FakeChatHandler:
+        def __init__(self, clip_model_path: str) -> None:
+            self.clip_model_path = clip_model_path
+
+    class FakeLlama:
+        def __init__(self, model_path: str, chat_handler: object, **_kwargs: object) -> None:
+            self.model_path = model_path
+            self.chat_handler = chat_handler
+            self.calls = []
+            created.append(self)
+
+        def create_chat_completion(self, *, messages: object, max_tokens: int) -> dict[str, object]:
+            self.calls.append({"messages": messages, "max_tokens": max_tokens})
+            return {"choices": [{"message": {"content": "OK"}}]}
+
+    monkeypatch.setattr(llamacpp_runtime, "_import_llama_cpp", lambda: (FakeLlama, FakeChatHandler))
+
+    model_path = tmp_path / "model.gguf"
+    mmproj_path = tmp_path / "mmproj.gguf"
+    model_path.write_text("x", encoding="utf-8")
+    mmproj_path.write_text("y", encoding="utf-8")
+
+    monkeypatch.setenv(lightonocr.ENV_BACKEND, "llama_cpp")
+    monkeypatch.setenv(lightonocr.ENV_GGUF_MODEL_PATH, str(model_path))
+    monkeypatch.setenv(lightonocr.ENV_GGUF_MMPROJ_PATH, str(mmproj_path))
+    monkeypatch.setenv(lightonocr.ENV_MAX_NEW_TOKENS, "7")
+
+    image = Image.new("RGB", (2, 2), color=(0, 0, 0))
+    assert lightonocr.ocr_image(image) == "OK"
+    assert lightonocr.ocr_image(image) == "OK"
+
+    assert len(created) == 1
+    llama = created[0]
+    assert llama.model_path == str(model_path)
+    assert getattr(llama.chat_handler, "clip_model_path", None) == str(mmproj_path)
+    assert llama.calls[0]["max_tokens"] == 7
+
+
 def test_load_error_message(monkeypatch: pytest.MonkeyPatch) -> None:
     lightonocr._get_runtime_cached.cache_clear()
 
