@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess
 import tempfile
@@ -9,6 +10,8 @@ from pathlib import Path
 from PIL import Image
 
 _MAX_PROCESS_OUTPUT_CHARS = 8000
+ENV_IMAGE_TMP_DIR = "LIGHTONOCR_IMAGE_TMP_DIR"
+_WINDOWS_LONG_PATH_THRESHOLD = 240
 
 
 @dataclass(frozen=True)
@@ -87,6 +90,83 @@ def _resolve_llava_cli(settings: LlamaCppCliSettings) -> str:
     )
 
 
+def _contains_non_ascii(text: str) -> bool:
+    return any(ord(ch) > 127 for ch in text)
+
+
+def _needs_windows_short_path(path: str) -> bool:
+    if os.name != "nt":
+        return False
+    if _contains_non_ascii(path):
+        return True
+    return len(path) >= _WINDOWS_LONG_PATH_THRESHOLD
+
+
+def _get_windows_short_path(path: str) -> str:
+    import ctypes
+    from ctypes import wintypes
+
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    get_short_path_name_w = kernel32.GetShortPathNameW
+    get_short_path_name_w.argtypes = [wintypes.LPCWSTR, wintypes.LPWSTR, wintypes.DWORD]
+    get_short_path_name_w.restype = wintypes.DWORD
+
+    input_path = str(Path(path))
+
+    buffer_len = 260
+    while True:
+        buffer = ctypes.create_unicode_buffer(buffer_len)
+        result = get_short_path_name_w(input_path, buffer, buffer_len)
+        if result == 0:
+            error = ctypes.get_last_error()
+            raise OSError(error, f"GetShortPathNameW failed for {input_path!r}")
+        if result < buffer_len:
+            return buffer.value
+        buffer_len = int(result) + 1
+
+
+def _maybe_windows_short_path(path: str) -> str:
+    if not _needs_windows_short_path(path):
+        return path
+    try:
+        return _get_windows_short_path(path)
+    except Exception:  # noqa: BLE001
+        return path
+
+
+def _strip_wrappers(value: str) -> str:
+    raw = value.strip()
+    if not raw:
+        return raw
+
+    wrappers = [('"', '"'), ("'", "'"), ("<", ">")]
+    for start, end in wrappers:
+        if raw.startswith(start) and raw.endswith(end) and len(raw) >= 2:
+            raw = raw[1:-1].strip()
+    return raw
+
+
+def _resolve_image_temp_dir() -> str | None:
+    raw = os.getenv(ENV_IMAGE_TMP_DIR)
+    if raw is None:
+        return None
+
+    raw = _strip_wrappers(raw)
+    if not raw:
+        return None
+
+    temp_dir = Path(raw)
+    try:
+        temp_dir.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        raise RuntimeError(
+            f"{ENV_IMAGE_TMP_DIR} must be a writable directory, got: {raw!r}"
+        ) from exc
+    if not temp_dir.is_dir():
+        raise RuntimeError(f"{ENV_IMAGE_TMP_DIR} must be a directory, got: {raw!r}")
+    return str(temp_dir)
+
+
 def _build_argv(
     *,
     llava_cli: str,
@@ -95,14 +175,18 @@ def _build_argv(
     prompt: str,
     max_new_tokens: int,
 ) -> list[str]:
+    model_path = _maybe_windows_short_path(settings.model_path)
+    mmproj_path = _maybe_windows_short_path(settings.mmproj_path)
+    image_arg = _maybe_windows_short_path(str(image_path))
+
     argv = [
         llava_cli,
         "-m",
-        settings.model_path,
+        model_path,
         "--mmproj",
-        settings.mmproj_path,
+        mmproj_path,
         "--image",
-        str(image_path),
+        image_arg,
         "-p",
         prompt,
         "-n",
@@ -163,7 +247,10 @@ def ocr_image(*, image: Image.Image, settings: LlamaCppCliSettings, max_new_toke
 
     prompt = "Extract all text from this image and return it as Markdown."
 
-    with tempfile.NamedTemporaryFile(prefix="ragprep_llava_", suffix=".png", delete=False) as tmp:
+    temp_dir = _resolve_image_temp_dir()
+    with tempfile.NamedTemporaryFile(
+        prefix="ragprep_llava_", suffix=".png", delete=False, dir=temp_dir
+    ) as tmp:
         image_path = Path(tmp.name)
     try:
         image.save(image_path, format="PNG")

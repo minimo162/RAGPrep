@@ -186,3 +186,97 @@ def test_llava_cli_nonzero_exit_is_actionable(
     assert "deprecated" in message
     assert "stderr:" in message
     assert "usage: llava-cli" in message
+
+
+def test_build_argv_uses_short_paths_for_non_ascii_on_windows(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    import os
+
+    import ragprep.ocr.llamacpp_cli_runtime as cli_runtime
+
+    model_path = tmp_path / "モデル.gguf"
+    mmproj_path = tmp_path / "mmproj-モデル.gguf"
+    image_path = tmp_path / "画像.png"
+    model_path.write_text("x", encoding="utf-8")
+    mmproj_path.write_text("y", encoding="utf-8")
+    image_path.write_text("z", encoding="utf-8")
+
+    short_map: dict[str, str] = {}
+
+    def fake_get_windows_short_path(path: str) -> str:
+        short = f"C:\\SHORT\\{Path(path).name}"
+        short_map[path] = short
+        return short
+
+    monkeypatch.setattr(cli_runtime, "_get_windows_short_path", fake_get_windows_short_path)
+
+    settings = cli_runtime.LlamaCppCliSettings(
+        llava_cli_path="llava-cli.exe",
+        model_path=str(model_path),
+        mmproj_path=str(mmproj_path),
+        n_ctx=None,
+        n_threads=None,
+        n_gpu_layers=None,
+    )
+    argv = cli_runtime._build_argv(
+        llava_cli="llava-cli.exe",
+        settings=settings,
+        image_path=image_path,
+        prompt="p",
+        max_new_tokens=1,
+    )
+
+    if os.name == "nt":
+        assert argv[argv.index("-m") + 1] == short_map[str(model_path)]
+        assert argv[argv.index("--mmproj") + 1] == short_map[str(mmproj_path)]
+        assert argv[argv.index("--image") + 1] == short_map[str(image_path)]
+    else:
+        assert argv[argv.index("-m") + 1] == str(model_path)
+        assert argv[argv.index("--mmproj") + 1] == str(mmproj_path)
+        assert argv[argv.index("--image") + 1] == str(image_path)
+
+
+def test_llava_cli_image_temp_dir_override(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    import subprocess
+
+    import ragprep.ocr.llamacpp_cli_runtime as cli_runtime
+
+    override_dir = tmp_path / "imgtmp"
+    monkeypatch.setenv("LIGHTONOCR_IMAGE_TMP_DIR", str(override_dir))
+
+    llava_cli_path = tmp_path / "llava-cli.exe"
+    llava_cli_path.write_text("x", encoding="utf-8")
+    model_path = tmp_path / "model.gguf"
+    mmproj_path = tmp_path / "mmproj.gguf"
+    model_path.write_text("x", encoding="utf-8")
+    mmproj_path.write_text("y", encoding="utf-8")
+
+    captured_image_parents: list[Path] = []
+
+    def fake_run(
+        argv: list[str], capture_output: bool, text: bool, check: bool
+    ) -> subprocess.CompletedProcess[str]:
+        image_flag_idx = argv.index("--image")
+        image_path = Path(argv[image_flag_idx + 1])
+        assert image_path.is_file()
+        captured_image_parents.append(image_path.parent)
+        return subprocess.CompletedProcess(
+            args=argv, returncode=0, stdout="ASSISTANT: OK\n", stderr=""
+        )
+
+    monkeypatch.setattr(cli_runtime.subprocess, "run", fake_run)
+
+    settings = cli_runtime.LlamaCppCliSettings(
+        llava_cli_path=str(llava_cli_path),
+        model_path=str(model_path),
+        mmproj_path=str(mmproj_path),
+        n_ctx=None,
+        n_threads=None,
+        n_gpu_layers=None,
+    )
+
+    image = Image.new("RGB", (2, 2), color=(0, 0, 0))
+    assert cli_runtime.ocr_image(image=image, settings=settings, max_new_tokens=7) == "OK"
+    assert override_dir.is_dir()
+    assert captured_image_parents == [override_dir]
