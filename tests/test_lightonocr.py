@@ -168,11 +168,21 @@ def test_llava_cli_nonzero_exit_is_actionable(
         argv: list[str], capture_output: bool, text: bool, check: bool
     ) -> subprocess.CompletedProcess[str]:
         return subprocess.CompletedProcess(
-            args=argv, returncode=2, stdout="", stderr="usage: llava-cli ..."
+            args=argv,
+            returncode=2,
+            stdout="WARNING: deprecated\nPlease use llama-mtmd-cli\n",
+            stderr="usage: llava-cli ...",
         )
 
     monkeypatch.setattr(cli_runtime.subprocess, "run", fake_run)
 
     image = Image.new("RGB", (2, 2), color=(0, 0, 0))
-    with pytest.raises(RuntimeError, match=r"exit code 2"):
+    with pytest.raises(RuntimeError) as excinfo:
         lightonocr.ocr_image(image)
+
+    message = str(excinfo.value)
+    assert "exit code 2" in message
+    assert "stdout:" in message
+    assert "deprecated" in message
+    assert "stderr:" in message
+    assert "usage: llava-cli" in message

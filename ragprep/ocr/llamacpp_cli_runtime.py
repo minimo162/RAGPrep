@@ -8,6 +8,8 @@ from pathlib import Path
 
 from PIL import Image
 
+_MAX_PROCESS_OUTPUT_CHARS = 8000
+
 
 @dataclass(frozen=True)
 class LlamaCppCliSettings:
@@ -137,6 +139,24 @@ def _extract_text(stdout: str) -> str:
     return text
 
 
+def _normalize_process_output(text: str) -> str:
+    return text.replace("\r\n", "\n").replace("\r", "\n").strip()
+
+
+def _format_process_output(name: str, text: str) -> str:
+    normalized = _normalize_process_output(text)
+    if not normalized:
+        return ""
+
+    truncated = False
+    if len(normalized) > _MAX_PROCESS_OUTPUT_CHARS:
+        normalized = normalized[-_MAX_PROCESS_OUTPUT_CHARS:]
+        truncated = True
+
+    label = f"{name} (truncated):" if truncated else f"{name}:"
+    return f"{label}\n{normalized}"
+
+
 def ocr_image(*, image: Image.Image, settings: LlamaCppCliSettings, max_new_tokens: int) -> str:
     _validate_paths(settings)
     llava_cli = _resolve_llava_cli(settings)
@@ -158,11 +178,13 @@ def ocr_image(*, image: Image.Image, settings: LlamaCppCliSettings, max_new_toke
 
         result = subprocess.run(argv, capture_output=True, text=True, check=False)  # noqa: S603
         if result.returncode != 0:
-            stderr = (result.stderr or "").strip()
-            stderr_summary = f"\n\nstderr:\n{stderr}" if stderr else ""
-            raise RuntimeError(
-                f"llava-cli failed with exit code {result.returncode}.{stderr_summary}"
+            stdout_summary = _format_process_output("stdout", result.stdout or "")
+            stderr_summary = _format_process_output("stderr", result.stderr or "")
+            details = "\n\n".join(
+                summary for summary in (stdout_summary, stderr_summary) if summary
             )
+            details = f"\n\n{details}" if details else ""
+            raise RuntimeError(f"llava-cli failed with exit code {result.returncode}.{details}")
 
         return _extract_text(result.stdout or "")
     finally:
