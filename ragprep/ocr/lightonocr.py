@@ -8,25 +8,58 @@ from typing import Any
 from PIL import Image
 
 DEFAULT_MODEL_ID = "lightonai/LightOnOCR-2-1B"
+DEFAULT_BACKEND = "transformers"
 
 ENV_MODEL_ID = "LIGHTONOCR_MODEL_ID"
 ENV_DEVICE = "LIGHTONOCR_DEVICE"
 ENV_DTYPE = "LIGHTONOCR_DTYPE"
 ENV_MAX_NEW_TOKENS = "LIGHTONOCR_MAX_NEW_TOKENS"
 ENV_DRY_RUN = "LIGHTONOCR_DRY_RUN"
+ENV_BACKEND = "LIGHTONOCR_BACKEND"
+ENV_GGUF_MODEL_PATH = "LIGHTONOCR_GGUF_MODEL_PATH"
+ENV_GGUF_MMPROJ_PATH = "LIGHTONOCR_GGUF_MMPROJ_PATH"
+ENV_LLAMA_N_CTX = "LIGHTONOCR_LLAMA_N_CTX"
+ENV_LLAMA_N_THREADS = "LIGHTONOCR_LLAMA_N_THREADS"
+ENV_LLAMA_N_GPU_LAYERS = "LIGHTONOCR_LLAMA_N_GPU_LAYERS"
 
 DRY_RUN_OUTPUT = "LIGHTONOCR_DRY_RUN=1 (no inference)"
 
 
 @dataclass(frozen=True)
 class LightOnOCRSettings:
+    backend: str
     model_id: str
     device: str
     dtype: str | None
     max_new_tokens: int
+    gguf_model_path: str | None
+    gguf_mmproj_path: str | None
+    llama_n_ctx: int | None
+    llama_n_threads: int | None
+    llama_n_gpu_layers: int | None
+
+
+def _parse_optional_int_env(name: str) -> int | None:
+    value = os.getenv(name)
+    if value is None:
+        return None
+    value = value.strip()
+    if not value:
+        return None
+    try:
+        return int(value)
+    except ValueError as exc:
+        raise ValueError(f"{name} must be an int, got: {value!r}") from exc
 
 
 def get_settings() -> LightOnOCRSettings:
+    backend_raw = os.getenv(ENV_BACKEND, DEFAULT_BACKEND)
+    backend = backend_raw.strip().lower() or DEFAULT_BACKEND
+    if backend not in {"transformers", "llama_cpp"}:
+        raise ValueError(
+            f"{ENV_BACKEND} must be one of: transformers|llama_cpp (got: {backend_raw!r})"
+        )
+
     model_id = os.getenv(ENV_MODEL_ID, DEFAULT_MODEL_ID).strip() or DEFAULT_MODEL_ID
     device = (os.getenv(ENV_DEVICE, "cpu").strip() or "cpu").lower()
     dtype = os.getenv(ENV_DTYPE)
@@ -40,11 +73,44 @@ def get_settings() -> LightOnOCRSettings:
             f"{ENV_MAX_NEW_TOKENS} must be an int, got: {max_new_tokens_str!r}"
         ) from exc
 
+    gguf_model_path = os.getenv(ENV_GGUF_MODEL_PATH)
+    gguf_model_path = gguf_model_path.strip() if gguf_model_path is not None else None
+    if gguf_model_path == "":
+        gguf_model_path = None
+
+    gguf_mmproj_path = os.getenv(ENV_GGUF_MMPROJ_PATH)
+    gguf_mmproj_path = gguf_mmproj_path.strip() if gguf_mmproj_path is not None else None
+    if gguf_mmproj_path == "":
+        gguf_mmproj_path = None
+
+    llama_n_ctx = _parse_optional_int_env(ENV_LLAMA_N_CTX)
+    llama_n_threads = _parse_optional_int_env(ENV_LLAMA_N_THREADS)
+    llama_n_gpu_layers = _parse_optional_int_env(ENV_LLAMA_N_GPU_LAYERS)
+
+    if backend == "llama_cpp":
+        missing = []
+        if gguf_model_path is None:
+            missing.append(ENV_GGUF_MODEL_PATH)
+        if gguf_mmproj_path is None:
+            missing.append(ENV_GGUF_MMPROJ_PATH)
+        if missing:
+            missing_str = ", ".join(missing)
+            raise ValueError(
+                f"When {ENV_BACKEND}=llama_cpp, set {missing_str} to local GGUF paths "
+                "(model: LightOnOCR-2-1B-Q4_K_M.gguf, mmproj: LightOnOCR-2-1B-mmproj-f16.gguf)."
+            )
+
     return LightOnOCRSettings(
+        backend=backend,
         model_id=model_id,
         device=device,
         dtype=dtype,
         max_new_tokens=max_new_tokens,
+        gguf_model_path=gguf_model_path,
+        gguf_mmproj_path=gguf_mmproj_path,
+        llama_n_ctx=llama_n_ctx,
+        llama_n_threads=llama_n_threads,
+        llama_n_gpu_layers=llama_n_gpu_layers,
     )
 
 
@@ -61,16 +127,29 @@ def ocr_image(image: Image.Image) -> str:
 
     Environment variables:
     - LIGHTONOCR_MODEL_ID: HF model id (default: lightonai/LightOnOCR-2-1B)
+    - LIGHTONOCR_BACKEND: transformers|llama_cpp (default: transformers)
     - LIGHTONOCR_DEVICE: cpu|cuda|mps|auto (default: cpu)
     - LIGHTONOCR_DTYPE: float32|bfloat16|float16 (default: float32 on cpu/mps, bfloat16 on cuda)
     - LIGHTONOCR_MAX_NEW_TOKENS: int (default: 1024)
     - LIGHTONOCR_DRY_RUN: truthy to skip inference and return placeholder text
+
+    llama.cpp backend variables (when LIGHTONOCR_BACKEND=llama_cpp):
+    - LIGHTONOCR_GGUF_MODEL_PATH: path to LightOnOCR-2-1B-Q4_K_M.gguf
+    - LIGHTONOCR_GGUF_MMPROJ_PATH: path to LightOnOCR-2-1B-mmproj-f16.gguf
+    - LIGHTONOCR_LLAMA_N_CTX: optional int
+    - LIGHTONOCR_LLAMA_N_THREADS: optional int
+    - LIGHTONOCR_LLAMA_N_GPU_LAYERS: optional int
     """
 
     if _env_truthy(ENV_DRY_RUN):
         return DRY_RUN_OUTPUT
 
     settings = get_settings()
+    if settings.backend == "llama_cpp":
+        raise RuntimeError(
+            f"{ENV_BACKEND}=llama_cpp is not implemented yet. "
+            f"Use {ENV_BACKEND}=transformers for now."
+        )
     runtime = _get_runtime_cached(settings.model_id, settings.device, settings.dtype)
     return _run_inference(runtime, image=image, max_new_tokens=settings.max_new_tokens)
 

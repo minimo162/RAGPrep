@@ -45,7 +45,37 @@ def test_runtime_is_cached(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_device_default_is_cpu(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv(lightonocr.ENV_DEVICE, raising=False)
     settings = lightonocr.get_settings()
+    assert settings.backend == "transformers"
     assert settings.device == "cpu"
+
+
+def test_backend_invalid_value_raises(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv(lightonocr.ENV_BACKEND, "nope")
+    with pytest.raises(ValueError, match=lightonocr.ENV_BACKEND):
+        lightonocr.get_settings()
+
+
+def test_llama_cpp_requires_gguf_paths(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv(lightonocr.ENV_BACKEND, "llama_cpp")
+    monkeypatch.delenv(lightonocr.ENV_GGUF_MODEL_PATH, raising=False)
+    monkeypatch.delenv(lightonocr.ENV_GGUF_MMPROJ_PATH, raising=False)
+
+    with pytest.raises(ValueError) as excinfo:
+        lightonocr.get_settings()
+
+    message = str(excinfo.value)
+    assert lightonocr.ENV_GGUF_MODEL_PATH in message
+    assert lightonocr.ENV_GGUF_MMPROJ_PATH in message
+
+
+def test_dry_run_skips_settings_validation(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv(lightonocr.ENV_DRY_RUN, "1")
+    monkeypatch.setenv(lightonocr.ENV_BACKEND, "llama_cpp")
+    monkeypatch.delenv(lightonocr.ENV_GGUF_MODEL_PATH, raising=False)
+    monkeypatch.delenv(lightonocr.ENV_GGUF_MMPROJ_PATH, raising=False)
+
+    image = Image.new("RGB", (2, 2), color=(0, 0, 0))
+    assert lightonocr.ocr_image(image) == lightonocr.DRY_RUN_OUTPUT
 
 
 def test_load_error_message(monkeypatch: pytest.MonkeyPatch) -> None:
