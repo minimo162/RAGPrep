@@ -15,7 +15,7 @@ $repoRoot = Resolve-Path (Join-Path $PSScriptRoot "..")
 
 function Resolve-SevenZip {
     param(
-        [Parameter(Mandatory = $true)][string]$ExplicitPath
+        [string]$ExplicitPath = ""
     )
 
     if (-not [string]::IsNullOrWhiteSpace($ExplicitPath)) {
