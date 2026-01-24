@@ -37,6 +37,24 @@ Examples (PowerShell):
 - Render-dominant (no inference): `$env:LIGHTONOCR_DRY_RUN='1'; uv run python scripts/bench_pdf_to_markdown.py --synthetic-pages 3`
 - Real OCR (requires GGUF env vars): `uv run python scripts/bench_pdf_to_markdown.py --pdf .\\path\\to\\input.pdf`
 - Compare backends: `$env:LIGHTONOCR_BACKEND='cli'` vs `$env:LIGHTONOCR_BACKEND='python'`
+- Hybrid benchmark (skips OCR on high-quality text pages; table/image pages still OCR): `uv run python scripts/bench_pdf_to_markdown.py --pdf .\\path\\to\\input.pdf --hybrid`
+
+Per-page artifacts (diff-friendly):
+- `uv run python scripts/pdf_to_markdown_pages.py --pdf .\\path\\to\\input.pdf --out-dir .\\out\\input-pages --overwrite`
+
+Outputs (in `--out-dir`):
+- `page-0001.pymupdf.md` (PyMuPDF extracted text)
+- `page-0001.ocr.md` (OCR output; empty if skipped)
+- `page-0001.merged.md` (selected output for this page)
+- `page-0001.meta.json` (page_kind, scores, OCR required/skipped, etc.)
+- `page-0001.diff.txt` (unified diff between OCR and PyMuPDF; only when OCR ran and both sides have text)
+- `merged.md` (concatenated merged pages)
+- `summary.json` (run summary)
+
+Notes:
+- PyMuPDF cannot read text inside images, so image pages always require OCR.
+- PyMuPDF often fails to preserve table structure, so table pages should use OCR output.
+- PyMuPDF `page.find_tables()` is not perfectly accurate; `--use-find-tables` treats it as a weak hint only (do not rely on it alone).
 
 Speed-first recommended env preset (PowerShell):
 
@@ -60,8 +78,8 @@ Targets (baseline comparison, same machine/inputs):
 - Time-to-first-page: -50%
 
 Record baseline results (fill this table):
-| date | pdf | pages | backend | dpi | max_edge | render_s | ocr_s | total_s | notes |
-|---|---|---:|---|---:|---:|---:|---:|---:|---|
+| date | pdf | pages | pages_ocr | pages_skipped | pages_table | pages_image | backend | dpi | max_edge | render_s | ocr_s | total_s | notes |
+|---|---|---:|---:|---:|---:|---:|---|---:|---:|---:|---:|---:|---|
 
 If the error includes a deprecation warning like:
 
