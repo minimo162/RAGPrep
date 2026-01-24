@@ -63,3 +63,9 @@ def test_render_pdf_to_images_respects_env_render_max_edge(monkeypatch: pytest.M
     images = render_pdf_to_images(pdf_bytes, dpi=72)
     assert len(images) == 1
     assert max(images[0].size) == 100
+
+
+def test_render_pdf_to_images_does_not_upscale_when_max_edge_is_larger() -> None:
+    pdf_bytes = _make_pdf_bytes(page_count=1)
+    original = render_pdf_to_images(pdf_bytes, dpi=72, max_edge=10_000)[0]
+    assert max(original.size) < 10_000

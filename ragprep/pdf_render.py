@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import io
 from typing import Any
 
 from PIL import Image
@@ -15,6 +14,20 @@ def _import_fitz() -> Any:
         raise ImportError("PyMuPDF is required for PDF rendering. Install `pymupdf`.") from exc
 
     return fitz
+
+
+def _pixmap_to_rgb_image(pix: Any) -> Image.Image:
+    width = int(pix.width)
+    height = int(pix.height)
+
+    samples = pix.samples
+    stride = int(getattr(pix, "stride", 0)) or width * int(getattr(pix, "n", 3))
+
+    if getattr(pix, "alpha", 0) or int(getattr(pix, "n", 0)) == 4:
+        rgba = Image.frombuffer("RGBA", (width, height), samples, "raw", "RGBA", stride, 1)
+        return rgba.convert("RGB")
+
+    return Image.frombuffer("RGB", (width, height), samples, "raw", "RGB", stride, 1)
 
 
 def render_pdf_to_images(
@@ -61,16 +74,12 @@ def render_pdf_to_images(
         images: list[Image.Image] = []
         for page_index in range(page_count):
             page = doc.load_page(page_index)
-            pix = page.get_pixmap(matrix=matrix, alpha=False)
-            png_bytes = pix.tobytes("png")
-            with io.BytesIO(png_bytes) as buf:
-                pil_image = Image.open(buf)
-                pil_image.load()
-                rgb = pil_image.convert("RGB")
+            pix = page.get_pixmap(matrix=matrix, colorspace=fitz.csRGB, alpha=False)
+            rgb = _pixmap_to_rgb_image(pix)
 
             width, height = rgb.size
             current_max_edge = max(width, height)
-            if current_max_edge != max_edge:
+            if current_max_edge > max_edge:
                 if width >= height:
                     new_width = max_edge
                     new_height = max(1, round(max_edge * height / width))
