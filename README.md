@@ -26,6 +26,9 @@ Optional env vars:
 - `LIGHTONOCR_LLAMA_REPEAT_LAST_N` (default: `128`)
 - `LIGHTONOCR_DRY_RUN=1` (verify end-to-end flow without inference)
 
+Optional app env vars:
+- `RAGPREP_WARMUP_ON_START=1` (warm up the OCR runtime on startup; effective with `LIGHTONOCR_BACKEND=python`)
+
 ## Performance benchmark (render/ocr/total breakdown)
 
 Run the benchmark script to measure where time is spent.
