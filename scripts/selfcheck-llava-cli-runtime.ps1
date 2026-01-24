@@ -169,8 +169,15 @@ function Invoke-CliHelp {
         [Parameter(Mandatory = $true)][string]$ExePath
     )
 
-    $helpOutput = & $ExePath --help 2>&1
-    $helpExitCode = $LASTEXITCODE
+    $oldErrorActionPreference = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    try {
+        $helpOutput = & $ExePath --help 2>&1
+        $helpExitCode = $LASTEXITCODE
+    }
+    finally {
+        $ErrorActionPreference = $oldErrorActionPreference
+    }
 
     $lines = @()
     if ($helpOutput) {
