@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from enum import Enum
 
 from ragprep.ocr.lightonocr import ocr_image
-from ragprep.pdf_render import render_pdf_to_images
+from ragprep.pdf_render import iter_pdf_images
 
 
 def _normalize_newlines(text: str) -> str:
@@ -58,8 +58,7 @@ def pdf_to_markdown(pdf_bytes: bytes, *, on_progress: ProgressCallback | None = 
             message="rendering",
         ),
     )
-    images = render_pdf_to_images(pdf_bytes)
-    total_pages = len(images)
+    total_pages, images = iter_pdf_images(pdf_bytes)
     _notify_progress(
         on_progress,
         PdfToMarkdownProgress(

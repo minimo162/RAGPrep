@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Iterator
 from typing import Any
 
 from PIL import Image
@@ -30,14 +31,14 @@ def _pixmap_to_rgb_image(pix: Any) -> Image.Image:
     return Image.frombuffer("RGB", (width, height), samples, "raw", "RGB", stride, 1)
 
 
-def render_pdf_to_images(
+def iter_pdf_images(
     pdf_bytes: bytes,
     *,
     dpi: int | None = None,
     max_edge: int | None = None,
     max_pages: int | None = None,
     max_bytes: int | None = None,
-) -> list[Image.Image]:
+) -> tuple[int, Iterator[Image.Image]]:
     settings = get_settings()
     dpi = settings.render_dpi if dpi is None else dpi
     max_edge = settings.render_max_edge if max_edge is None else max_edge
@@ -63,34 +64,57 @@ def render_pdf_to_images(
     except Exception as exc:  # noqa: BLE001
         raise ValueError("Invalid PDF data") from exc
 
-    with doc:
+    try:
         page_count = int(doc.page_count)
-        if page_count > max_pages:
-            raise ValueError(f"PDF has {page_count} pages, max_pages={max_pages}")
+    except Exception as exc:  # noqa: BLE001
+        doc.close()
+        raise RuntimeError("Failed to read PDF page count") from exc
+    if page_count > max_pages:
+        doc.close()
+        raise ValueError(f"PDF has {page_count} pages, max_pages={max_pages}")
 
-        zoom = dpi / 72.0
-        matrix = fitz.Matrix(zoom, zoom)
+    zoom = dpi / 72.0
+    matrix = fitz.Matrix(zoom, zoom)
 
-        images: list[Image.Image] = []
-        for page_index in range(page_count):
-            page = doc.load_page(page_index)
-            pix = page.get_pixmap(matrix=matrix, colorspace=fitz.csRGB, alpha=False)
-            rgb = _pixmap_to_rgb_image(pix)
+    def generate() -> Iterator[Image.Image]:
+        with doc:
+            for page_index in range(page_count):
+                page = doc.load_page(page_index)
+                pix = page.get_pixmap(matrix=matrix, colorspace=fitz.csRGB, alpha=False)
+                rgb = _pixmap_to_rgb_image(pix)
 
-            width, height = rgb.size
-            current_max_edge = max(width, height)
-            if current_max_edge > max_edge:
-                if width >= height:
-                    new_width = max_edge
-                    new_height = max(1, round(max_edge * height / width))
-                else:
-                    new_height = max_edge
-                    new_width = max(1, round(max_edge * width / height))
-                rgb = rgb.resize(
-                    (int(new_width), int(new_height)),
-                    resample=Image.Resampling.LANCZOS,
-                )
+                width, height = rgb.size
+                current_max_edge = max(width, height)
+                if current_max_edge > max_edge:
+                    if width >= height:
+                        new_width = max_edge
+                        new_height = max(1, round(max_edge * height / width))
+                    else:
+                        new_height = max_edge
+                        new_width = max(1, round(max_edge * width / height))
+                    rgb = rgb.resize(
+                        (int(new_width), int(new_height)),
+                        resample=Image.Resampling.LANCZOS,
+                    )
 
-            images.append(rgb)
+                yield rgb
 
-        return images
+    return page_count, generate()
+
+
+def render_pdf_to_images(
+    pdf_bytes: bytes,
+    *,
+    dpi: int | None = None,
+    max_edge: int | None = None,
+    max_pages: int | None = None,
+    max_bytes: int | None = None,
+) -> list[Image.Image]:
+    _total_pages, images = iter_pdf_images(
+        pdf_bytes,
+        dpi=dpi,
+        max_edge=max_edge,
+        max_pages=max_pages,
+        max_bytes=max_bytes,
+    )
+    return list(images)

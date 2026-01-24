@@ -44,7 +44,10 @@ def test_pdf_to_markdown_rejects_empty_input() -> None:
 
 def test_pdf_to_markdown_reports_progress(monkeypatch: pytest.MonkeyPatch) -> None:
     images = [object(), object(), object()]
-    monkeypatch.setattr("ragprep.pipeline.render_pdf_to_images", lambda _pdf_bytes: images)
+    monkeypatch.setattr(
+        "ragprep.pipeline.iter_pdf_images",
+        lambda _pdf_bytes: (len(images), iter(images)),
+    )
     monkeypatch.setattr("ragprep.pipeline.ocr_image", lambda _image: "ok")
 
     updates: list[PdfToMarkdownProgress] = []
