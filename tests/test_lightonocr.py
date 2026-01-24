@@ -52,8 +52,54 @@ def test_missing_llama_cpp_import_is_actionable(
     monkeypatch.setattr(cli_runtime.shutil, "which", lambda _name: None)
 
     image = Image.new("RGB", (2, 2), color=(0, 0, 0))
-    with pytest.raises(RuntimeError, match="llava-cli"):
+    with pytest.raises(RuntimeError, match="llama-mtmd-cli"):
         lightonocr.ocr_image(image)
+
+
+def test_default_bundled_cli_prefers_mtmd_over_llava(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    import ragprep.ocr.llamacpp_cli_runtime as cli_runtime
+
+    standalone_root = tmp_path / "standalone"
+    module_path = standalone_root / "app" / "ragprep" / "ocr" / "llamacpp_cli_runtime.py"
+    module_path.parent.mkdir(parents=True, exist_ok=True)
+    module_path.write_text("x", encoding="utf-8")
+
+    bin_dir = standalone_root / "bin" / "llama.cpp"
+    bin_dir.mkdir(parents=True, exist_ok=True)
+
+    mtmd = bin_dir / "llama-mtmd-cli.exe"
+    llava = bin_dir / "llava-cli.exe"
+    mtmd.write_text("x", encoding="utf-8")
+    llava.write_text("x", encoding="utf-8")
+
+    monkeypatch.setattr(cli_runtime, "__file__", str(module_path))
+
+    resolved = cli_runtime._default_bundled_llava_cli()
+    assert resolved == mtmd
+
+
+def test_default_bundled_cli_falls_back_to_llava_when_mtmd_missing(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    import ragprep.ocr.llamacpp_cli_runtime as cli_runtime
+
+    standalone_root = tmp_path / "standalone"
+    module_path = standalone_root / "app" / "ragprep" / "ocr" / "llamacpp_cli_runtime.py"
+    module_path.parent.mkdir(parents=True, exist_ok=True)
+    module_path.write_text("x", encoding="utf-8")
+
+    bin_dir = standalone_root / "bin" / "llama.cpp"
+    bin_dir.mkdir(parents=True, exist_ok=True)
+
+    llava = bin_dir / "llava-cli.exe"
+    llava.write_text("x", encoding="utf-8")
+
+    monkeypatch.setattr(cli_runtime, "__file__", str(module_path))
+
+    resolved = cli_runtime._default_bundled_llava_cli()
+    assert resolved == llava
 
 
 def test_prefers_llama_mtmd_cli_when_available_on_path(
