@@ -8,7 +8,7 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 $ProgressPreference = "SilentlyContinue"
 
-# Self-check for the llava-cli based OCR runtime prerequisites. No network access required.
+# Self-check for the llama.cpp multimodal CLI based OCR runtime prerequisites. No network access required.
 #
 # Run:
 #   powershell -ExecutionPolicy Bypass -File scripts/selfcheck-llava-cli-runtime.ps1
@@ -20,7 +20,7 @@ $ProgressPreference = "SilentlyContinue"
 # - Respects the app env vars:
 #   - LIGHTONOCR_GGUF_MODEL_PATH
 #   - LIGHTONOCR_GGUF_MMPROJ_PATH
-#   - LIGHTONOCR_LLAVA_CLI_PATH
+#   - LIGHTONOCR_LLAVA_CLI_PATH (can point to llama-mtmd-cli.exe / llava-cli.exe / llama-llava-cli.exe)
 # - If the GGUF env vars are unset, and a standalone dir is available, this script falls back to:
 #   - <standalone>/data/models/lightonocr-gguf/LightOnOCR-2-1B-Q4_K_M.gguf
 #   - <standalone>/data/models/lightonocr-gguf/LightOnOCR-2-1B-mmproj-f16.gguf
@@ -104,7 +104,7 @@ function Resolve-PathFromRepo {
     return [System.IO.Path]::GetFullPath($p)
 }
 
-function Resolve-LlavaCli {
+function Resolve-MultimodalCli {
     param(
         [Parameter(Mandatory = $true)][string]$RepoRoot,
         [Parameter(Mandatory = $true)][string]$StandaloneDirFull,
@@ -116,13 +116,26 @@ function Resolve-LlavaCli {
         $candidates += $EnvLlavaCliPath
     }
     else {
-        $bundled = Join-Path $StandaloneDirFull "bin\llama.cpp\llava-cli.exe"
-        if (Test-Path -LiteralPath $bundled -PathType Leaf) {
-            $candidates += $bundled
+        $bundledCandidates = @(
+            (Join-Path $StandaloneDirFull "bin\llama.cpp\llama-mtmd-cli.exe"),
+            (Join-Path $StandaloneDirFull "bin\llama.cpp\llava-cli.exe"),
+            (Join-Path $StandaloneDirFull "bin\llama.cpp\llama-llava-cli.exe")
+        )
+        foreach ($bundled in $bundledCandidates) {
+            if (Test-Path -LiteralPath $bundled -PathType Leaf) {
+                $candidates += $bundled
+            }
         }
     }
 
-    $candidates += @("llava-cli", "llava-cli.exe", "llama-llava-cli", "llama-llava-cli.exe")
+    $candidates += @(
+        "llama-mtmd-cli",
+        "llama-mtmd-cli.exe",
+        "llava-cli",
+        "llava-cli.exe",
+        "llama-llava-cli",
+        "llama-llava-cli.exe"
+    )
 
     foreach ($candidate in $candidates) {
         if ([string]::IsNullOrWhiteSpace($candidate)) {
@@ -142,12 +155,60 @@ function Resolve-LlavaCli {
     }
 
     throw (
-        "llava-cli executable not found.`n" +
+        "llama.cpp multimodal CLI executable not found.`n" +
         "Fix:`n" +
-        "  - Set LIGHTONOCR_LLAVA_CLI_PATH to the full path of llava-cli(.exe) (or llama-llava-cli(.exe))`n" +
+        "  - Set LIGHTONOCR_LLAVA_CLI_PATH to the full path of llama-mtmd-cli(.exe)`n" +
+        "    (or llava-cli(.exe) / llama-llava-cli(.exe))`n" +
         "  - Or ensure it is available on PATH.`n" +
-        "  - If using the standalone build, confirm <standalone>\\bin\\llama.cpp\\llava-cli.exe exists."
+        "  - If using the standalone build, confirm <standalone>\\bin\\llama.cpp\\llama-mtmd-cli.exe exists."
     )
+}
+
+function Invoke-CliHelp {
+    param(
+        [Parameter(Mandatory = $true)][string]$ExePath
+    )
+
+    $helpOutput = & $ExePath --help 2>&1
+    $helpExitCode = $LASTEXITCODE
+
+    $lines = @()
+    if ($helpOutput) {
+        $lines = ($helpOutput | ForEach-Object { $_.ToString() })
+    }
+
+    $combined = ""
+    if ($lines) {
+        $combined = ($lines -join "`n").Trim()
+    }
+
+    return [pscustomobject]@{
+        ExitCode = $helpExitCode
+        Lines    = $lines
+        Text     = $combined
+    }
+}
+
+function Test-DeprecatedLlavaShim {
+    param(
+        [AllowEmptyString()][string]$Text = ""
+    )
+
+    if ([string]::IsNullOrWhiteSpace($Text)) {
+        return $false
+    }
+    return ($Text -match '(?i)deprecated' -and $Text -match '(?i)llama-mtmd-cli')
+}
+
+function Test-HelpLooksValid {
+    param(
+        [AllowEmptyString()][string]$Text = ""
+    )
+
+    if ([string]::IsNullOrWhiteSpace($Text)) {
+        return $false
+    }
+    return ($Text -match '(?m)^Usage:' -or $Text -match '(?i)--mmproj' -or $Text -match '(?i)--image')
 }
 
 $repoRoot = Resolve-Path (Join-Path $PSScriptRoot "..")
@@ -190,52 +251,62 @@ Assert-True (Test-Path -LiteralPath $mmprojPath -PathType Leaf) "GGUF mmproj fil
 Write-Host "Model:  $modelPath" -ForegroundColor Green
 Write-Host "Mmproj: $mmprojPath" -ForegroundColor Green
 
-$llavaCli = Resolve-LlavaCli -RepoRoot $repoRoot -StandaloneDirFull $StandaloneDir -EnvLlavaCliPath $envLlavaRaw
-Write-Host "llava-cli: $llavaCli" -ForegroundColor Green
+$cli = Resolve-MultimodalCli -RepoRoot $repoRoot -StandaloneDirFull $StandaloneDir -EnvLlavaCliPath $envLlavaRaw
+Write-Host "multimodal-cli: $cli" -ForegroundColor Green
 
 Write-Host ""  # spacer
-Write-Host "Running: $llavaCli --help" -ForegroundColor Cyan
-$helpOutput = & $llavaCli --help 2>&1
-$helpExitCode = $LASTEXITCODE
-Write-Host "exit_code: $helpExitCode" -ForegroundColor Cyan
+Write-Host "Running: $cli --help" -ForegroundColor Cyan
+$result = Invoke-CliHelp -ExePath $cli
+Write-Host "exit_code: $($result.ExitCode)" -ForegroundColor Cyan
 
-if ($helpOutput) {
-    ($helpOutput | ForEach-Object { $_.ToString() }) | Write-Host
+if ($result.Lines) {
+    ($result.Lines | ForEach-Object { $_.ToString() }) | Write-Host
 }
 
-if ($helpExitCode -ne 0) {
-    $combined = ""
-    if ($helpOutput) {
-        $combined = ($helpOutput | ForEach-Object { $_.ToString() }) -join "`n"
-    }
+if (Test-DeprecatedLlavaShim -Text $result.Text) {
+    Write-Warning "Detected a deprecated llava-cli shim. Switching to llama-mtmd-cli for re-check."
 
-    if ($combined -match '(?i)deprecated' -and $combined -match '(?i)llama-mtmd-cli') {
-        Write-Warning "Detected a deprecated llava-cli shim. Your bundle may require llama-mtmd-cli instead."
-        $mtmdSibling = Join-Path (Split-Path -Parent $llavaCli) "llama-mtmd-cli.exe"
-        if (Test-Path -LiteralPath $mtmdSibling -PathType Leaf) {
-            Write-Host "Found llama-mtmd-cli next to llava-cli: $mtmdSibling" -ForegroundColor Yellow
-        }
-        else {
-            $mtmdCmd = Get-Command "llama-mtmd-cli" -ErrorAction SilentlyContinue
-            if ($mtmdCmd -and -not [string]::IsNullOrWhiteSpace($mtmdCmd.Source)) {
-                Write-Host "Found llama-mtmd-cli on PATH: $($mtmdCmd.Source)" -ForegroundColor Yellow
-            }
-            else {
-                Write-Host "llama-mtmd-cli not found next to llava-cli and not on PATH." -ForegroundColor Yellow
-            }
+    $mtmdSibling = Join-Path (Split-Path -Parent $cli) "llama-mtmd-cli.exe"
+    $mtmdCandidate = ""
+    if (Test-Path -LiteralPath $mtmdSibling -PathType Leaf) {
+        $mtmdCandidate = $mtmdSibling
+        Write-Host "Found llama-mtmd-cli next to the shim: $mtmdCandidate" -ForegroundColor Yellow
+    }
+    else {
+        $mtmdCmd = Get-Command "llama-mtmd-cli" -ErrorAction SilentlyContinue
+        if ($mtmdCmd -and -not [string]::IsNullOrWhiteSpace($mtmdCmd.Source)) {
+            $mtmdCandidate = $mtmdCmd.Source
+            Write-Host "Found llama-mtmd-cli on PATH: $mtmdCandidate" -ForegroundColor Yellow
         }
     }
 
+    if (-not [string]::IsNullOrWhiteSpace($mtmdCandidate)) {
+        Write-Host ""  # spacer
+        Write-Host "Re-check: $mtmdCandidate --help" -ForegroundColor Cyan
+        $result = Invoke-CliHelp -ExePath $mtmdCandidate
+        Write-Host "exit_code: $($result.ExitCode)" -ForegroundColor Cyan
+        if ($result.Lines) {
+            ($result.Lines | ForEach-Object { $_.ToString() }) | Write-Host
+        }
+        $cli = $mtmdCandidate
+    }
+    else {
+        Write-Host "llama-mtmd-cli not found next to the shim and not on PATH." -ForegroundColor Yellow
+    }
+}
+
+$helpValid = Test-HelpLooksValid -Text $result.Text
+if (-not $helpValid) {
     Write-Host ""  # spacer
     Write-Host "Fix:" -ForegroundColor Yellow
-    Write-Host "  - Ensure the resolved llava-cli path points to a working executable."
+    Write-Host "  - Ensure LIGHTONOCR_LLAVA_CLI_PATH points to a working llama.cpp multimodal CLI (recommended: llama-mtmd-cli.exe)."
     Write-Host "  - If using the standalone build, ensure required llama.cpp DLLs are next to the executable under <standalone>\\bin\\llama.cpp\\."
-    Write-Host "  - If you see a deprecation warning telling you to use llama-mtmd-cli, update the bundle/runtime to use llama-mtmd-cli."
+    Write-Host "  - If you see a deprecation warning telling you to use llama-mtmd-cli, rebuild the standalone bundle (or install llama.cpp and set LIGHTONOCR_LLAVA_CLI_PATH)."
 
-    Write-Error "llava-cli --help failed with exit code $helpExitCode"
-    exit $helpExitCode
+    Write-Error "multimodal CLI --help did not look valid (exit_code=$($result.ExitCode))."
+    exit 1
 }
 
 Write-Host ""  # spacer
-Write-Host "OK: llava-cli launches and GGUF paths are present." -ForegroundColor Green
-Write-Host "OK: llava-cli runtime self-check completed." -ForegroundColor Green
+Write-Host "OK: multimodal CLI launches and GGUF paths are present." -ForegroundColor Green
+Write-Host "OK: multimodal CLI runtime self-check completed." -ForegroundColor Green
