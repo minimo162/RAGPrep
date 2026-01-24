@@ -59,6 +59,7 @@ def test_convert_creates_job_and_downloads_markdown(monkeypatch: pytest.MonkeyPa
     assert response.status_code == 200
     job_id = _extract_job_id(response.text)
     assert f"/jobs/{job_id}/status" in response.text
+    assert "<progress" in response.text
 
     for _ in range(20):
         result = client.get(f"/jobs/{job_id}/result")

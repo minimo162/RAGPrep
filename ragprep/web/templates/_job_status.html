@@ -6,8 +6,18 @@
     hx-trigger="load, every 1s"
     hx-swap="outerHTML"
   >
-    <p class="muted">Job {{ job.id }} — {{ job.status.value }}</p>
-    <p class="muted">Processing…</p>
+    <p class="muted">Job {{ job.id }} - {{ job.status.value }}</p>
+    <p class="muted">Phase: {{ job.phase or job.status.value }}</p>
+    {% if job.total_pages > 0 %}
+      <progress class="progress" value="{{ job.processed_pages }}" max="{{ job.total_pages }}"></progress>
+      <p class="muted">Page {{ job.processed_pages }} / {{ job.total_pages }}</p>
+    {% else %}
+      <progress class="progress"></progress>
+      <p class="muted">Preparing...</p>
+    {% endif %}
+    {% if job.progress_message %}
+      <p class="muted">{{ job.progress_message }}</p>
+    {% endif %}
   </div>
 {% elif job.status == "done" %}
   <div
@@ -17,11 +27,11 @@
     hx-trigger="load"
     hx-swap="outerHTML"
   >
-    <p class="muted">Job {{ job.id }} — done. Loading result…</p>
+    <p class="muted">Job {{ job.id }} - done. Loading result...</p>
   </div>
 {% else %}
   <div class="job" data-job-id="{{ job.id }}">
-    <p class="muted">Job {{ job.id }} — {{ job.status.value }}</p>
+    <p class="muted">Job {{ job.id }} - {{ job.status.value }}</p>
     <div class="error">{{ job.error or "Conversion failed." }}</div>
   </div>
 {% endif %}

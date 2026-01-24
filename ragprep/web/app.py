@@ -15,7 +15,7 @@ from fastapi.templating import Jinja2Templates
 from starlette.responses import Response
 
 from ragprep.config import get_settings
-from ragprep.pipeline import pdf_to_markdown
+from ragprep.pipeline import PdfToMarkdownProgress, pdf_to_markdown
 
 TEMPLATES_DIR = Path(__file__).resolve().parent / "templates"
 STATIC_DIR = Path(__file__).resolve().parent / "static"
@@ -39,6 +39,10 @@ class Job:
     id: str
     filename: str
     status: JobStatus
+    phase: str | None = None
+    processed_pages: int = 0
+    total_pages: int = 0
+    progress_message: str | None = None
     markdown: str | None = None
     error: str | None = None
 
@@ -90,14 +94,32 @@ def _get_job_semaphore() -> Semaphore:
 def _run_job(job_id: str, pdf_bytes: bytes) -> None:
     semaphore = _get_job_semaphore()
     with semaphore:
-        jobs.update(job_id, status=JobStatus.running, error=None)
+        jobs.update(
+            job_id,
+            status=JobStatus.running,
+            error=None,
+            phase="starting",
+            processed_pages=0,
+            total_pages=0,
+            progress_message=None,
+        )
+
+        def on_progress(update: PdfToMarkdownProgress) -> None:
+            jobs.update(
+                job_id,
+                phase=update.phase.value,
+                processed_pages=update.current,
+                total_pages=update.total,
+                progress_message=update.message,
+            )
+
         try:
-            markdown = pdf_to_markdown(pdf_bytes)
+            markdown = pdf_to_markdown(pdf_bytes, on_progress=on_progress)
         except Exception as exc:  # noqa: BLE001
             logger.exception("Job %s failed", job_id)
-            jobs.update(job_id, status=JobStatus.error, error=str(exc))
+            jobs.update(job_id, status=JobStatus.error, phase="error", error=str(exc))
             return
-        jobs.update(job_id, status=JobStatus.done, markdown=markdown, error=None)
+        jobs.update(job_id, status=JobStatus.done, phase="done", markdown=markdown, error=None)
 
 
 @app.get("/", response_class=HTMLResponse)
