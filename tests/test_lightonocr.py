@@ -36,6 +36,36 @@ def test_missing_gguf_paths_raise_actionable_error(monkeypatch: pytest.MonkeyPat
     assert lightonocr.ENV_GGUF_MMPROJ_PATH in message
 
 
+@pytest.mark.parametrize(
+    ("env_name", "bad_value"),
+    [
+        (lightonocr.ENV_LLAMA_TEMP, "not-a-float"),
+        (lightonocr.ENV_LLAMA_REPEAT_PENALTY, "not-a-float"),
+        (lightonocr.ENV_LLAMA_REPEAT_LAST_N, "not-an-int"),
+        (lightonocr.ENV_LLAMA_N_CTX, "not-an-int"),
+        (lightonocr.ENV_LLAMA_N_GPU_LAYERS, "not-an-int"),
+    ],
+)
+def test_llama_param_env_validation_is_actionable(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, env_name: str, bad_value: str
+) -> None:
+    model_path = tmp_path / "model.gguf"
+    mmproj_path = tmp_path / "mmproj.gguf"
+    model_path.write_text("x", encoding="utf-8")
+    mmproj_path.write_text("y", encoding="utf-8")
+
+    monkeypatch.delenv(lightonocr.ENV_DRY_RUN, raising=False)
+    monkeypatch.setenv(lightonocr.ENV_GGUF_MODEL_PATH, str(model_path))
+    monkeypatch.setenv(lightonocr.ENV_GGUF_MMPROJ_PATH, str(mmproj_path))
+    monkeypatch.setenv(env_name, bad_value)
+
+    with pytest.raises(ValueError) as excinfo:
+        lightonocr.get_settings()
+
+    message = str(excinfo.value)
+    assert env_name in message
+
+
 def test_missing_llama_cpp_import_is_actionable(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -236,6 +266,9 @@ def test_llama_cpp_executes_with_mock_and_is_cached(
     assert argv[argv.index("-c") + 1] == "1234"
     assert argv[argv.index("-t") + 1] == "2"
     assert argv[argv.index("-ngl") + 1] == "7"
+    assert argv[argv.index("--temp") + 1] == "0.2"
+    assert argv[argv.index("--repeat-penalty") + 1] == "1.15"
+    assert argv[argv.index("--repeat-last-n") + 1] == "128"
 
 
 def test_llava_cli_nonzero_exit_is_actionable(

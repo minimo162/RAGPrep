@@ -22,6 +22,9 @@ class LlamaCppCliSettings:
     n_ctx: int | None
     n_threads: int | None
     n_gpu_layers: int | None
+    temp: float | None = None
+    repeat_penalty: float | None = None
+    repeat_last_n: int | None = None
 
 
 def _validate_paths(settings: LlamaCppCliSettings) -> None:
@@ -203,6 +206,13 @@ def _build_argv(
         "-n",
         str(max_new_tokens),
     ]
+
+    if settings.temp is not None:
+        argv.extend(["--temp", str(settings.temp)])
+    if settings.repeat_penalty is not None:
+        argv.extend(["--repeat-penalty", str(settings.repeat_penalty)])
+    if settings.repeat_last_n is not None:
+        argv.extend(["--repeat-last-n", str(settings.repeat_last_n)])
 
     if settings.n_ctx is not None:
         argv.extend(["-c", str(settings.n_ctx)])
