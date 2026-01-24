@@ -16,6 +16,13 @@ Required env vars (real OCR):
 Optional env vars:
 - `LIGHTONOCR_LLAVA_CLI_PATH` (path to a working `llama-mtmd-cli(.exe)`, `llava-cli(.exe)` or `llama-llava-cli(.exe)`)
 - `LIGHTONOCR_IMAGE_TMP_DIR` (override temp dir for OCR images; helps with non-ASCII temp paths)
+- `LIGHTONOCR_MAX_NEW_TOKENS` (default: `1000`)
+- `LIGHTONOCR_LLAMA_N_CTX` (default: `4096`)
+- `LIGHTONOCR_LLAMA_N_THREADS` (optional)
+- `LIGHTONOCR_LLAMA_N_GPU_LAYERS` (default: `99`)
+- `LIGHTONOCR_LLAMA_TEMP` (default: `0.2`)
+- `LIGHTONOCR_LLAMA_REPEAT_PENALTY` (default: `1.15`)
+- `LIGHTONOCR_LLAMA_REPEAT_LAST_N` (default: `128`)
 - `LIGHTONOCR_DRY_RUN=1` (verify end-to-end flow without inference)
 
 If the error includes a deprecation warning like:
@@ -32,6 +39,41 @@ Then you are pointing at a deprecated `llava-cli` shim. Fix options:
 
 LightOnOCR-2-1B（GGUF + llama.cpp）を使った PDF -> Markdown 変換アプリ（FastAPI + htmx）のスキャフォールドです。
 
+## 推奨パラメータ（llama-mtmd-cli）
+このプロジェクトは `ragprep/ocr/lightonocr.py` から llama.cpp CLI（`llama-mtmd-cli`）を呼び出します。
+以下は intent の推奨値で、環境変数未設定時のデフォルトとして適用されます（必要に応じて env で上書き可能）。
+
+| Parameter | Value | Description |
+|-----------|-------|-------------|
+| `--temp` | 0.2 | Official recommended temperature |
+| `--repeat-penalty` | 1.15 | Prevents repetition (1.1-1.2 optimal) |
+| `--repeat-last-n` | 128 | Tokens to consider for penalty |
+| `-n` | 1000 | Max output tokens (avoid >1500) |
+| `-ngl` | 99 | GPU layers (use all for best speed) |
+
+Parameter notes:
+- **repeat-penalty**: 1.2 を超えると OCR 品質が落ちる可能性があります
+- **-n (max tokens)**: 末尾の繰り返しを避けるため、`~1000` 程度に制限するのがおすすめです
+
+環境変数の対応（抜粋）:
+- `LIGHTONOCR_MAX_NEW_TOKENS` -> `-n`
+- `LIGHTONOCR_LLAMA_N_CTX` -> `-c`
+- `LIGHTONOCR_LLAMA_N_THREADS` -> `-t`
+- `LIGHTONOCR_LLAMA_N_GPU_LAYERS` -> `-ngl`
+- `LIGHTONOCR_LLAMA_TEMP` -> `--temp`
+- `LIGHTONOCR_LLAMA_REPEAT_PENALTY` -> `--repeat-penalty`
+- `LIGHTONOCR_LLAMA_REPEAT_LAST_N` -> `--repeat-last-n`
+
+## 画像前処理（PDF -> PNG）
+PDF は PyMuPDF でレンダリングした後、最終的に「最長辺 N px」になるようリサイズされます。
+- `RAGPREP_RENDER_MAX_EDGE`（デフォルト: `1540`）
+
+## GUIの進捗表示
+Web UI（`/`）は HTMX のポーリング（1秒間隔）で進捗を更新し、以下を表示します。
+- Phase: `starting` / `rendering` / `ocr` / `done` / `error`
+- Page: `x / y`
+- progress bar（ページ総数が確定するまでは indeterminate）
+
 ## 開発環境
 - `uv` のインストール: https://docs.astral.sh/uv/
 - 依存関係のインストール: `uv sync --dev`
@@ -46,13 +88,16 @@ PDF -> 画像 -> LightOnOCR（GGUF + llama.cpp）-> Markdown を実行し、出�
 - 出力: `path/to/file.md`（`--out ...` と `--overwrite` を使用）
 
 環境変数:
-- `LIGHTONOCR_MAX_NEW_TOKENS`（デフォルト: `1024`）
+- `LIGHTONOCR_MAX_NEW_TOKENS`（デフォルト: `1000`）
 - `LIGHTONOCR_DRY_RUN`（truthy で実推論をスキップ）
 - `LIGHTONOCR_GGUF_MODEL_PATH`（必須: `LightOnOCR-2-1B-Q4_K_M.gguf`）
 - `LIGHTONOCR_GGUF_MMPROJ_PATH`（必須: `LightOnOCR-2-1B-mmproj-f16.gguf`）
-- `LIGHTONOCR_LLAMA_N_CTX`（任意: int）
+- `LIGHTONOCR_LLAMA_N_CTX`（任意: int、未設定時は `4096`）
 - `LIGHTONOCR_LLAMA_N_THREADS`（任意: int）
-- `LIGHTONOCR_LLAMA_N_GPU_LAYERS`（任意: int）
+- `LIGHTONOCR_LLAMA_N_GPU_LAYERS`（任意: int、未設定時は `99`）
+- `LIGHTONOCR_LLAMA_TEMP`（任意: float、未設定時は `0.2`）
+- `LIGHTONOCR_LLAMA_REPEAT_PENALTY`（任意: float、未設定時は `1.15`）
+- `LIGHTONOCR_LLAMA_REPEAT_LAST_N`（任意: int、未設定時は `128`）
 - `HF_HOME`（Hugging Face のキャッシュ場所。スタンドアロンは未指定時に `dist/standalone/data/hf` を使用）
 
 ### GGUF + llama.cpp（既定）
