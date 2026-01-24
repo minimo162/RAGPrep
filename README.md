@@ -14,7 +14,7 @@ Required env vars (real OCR):
 - `LIGHTONOCR_GGUF_MMPROJ_PATH` (mmproj .gguf)
 
 Optional env vars:
-- `LIGHTONOCR_LLAVA_CLI_PATH` (path to a working `llava-cli(.exe)` or `llama-llava-cli(.exe)`)
+- `LIGHTONOCR_LLAVA_CLI_PATH` (path to a working `llama-mtmd-cli(.exe)`, `llava-cli(.exe)` or `llama-llava-cli(.exe)`)
 - `LIGHTONOCR_IMAGE_TMP_DIR` (override temp dir for OCR images; helps with non-ASCII temp paths)
 - `LIGHTONOCR_DRY_RUN=1` (verify end-to-end flow without inference)
 
@@ -26,6 +26,7 @@ Please use 'llama-mtmd-cli' instead.
 ```
 
 Then you are pointing at a deprecated `llava-cli` shim. Fix options:
+- Point `LIGHTONOCR_LLAVA_CLI_PATH` to `llama-mtmd-cli.exe` from your llama.cpp release (recommended for newer llama.cpp).
 - Point `LIGHTONOCR_LLAVA_CLI_PATH` to `llama-llava-cli.exe` from your llama.cpp release (this project already searches for it), or install/upgrade llama.cpp so `llava-cli` works.
 - For the standalone bundle, ensure the actual llama.cpp CLI + required DLLs are present under `dist/standalone/bin/llama.cpp/` (the self-check prints what it resolved).
 
