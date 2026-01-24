@@ -4,7 +4,7 @@ from typing import cast
 
 import pytest
 
-from ragprep.pipeline import pdf_to_markdown
+from ragprep.pipeline import PdfToMarkdownProgress, ProgressPhase, pdf_to_markdown
 
 
 def _make_pdf_bytes(page_count: int) -> bytes:
@@ -40,3 +40,26 @@ def test_pdf_to_markdown_concatenates_pages_and_normalizes_newlines(
 def test_pdf_to_markdown_rejects_empty_input() -> None:
     with pytest.raises(ValueError, match="pdf_bytes is empty"):
         pdf_to_markdown(b"")
+
+
+def test_pdf_to_markdown_reports_progress(monkeypatch: pytest.MonkeyPatch) -> None:
+    images = [object(), object(), object()]
+    monkeypatch.setattr("ragprep.pipeline.render_pdf_to_images", lambda _pdf_bytes: images)
+    monkeypatch.setattr("ragprep.pipeline.ocr_image", lambda _image: "ok")
+
+    updates: list[PdfToMarkdownProgress] = []
+
+    def on_progress(update: PdfToMarkdownProgress) -> None:
+        updates.append(update)
+
+    assert pdf_to_markdown(b"pdf", on_progress=on_progress) == "ok\n\nok\n\nok"
+
+    assert [(u.phase, u.current, u.total) for u in updates] == [
+        (ProgressPhase.rendering, 0, 0),
+        (ProgressPhase.rendering, 3, 3),
+        (ProgressPhase.ocr, 0, 3),
+        (ProgressPhase.ocr, 1, 3),
+        (ProgressPhase.ocr, 2, 3),
+        (ProgressPhase.ocr, 3, 3),
+        (ProgressPhase.done, 3, 3),
+    ]
