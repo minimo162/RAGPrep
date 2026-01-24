@@ -406,3 +406,124 @@ def test_llava_cli_image_temp_dir_override(monkeypatch: pytest.MonkeyPatch, tmp_
     assert cli_runtime.ocr_image(image=image, settings=settings, max_new_tokens=7) == "OK"
     assert override_dir.is_dir()
     assert captured_image_parents == [override_dir]
+
+
+def test_backend_env_validation_is_actionable(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv(lightonocr.ENV_DRY_RUN, raising=False)
+    monkeypatch.setenv(lightonocr.ENV_BACKEND, "not-a-backend")
+
+    image = Image.new("RGB", (2, 2), color=(0, 0, 0))
+    with pytest.raises(ValueError) as excinfo:
+        lightonocr.ocr_image(image)
+
+    message = str(excinfo.value)
+    assert lightonocr.ENV_BACKEND in message
+    assert "cli" in message
+    assert "python" in message
+
+
+def test_python_backend_uses_llamacpp_runtime_and_is_cached(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    import ragprep.ocr.llamacpp_runtime as py_runtime
+
+    py_runtime._get_runtime_cached.cache_clear()
+
+    model_path = tmp_path / "model.gguf"
+    mmproj_path = tmp_path / "mmproj.gguf"
+    model_path.write_text("x", encoding="utf-8")
+    mmproj_path.write_text("y", encoding="utf-8")
+
+    monkeypatch.delenv(lightonocr.ENV_DRY_RUN, raising=False)
+    monkeypatch.setenv(lightonocr.ENV_BACKEND, "python")
+    monkeypatch.setenv(lightonocr.ENV_GGUF_MODEL_PATH, str(model_path))
+    monkeypatch.setenv(lightonocr.ENV_GGUF_MMPROJ_PATH, str(mmproj_path))
+    monkeypatch.setenv(lightonocr.ENV_LLAMA_TEMP, "0.7")
+    monkeypatch.setenv(lightonocr.ENV_LLAMA_REPEAT_PENALTY, "1.25")
+    monkeypatch.setenv(lightonocr.ENV_LLAMA_REPEAT_LAST_N, "42")
+    monkeypatch.setenv(lightonocr.ENV_MAX_NEW_TOKENS, "7")
+
+    def should_not_use_cli(*_args: object, **_kwargs: object) -> str:
+        raise AssertionError("CLI backend should not be used when LIGHTONOCR_BACKEND=python")
+
+    monkeypatch.setattr(lightonocr, "ocr_image_llama_cpp_cli", should_not_use_cli)
+
+    import_calls: dict[str, int] = {"n": 0}
+    create_calls: list[dict[str, object]] = []
+
+    class FakeChatHandler:
+        def __init__(self, clip_model_path: str) -> None:
+            self.clip_model_path = clip_model_path
+
+    class FakeLlama:
+        def __init__(self, model_path: str, chat_handler: object, **_kwargs: object) -> None:
+            self.model_path = model_path
+            self.chat_handler = chat_handler
+
+        def create_chat_completion(
+            self,
+            *,
+            messages: object,
+            max_tokens: int,
+            temperature: float | None = None,
+            repeat_penalty: float | None = None,
+            repeat_last_n: int | None = None,
+        ) -> dict[str, object]:
+            create_calls.append(
+                {
+                    "messages": messages,
+                    "max_tokens": max_tokens,
+                    "temperature": temperature,
+                    "repeat_penalty": repeat_penalty,
+                    "repeat_last_n": repeat_last_n,
+                }
+            )
+            return {"choices": [{"message": {"content": "OK"}}]}
+
+    def fake_import_llama_cpp() -> tuple[object, object]:
+        import_calls["n"] += 1
+        return FakeLlama, FakeChatHandler
+
+    monkeypatch.setattr(py_runtime, "_import_llama_cpp", fake_import_llama_cpp)
+
+    image = Image.new("RGB", (2, 2), color=(0, 0, 0))
+    assert lightonocr.ocr_image(image) == "OK"
+    assert lightonocr.ocr_image(image) == "OK"
+
+    assert import_calls["n"] == 1
+    assert len(create_calls) == 2
+    assert create_calls[0]["max_tokens"] == 7
+    assert create_calls[0]["temperature"] == 0.7
+    assert create_calls[0]["repeat_penalty"] == 1.25
+    assert create_calls[0]["repeat_last_n"] == 42
+
+
+def test_python_backend_import_error_is_actionable(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    import ragprep.ocr.llamacpp_runtime as py_runtime
+
+    py_runtime._get_runtime_cached.cache_clear()
+
+    model_path = tmp_path / "model.gguf"
+    mmproj_path = tmp_path / "mmproj.gguf"
+    model_path.write_text("x", encoding="utf-8")
+    mmproj_path.write_text("y", encoding="utf-8")
+
+    monkeypatch.delenv(lightonocr.ENV_DRY_RUN, raising=False)
+    monkeypatch.setenv(lightonocr.ENV_BACKEND, "python")
+    monkeypatch.setenv(lightonocr.ENV_GGUF_MODEL_PATH, str(model_path))
+    monkeypatch.setenv(lightonocr.ENV_GGUF_MMPROJ_PATH, str(mmproj_path))
+
+    def raise_import_error() -> tuple[object, object]:
+        raise ImportError("llama-cpp-python missing")
+
+    monkeypatch.setattr(py_runtime, "_import_llama_cpp", raise_import_error)
+
+    image = Image.new("RGB", (2, 2), color=(0, 0, 0))
+    with pytest.raises(RuntimeError) as excinfo:
+        lightonocr.ocr_image(image)
+
+    message = str(excinfo.value)
+    assert "llama-cpp-python missing" in message
+    assert f"{lightonocr.ENV_BACKEND}=cli" in message

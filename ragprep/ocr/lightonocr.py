@@ -21,6 +21,7 @@ ENV_LLAMA_N_GPU_LAYERS = "LIGHTONOCR_LLAMA_N_GPU_LAYERS"
 ENV_LLAMA_TEMP = "LIGHTONOCR_LLAMA_TEMP"
 ENV_LLAMA_REPEAT_PENALTY = "LIGHTONOCR_LLAMA_REPEAT_PENALTY"
 ENV_LLAMA_REPEAT_LAST_N = "LIGHTONOCR_LLAMA_REPEAT_LAST_N"
+ENV_BACKEND = "LIGHTONOCR_BACKEND"
 
 DRY_RUN_OUTPUT = "LIGHTONOCR_DRY_RUN=1 (no inference)"
 
@@ -168,9 +169,7 @@ def get_settings() -> LightOnOCRSettings:
     if llama_repeat_penalty is None:
         llama_repeat_penalty = DEFAULT_LLAMA_REPEAT_PENALTY
     if llama_repeat_penalty <= 0:
-        raise ValueError(
-            f"{ENV_LLAMA_REPEAT_PENALTY} must be > 0, got: {llama_repeat_penalty}"
-        )
+        raise ValueError(f"{ENV_LLAMA_REPEAT_PENALTY} must be > 0, got: {llama_repeat_penalty}")
 
     llama_repeat_last_n = _parse_optional_int_env(ENV_LLAMA_REPEAT_LAST_N)
     if llama_repeat_last_n is None:
@@ -199,11 +198,26 @@ def _env_truthy(name: str) -> bool:
     return value.strip().lower() in {"1", "true", "t", "yes", "y", "on"}
 
 
+def _get_backend() -> str:
+    raw = os.getenv(ENV_BACKEND)
+    if raw is None or not raw.strip():
+        return "cli"
+
+    value = raw.strip().lower()
+    if value in {"cli"}:
+        return "cli"
+    if value in {"python", "py"}:
+        return "python"
+
+    raise ValueError(f"{ENV_BACKEND} must be one of: cli, python (got: {raw!r})")
+
+
 def ocr_image(image: Image.Image) -> str:
     """
     Run LightOnOCR on a single image and return extracted Markdown/text.
 
     Environment variables:
+    - LIGHTONOCR_BACKEND: optional backend selector (`cli` or `python`; default: `cli`)
     - LIGHTONOCR_GGUF_MODEL_PATH: required path to a local .gguf model file
     - LIGHTONOCR_GGUF_MMPROJ_PATH: required path to a local mmproj .gguf file
     - LIGHTONOCR_LLAVA_CLI_PATH: optional path to `llama-mtmd-cli` / `llava-cli`
@@ -221,8 +235,35 @@ def ocr_image(image: Image.Image) -> str:
     if _env_truthy(ENV_DRY_RUN):
         return DRY_RUN_OUTPUT
 
+    backend = _get_backend()
     settings = get_settings()
-    llama_settings = LlamaCppCliSettings(
+
+    if backend == "python":
+        from .llamacpp_runtime import LlamaCppSettings
+        from .llamacpp_runtime import ocr_image as ocr_image_llama_cpp_python
+
+        python_settings = LlamaCppSettings(
+            model_path=settings.gguf_model_path,
+            mmproj_path=settings.gguf_mmproj_path,
+            n_ctx=settings.llama_n_ctx,
+            n_threads=settings.llama_n_threads,
+            n_gpu_layers=settings.llama_n_gpu_layers,
+        )
+        try:
+            return ocr_image_llama_cpp_python(
+                image=image,
+                settings=python_settings,
+                max_new_tokens=settings.max_new_tokens,
+                temperature=settings.llama_temp,
+                repeat_penalty=settings.llama_repeat_penalty,
+                repeat_last_n=settings.llama_repeat_last_n,
+            )
+        except ImportError as exc:
+            raise RuntimeError(
+                f"{exc}\n\n(If you prefer the subprocess CLI backend, set {ENV_BACKEND}=cli.)"
+            ) from exc
+
+    cli_settings = LlamaCppCliSettings(
         llava_cli_path=settings.llava_cli_path,
         model_path=settings.gguf_model_path,
         mmproj_path=settings.gguf_mmproj_path,
@@ -235,6 +276,6 @@ def ocr_image(image: Image.Image) -> str:
     )
     return ocr_image_llama_cpp_cli(
         image=image,
-        settings=llama_settings,
+        settings=cli_settings,
         max_new_tokens=settings.max_new_tokens,
     )

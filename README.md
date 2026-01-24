@@ -14,6 +14,7 @@ Required env vars (real OCR):
 - `LIGHTONOCR_GGUF_MMPROJ_PATH` (mmproj .gguf)
 
 Optional env vars:
+- `LIGHTONOCR_BACKEND` (default: `cli`; `cli` = subprocess CLI per page, `python` = in-process llama-cpp-python runtime)
 - `LIGHTONOCR_LLAVA_CLI_PATH` (path to a working `llama-mtmd-cli(.exe)`, `llava-cli(.exe)` or `llama-llava-cli(.exe)`)
 - `LIGHTONOCR_IMAGE_TMP_DIR` (override temp dir for OCR images; helps with non-ASCII temp paths)
 - `LIGHTONOCR_MAX_NEW_TOKENS` (default: `1000`)

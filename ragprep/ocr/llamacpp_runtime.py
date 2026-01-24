@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib
+import inspect
 import tempfile
 import threading
 from dataclasses import dataclass
@@ -105,7 +106,58 @@ def _get_runtime_cached(
     return _Runtime(llama=llama, lock=threading.Lock())
 
 
-def ocr_image(*, image: Image.Image, settings: LlamaCppSettings, max_new_tokens: int) -> str:
+def _create_chat_completion(
+    llama: Any,
+    *,
+    messages: list[dict[str, Any]],
+    max_tokens: int,
+    temperature: float | None,
+    repeat_penalty: float | None,
+    repeat_last_n: int | None,
+) -> Any:
+    create_chat_completion = getattr(llama, "create_chat_completion", None)
+    if create_chat_completion is None:
+        raise RuntimeError("llama_cpp.Llama.create_chat_completion not found.")
+
+    try:
+        signature = inspect.signature(create_chat_completion)
+    except (TypeError, ValueError):
+        return create_chat_completion(messages=messages, max_tokens=max_tokens)
+
+    parameters = signature.parameters
+    has_varkw = any(param.kind == inspect.Parameter.VAR_KEYWORD for param in parameters.values())
+
+    def supported(name: str) -> bool:
+        return has_varkw or name in parameters
+
+    kwargs: dict[str, Any] = {"messages": messages, "max_tokens": max_tokens}
+
+    if temperature is not None:
+        if supported("temperature"):
+            kwargs["temperature"] = temperature
+        elif supported("temp"):
+            kwargs["temp"] = temperature
+
+    if repeat_penalty is not None and supported("repeat_penalty"):
+        kwargs["repeat_penalty"] = repeat_penalty
+    if repeat_last_n is not None and supported("repeat_last_n"):
+        kwargs["repeat_last_n"] = repeat_last_n
+
+    if not has_varkw:
+        kwargs = {k: v for k, v in kwargs.items() if k in parameters}
+
+    return create_chat_completion(**kwargs)
+
+
+def ocr_image(
+    *,
+    image: Image.Image,
+    settings: LlamaCppSettings,
+    max_new_tokens: int,
+    temperature: float | None = None,
+    repeat_penalty: float | None = None,
+    repeat_last_n: int | None = None,
+) -> str:
     _validate_paths(settings)
     runtime = _get_runtime_cached(
         settings.model_path,
@@ -135,9 +187,13 @@ def ocr_image(*, image: Image.Image, settings: LlamaCppSettings, max_new_tokens:
         ]
 
         with runtime.lock:
-            response = runtime.llama.create_chat_completion(
+            response = _create_chat_completion(
+                runtime.llama,
                 messages=messages,
                 max_tokens=max_new_tokens,
+                temperature=temperature,
+                repeat_penalty=repeat_penalty,
+                repeat_last_n=repeat_last_n,
             )
 
         choices = response.get("choices") if isinstance(response, dict) else None

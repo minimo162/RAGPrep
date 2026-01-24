@@ -29,9 +29,7 @@ class PdfToMarkdownProgress:
 ProgressCallback = Callable[[PdfToMarkdownProgress], None]
 
 
-def _notify_progress(
-    on_progress: ProgressCallback | None, update: PdfToMarkdownProgress
-) -> None:
+def _notify_progress(on_progress: ProgressCallback | None, update: PdfToMarkdownProgress) -> None:
     if on_progress is None:
         return
     try:
