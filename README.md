@@ -26,6 +26,23 @@ Optional env vars:
 - `LIGHTONOCR_LLAMA_REPEAT_LAST_N` (default: `128`)
 - `LIGHTONOCR_DRY_RUN=1` (verify end-to-end flow without inference)
 
+## Performance benchmark (render/ocr/total breakdown)
+
+Run the benchmark script to measure where time is spent.
+
+Examples (PowerShell):
+- Render-dominant (no inference): `$env:LIGHTONOCR_DRY_RUN='1'; uv run python scripts/bench_pdf_to_markdown.py --synthetic-pages 3`
+- Real OCR (requires GGUF env vars): `uv run python scripts/bench_pdf_to_markdown.py --pdf .\\path\\to\\input.pdf`
+- Compare backends: `$env:LIGHTONOCR_BACKEND='cli'` vs `$env:LIGHTONOCR_BACKEND='python'`
+
+Targets (baseline comparison, same machine/inputs):
+- Total time: -30%
+- Time-to-first-page: -50%
+
+Record baseline results (fill this table):
+| date | pdf | pages | backend | dpi | max_edge | render_s | ocr_s | total_s | notes |
+|---|---|---:|---|---:|---:|---:|---:|---:|---|
+
 If the error includes a deprecation warning like:
 
 ```
