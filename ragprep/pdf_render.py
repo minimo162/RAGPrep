@@ -21,11 +21,13 @@ def render_pdf_to_images(
     pdf_bytes: bytes,
     *,
     dpi: int | None = None,
+    max_edge: int | None = None,
     max_pages: int | None = None,
     max_bytes: int | None = None,
 ) -> list[Image.Image]:
     settings = get_settings()
     dpi = settings.render_dpi if dpi is None else dpi
+    max_edge = settings.render_max_edge if max_edge is None else max_edge
     max_pages = settings.max_pages if max_pages is None else max_pages
     max_bytes = settings.max_upload_bytes if max_bytes is None else max_bytes
 
@@ -33,6 +35,8 @@ def render_pdf_to_images(
         raise ValueError("pdf_bytes is empty")
     if dpi <= 0:
         raise ValueError("dpi must be > 0")
+    if max_edge <= 0:
+        raise ValueError("max_edge must be > 0")
     if max_pages <= 0:
         raise ValueError("max_pages must be > 0")
     if max_bytes <= 0:
@@ -62,6 +66,22 @@ def render_pdf_to_images(
             with io.BytesIO(png_bytes) as buf:
                 pil_image = Image.open(buf)
                 pil_image.load()
-                images.append(pil_image.convert("RGB"))
+                rgb = pil_image.convert("RGB")
+
+            width, height = rgb.size
+            current_max_edge = max(width, height)
+            if current_max_edge != max_edge:
+                if width >= height:
+                    new_width = max_edge
+                    new_height = max(1, round(max_edge * height / width))
+                else:
+                    new_height = max_edge
+                    new_width = max(1, round(max_edge * width / height))
+                rgb = rgb.resize(
+                    (int(new_width), int(new_height)),
+                    resample=Image.Resampling.LANCZOS,
+                )
+
+            images.append(rgb)
 
         return images

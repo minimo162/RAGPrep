@@ -55,3 +55,11 @@ def test_render_pdf_to_images_respects_env_max_upload_bytes(
     pdf_bytes = _make_pdf_bytes(page_count=1)
     with pytest.raises(ValueError, match="PDF too large"):
         render_pdf_to_images(pdf_bytes)
+
+
+def test_render_pdf_to_images_respects_env_render_max_edge(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("RAGPREP_RENDER_MAX_EDGE", "100")
+    pdf_bytes = _make_pdf_bytes(page_count=1)
+    images = render_pdf_to_images(pdf_bytes, dpi=72)
+    assert len(images) == 1
+    assert max(images[0].size) == 100

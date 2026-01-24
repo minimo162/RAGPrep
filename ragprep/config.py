@@ -7,11 +7,13 @@ from typing import Final
 ENV_MAX_UPLOAD_BYTES: Final[str] = "RAGPREP_MAX_UPLOAD_BYTES"
 ENV_MAX_PAGES: Final[str] = "RAGPREP_MAX_PAGES"
 ENV_RENDER_DPI: Final[str] = "RAGPREP_RENDER_DPI"
+ENV_RENDER_MAX_EDGE: Final[str] = "RAGPREP_RENDER_MAX_EDGE"
 ENV_MAX_CONCURRENCY: Final[str] = "RAGPREP_MAX_CONCURRENCY"
 
 DEFAULT_MAX_UPLOAD_BYTES: Final[int] = 10 * 1024 * 1024
 DEFAULT_MAX_PAGES: Final[int] = 50
 DEFAULT_RENDER_DPI: Final[int] = 200
+DEFAULT_RENDER_MAX_EDGE: Final[int] = 1540
 DEFAULT_MAX_CONCURRENCY: Final[int] = 1
 
 
@@ -20,6 +22,7 @@ class Settings:
     max_upload_bytes: int
     max_pages: int
     render_dpi: int
+    render_max_edge: int
     max_concurrency: int
 
 
@@ -41,5 +44,6 @@ def get_settings() -> Settings:
         max_upload_bytes=_get_positive_int(ENV_MAX_UPLOAD_BYTES, DEFAULT_MAX_UPLOAD_BYTES),
         max_pages=_get_positive_int(ENV_MAX_PAGES, DEFAULT_MAX_PAGES),
         render_dpi=_get_positive_int(ENV_RENDER_DPI, DEFAULT_RENDER_DPI),
+        render_max_edge=_get_positive_int(ENV_RENDER_MAX_EDGE, DEFAULT_RENDER_MAX_EDGE),
         max_concurrency=_get_positive_int(ENV_MAX_CONCURRENCY, DEFAULT_MAX_CONCURRENCY),
     )
