@@ -45,7 +45,7 @@ def _validate_paths(settings: LlamaCppCliSettings) -> None:
 def _default_bundled_llava_cli() -> Path | None:
     """
     In the Windows standalone layout, build scripts bundle llama.cpp under:
-      <standalone_root>/bin/llama.cpp/llava-cli.exe
+      <standalone_root>/bin/llama.cpp/
 
     When running from the standalone `app/` directory, this module resolves to:
       <standalone_root>/app/ragprep/ocr/llamacpp_cli_runtime.py
@@ -56,9 +56,11 @@ def _default_bundled_llava_cli() -> Path | None:
     except Exception:  # noqa: BLE001
         return None
 
-    candidate = standalone_root / "bin" / "llama.cpp" / "llava-cli.exe"
-    if candidate.is_file():
-        return candidate
+    bin_dir = standalone_root / "bin" / "llama.cpp"
+    for candidate_name in ("llama-mtmd-cli.exe", "llava-cli.exe", "llama-llava-cli.exe"):
+        candidate = bin_dir / candidate_name
+        if candidate.is_file():
+            return candidate
     return None
 
 
@@ -72,7 +74,16 @@ def _resolve_llava_cli(settings: LlamaCppCliSettings) -> str:
         if bundled is not None:
             candidates.append(str(bundled))
 
-    candidates.extend(["llava-cli", "llava-cli.exe", "llama-llava-cli", "llama-llava-cli.exe"])
+    candidates.extend(
+        [
+            "llama-mtmd-cli",
+            "llama-mtmd-cli.exe",
+            "llava-cli",
+            "llava-cli.exe",
+            "llama-llava-cli",
+            "llama-llava-cli.exe",
+        ]
+    )
 
     for candidate in candidates:
         candidate_path = Path(candidate)
@@ -84,9 +95,9 @@ def _resolve_llava_cli(settings: LlamaCppCliSettings) -> str:
             return found
 
     raise RuntimeError(
-        "llava-cli executable not found. "
-        "Set LIGHTONOCR_LLAVA_CLI_PATH to the full path of llava-cli(.exe) "
-        "(or llama-llava-cli(.exe)), or ensure it is available on PATH."
+        "llama.cpp multimodal CLI executable not found. "
+        "Set LIGHTONOCR_LLAVA_CLI_PATH to the full path of llama-mtmd-cli(.exe) "
+        "(or llava-cli(.exe) / llama-llava-cli(.exe)), or ensure it is available on PATH."
     )
 
 

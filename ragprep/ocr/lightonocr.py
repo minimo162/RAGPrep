@@ -141,7 +141,8 @@ def ocr_image(image: Image.Image) -> str:
     Environment variables:
     - LIGHTONOCR_GGUF_MODEL_PATH: required path to a local .gguf model file
     - LIGHTONOCR_GGUF_MMPROJ_PATH: required path to a local mmproj .gguf file
-    - LIGHTONOCR_LLAVA_CLI_PATH: optional path to `llava-cli` (if not set, use PATH)
+    - LIGHTONOCR_LLAVA_CLI_PATH: optional path to `llama-mtmd-cli` / `llava-cli`
+      (if not set, use PATH)
     - LIGHTONOCR_LLAMA_N_CTX: optional int
     - LIGHTONOCR_LLAMA_N_THREADS: optional int
     - LIGHTONOCR_LLAMA_N_GPU_LAYERS: optional int

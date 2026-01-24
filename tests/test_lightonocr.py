@@ -56,6 +56,53 @@ def test_missing_llama_cpp_import_is_actionable(
         lightonocr.ocr_image(image)
 
 
+def test_prefers_llama_mtmd_cli_when_available_on_path(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    import os
+    import subprocess
+
+    import ragprep.ocr.llamacpp_cli_runtime as cli_runtime
+
+    model_path = tmp_path / "model.gguf"
+    mmproj_path = tmp_path / "mmproj.gguf"
+    model_path.write_text("x", encoding="utf-8")
+    mmproj_path.write_text("y", encoding="utf-8")
+
+    monkeypatch.delenv(lightonocr.ENV_DRY_RUN, raising=False)
+    monkeypatch.setenv(lightonocr.ENV_GGUF_MODEL_PATH, str(model_path))
+    monkeypatch.setenv(lightonocr.ENV_GGUF_MMPROJ_PATH, str(mmproj_path))
+    monkeypatch.delenv(lightonocr.ENV_LLAVA_CLI_PATH, raising=False)
+
+    mtmd_name = "llama-mtmd-cli.exe" if os.name == "nt" else "llama-mtmd-cli"
+    mtmd_cli_path = tmp_path / mtmd_name
+    mtmd_cli_path.write_text("x", encoding="utf-8")
+
+    def fake_which(name: str) -> str | None:
+        if name in {"llama-mtmd-cli", "llama-mtmd-cli.exe"}:
+            return str(mtmd_cli_path)
+        return None
+
+    calls: list[list[str]] = []
+
+    def fake_run(
+        argv: list[str], capture_output: bool, text: bool, check: bool
+    ) -> subprocess.CompletedProcess[str]:
+        calls.append(argv)
+        return subprocess.CompletedProcess(
+            args=argv, returncode=0, stdout="ASSISTANT: OK\n", stderr=""
+        )
+
+    monkeypatch.setattr(cli_runtime.shutil, "which", fake_which)
+    monkeypatch.setattr(cli_runtime.subprocess, "run", fake_run)
+
+    image = Image.new("RGB", (2, 2), color=(0, 0, 0))
+    assert lightonocr.ocr_image(image) == "OK"
+
+    assert calls
+    assert calls[0][0] == str(mtmd_cli_path)
+
+
 def test_gguf_env_paths_strip_quotes_and_angle_brackets(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
