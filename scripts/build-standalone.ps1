@@ -456,24 +456,35 @@ if __name__ == "__main__":
     $llamaCppBinDir = Join-Path $OutputDir "bin/llama.cpp"
     New-Item -ItemType Directory -Force -Path $llamaCppBinDir | Out-Null
 
+    $mtmdCliExe = Join-Path $llamaCppExtractDir "llama-mtmd-cli.exe"
+    if (-not (Test-Path -LiteralPath $mtmdCliExe -PathType Leaf)) {
+        $available = (Get-ChildItem -Path $llamaCppExtractDir -File -Filter "*.exe" | Select-Object -ExpandProperty Name) -join ", "
+        throw "Could not locate llama-mtmd-cli.exe in the llama.cpp bundle. Available: $available"
+    }
+
     $llavaCliCandidates = @(
         (Join-Path $llamaCppExtractDir "llava-cli.exe"),
         (Join-Path $llamaCppExtractDir "llama-llava-cli.exe")
     )
     $llavaCliExe = $llavaCliCandidates | Where-Object { Test-Path $_ } | Select-Object -First 1
-    if (-not $llavaCliExe) {
-        $available = (Get-ChildItem -Path $llamaCppExtractDir -File -Filter "*.exe" | Select-Object -ExpandProperty Name) -join ", "
-        throw "Could not locate a llava CLI executable in the llama.cpp bundle. Available: $available"
-    }
 
+    # Bundle the preferred multimodal CLI (llama-mtmd-cli.exe).
+    Copy-Item -Force $mtmdCliExe (Join-Path $llamaCppBinDir "llama-mtmd-cli.exe")
+
+    # Bundle llava-cli.exe for backward compatibility (if present in the release).
     # Normalize to llava-cli.exe for runtime discovery.
-    Copy-Item -Force $llavaCliExe (Join-Path $llamaCppBinDir "llava-cli.exe")
+    if ($llavaCliExe) {
+        Copy-Item -Force $llavaCliExe (Join-Path $llamaCppBinDir "llava-cli.exe")
+    }
     Get-ChildItem -Path $llamaCppExtractDir -File -Filter "*.dll" | ForEach-Object {
         Copy-Item -Force $_.FullName $llamaCppBinDir
     }
 
     Write-Host "Bundled llama.cpp binaries:" -ForegroundColor Cyan
-    Write-Host "  llava-cli: $(Join-Path $llamaCppBinDir "llava-cli.exe")" -ForegroundColor DarkGray
+    Write-Host "  mtmd-cli:  $(Join-Path $llamaCppBinDir "llama-mtmd-cli.exe")" -ForegroundColor DarkGray
+    if ($llavaCliExe) {
+        Write-Host "  llava-cli: $(Join-Path $llamaCppBinDir "llava-cli.exe")" -ForegroundColor DarkGray
+    }
 
     $runPs1 = @"
 [CmdletBinding()]
@@ -505,9 +516,15 @@ if (-not `$env:LIGHTONOCR_GGUF_MMPROJ_PATH -or [string]::IsNullOrWhiteSpace(`$en
 }
 
 if (-not `$env:LIGHTONOCR_LLAVA_CLI_PATH -or [string]::IsNullOrWhiteSpace(`$env:LIGHTONOCR_LLAVA_CLI_PATH)) {
-    `$candidate = Join-Path `$root "bin/llama.cpp/llava-cli.exe"
+    `$candidate = Join-Path `$root "bin/llama.cpp/llama-mtmd-cli.exe"
     if (Test-Path `$candidate) {
         `$env:LIGHTONOCR_LLAVA_CLI_PATH = `$candidate
+    }
+    else {
+        `$candidate = Join-Path `$root "bin/llama.cpp/llava-cli.exe"
+        if (Test-Path `$candidate) {
+            `$env:LIGHTONOCR_LLAVA_CLI_PATH = `$candidate
+        }
     }
 }
 
@@ -534,7 +551,11 @@ if "%LIGHTONOCR_GGUF_MMPROJ_PATH%"=="" (
   set LIGHTONOCR_GGUF_MMPROJ_PATH=%ROOT%data\models\lightonocr-gguf\$ggufMmprojFileTrimmed
 )
 if "%LIGHTONOCR_LLAVA_CLI_PATH%"=="" (
-  set LIGHTONOCR_LLAVA_CLI_PATH=%ROOT%bin\llama.cpp\llava-cli.exe
+  if exist "%ROOT%bin\llama.cpp\llama-mtmd-cli.exe" (
+    set LIGHTONOCR_LLAVA_CLI_PATH=%ROOT%bin\llama.cpp\llama-mtmd-cli.exe
+  ) else (
+    set LIGHTONOCR_LLAVA_CLI_PATH=%ROOT%bin\llama.cpp\llava-cli.exe
+  )
 )
 set PYTHONNOUSERSITE=1
 set PYTHONUTF8=1
