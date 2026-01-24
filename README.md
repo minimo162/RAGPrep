@@ -38,6 +38,23 @@ Examples (PowerShell):
 - Real OCR (requires GGUF env vars): `uv run python scripts/bench_pdf_to_markdown.py --pdf .\\path\\to\\input.pdf`
 - Compare backends: `$env:LIGHTONOCR_BACKEND='cli'` vs `$env:LIGHTONOCR_BACKEND='python'`
 
+Speed-first recommended env preset (PowerShell):
+
+```powershell
+# Render (quality vs speed tradeoff)
+$env:RAGPREP_RENDER_DPI='120'
+$env:RAGPREP_RENDER_MAX_EDGE='1280'
+
+# OCR runtime (reduce per-page overhead)
+$env:LIGHTONOCR_BACKEND='python'  # fallback: 'cli'
+$env:LIGHTONOCR_MAX_NEW_TOKENS='1000'
+$env:LIGHTONOCR_LLAMA_N_THREADS=([Environment]::ProcessorCount).ToString()
+$env:LIGHTONOCR_LLAMA_N_GPU_LAYERS='99'  # set 0 for CPU-only
+
+# Optional: warm up on startup (effective with LIGHTONOCR_BACKEND=python)
+$env:RAGPREP_WARMUP_ON_START='1'
+```
+
 Targets (baseline comparison, same machine/inputs):
 - Total time: -30%
 - Time-to-first-page: -50%
@@ -85,8 +102,10 @@ Parameter notes:
 - `LIGHTONOCR_LLAMA_REPEAT_PENALTY` -> `--repeat-penalty`
 - `LIGHTONOCR_LLAMA_REPEAT_LAST_N` -> `--repeat-last-n`
 
-## 画像前処理（PDF -> PNG）
+## 画像前処理（PDF -> 画像）
 PDF は PyMuPDF でレンダリングした後、最終的に「最長辺 N px」になるようリサイズされます。
+PNG への一時変換は行わず、ピクセルバッファから直接 PIL.Image を作ります。
+- `RAGPREP_RENDER_DPI`（デフォルト: `200`）
 - `RAGPREP_RENDER_MAX_EDGE`（デフォルト: `1540`）
 
 ## GUIの進捗表示

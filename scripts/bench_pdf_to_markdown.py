@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import argparse
-import io
 import os
 import sys
 import time
@@ -108,6 +107,8 @@ def _render_doc_to_images(
 ) -> tuple[list[Image.Image], list[float]]:
     import fitz
 
+    from ragprep.pdf_render import _pixmap_to_rgb_image
+
     if not hasattr(doc, "load_page"):
         raise TypeError("doc must be a PyMuPDF document")
 
@@ -121,16 +122,12 @@ def _render_doc_to_images(
     for page_index in range(page_count):
         start = time.perf_counter()
         page = doc.load_page(page_index)
-        pix = page.get_pixmap(matrix=matrix, alpha=False)
-        png_bytes = pix.tobytes("png")
-        with io.BytesIO(png_bytes) as buf:
-            pil_image = Image.open(buf)
-            pil_image.load()
-            rgb = pil_image.convert("RGB")
+        pix = page.get_pixmap(matrix=matrix, colorspace=fitz.csRGB, alpha=False)
+        rgb = _pixmap_to_rgb_image(pix)
 
         width, height = rgb.size
         current_max_edge = max(width, height)
-        if current_max_edge != max_edge:
+        if current_max_edge > max_edge:
             if width >= height:
                 new_width = max_edge
                 new_height = max(1, round(max_edge * height / width))

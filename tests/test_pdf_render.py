@@ -4,7 +4,7 @@ from typing import cast
 
 import pytest
 
-from ragprep.pdf_render import render_pdf_to_images
+from ragprep.pdf_render import _pixmap_to_rgb_image, render_pdf_to_images
 
 
 def _make_pdf_bytes(page_count: int) -> bytes:
@@ -15,6 +15,28 @@ def _make_pdf_bytes(page_count: int) -> bytes:
         page = doc.new_page()
         page.insert_text((72, 72), f"Hello {i + 1}")
     return cast(bytes, doc.tobytes())
+
+
+def test_pixmap_to_rgb_image_does_not_use_png_roundtrip() -> None:
+    class FakePixmap:
+        width = 2
+        height = 1
+        n = 3
+        alpha = 0
+        stride = 0
+
+        @property
+        def samples(self) -> bytes:
+            return bytes([255, 0, 0, 0, 255, 0])
+
+        def tobytes(self, *_args: object, **_kwargs: object) -> bytes:
+            raise AssertionError("PNG roundtrip should not be used in _pixmap_to_rgb_image")
+
+    image = _pixmap_to_rgb_image(FakePixmap())
+    assert image.mode == "RGB"
+    assert image.size == (2, 1)
+    assert image.getpixel((0, 0)) == (255, 0, 0)
+    assert image.getpixel((1, 0)) == (0, 255, 0)
 
 
 def test_render_pdf_to_images_returns_one_image_per_page() -> None:
