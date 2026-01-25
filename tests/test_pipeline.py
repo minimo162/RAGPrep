@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import json
+from io import BytesIO
 from typing import cast
 
 import pytest
+from PIL import Image
 
 from ragprep.pdf_text import normalize_extracted_text
 from ragprep.pipeline import (
@@ -43,6 +45,21 @@ def _make_table_pdf_bytes(rows: int = 20) -> bytes:
         page.insert_text((200, y), f"{i}")
         page.insert_text((320, y), f"{i * 10}")
         y += 12
+
+    return cast(bytes, doc.tobytes())
+
+
+def _make_mixed_pdf_bytes(text: str) -> bytes:
+    import fitz
+
+    doc = fitz.open()
+    page = doc.new_page()
+    page.insert_text((72, 72), text)
+
+    image = Image.new("RGB", (400, 400), color=(255, 255, 255))
+    bio = BytesIO()
+    image.save(bio, format="PNG")
+    page.insert_image(fitz.Rect(72, 200, 472, 600), stream=bio.getvalue())
 
     return cast(bytes, doc.tobytes())
 
@@ -249,3 +266,30 @@ def test_pdf_to_markdown_table_page_applies_table_cell_merge_and_records_meta(
     assert meta["table_merge"]["applied"] is True
     assert meta["table_merge"]["changed_cells"] >= 1
     assert meta["table_merge"]["changed_chars"] >= 1
+
+
+def test_pdf_to_markdown_mixed_page_applies_text_merge_and_records_meta_reason(
+    tmp_path_factory: pytest.TempPathFactory,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    out_dir = tmp_path_factory.mktemp("mixed-artifacts")
+    pdf_bytes = _make_mixed_pdf_bytes(_LONG_JP_TEXT)
+    expected = _expected_pymupdf_page_text(pdf_bytes, 0)
+
+    ocr_text = expected.replace("a", "\ufffd", 1)
+    monkeypatch.setattr("ragprep.pipeline._render_page_to_image", lambda *_a, **_k: object())
+    monkeypatch.setattr("ragprep.pipeline.ocr_image", lambda _image: ocr_text)
+
+    result = pdf_to_markdown(pdf_bytes, page_output_dir=out_dir)
+    assert result == expected
+    assert "\ufffd" not in result
+
+    meta = json.loads((out_dir / "page-0001.meta.json").read_text(encoding="utf-8"))
+    assert meta["page_kind"] == "mixed"
+    assert meta["selected_source"] == "merged"
+    assert meta["selected_source_reason"] == "text_merge_applied"
+
+    assert meta["merge"]["applied"] is True
+    assert meta["merge"]["used"] is True
+    assert meta["merge"]["changed_chars"] == 1
+    assert isinstance(meta["merge"]["reason"], str) and meta["merge"]["reason"]

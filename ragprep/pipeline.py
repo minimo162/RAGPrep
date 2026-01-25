@@ -380,25 +380,17 @@ def pdf_to_markdown(
             merged_text = ""
             selected_source = "ocr"
             merge_stats = None
+            merge_reason: str | None = None
             table_merge_stats: TableMergeStats | None = None
+            selected_source_reason: str | None = None
 
             progress_message = f"page {page_number}"
             if requires_ocr:
                 image = _render_page_to_image(page, fitz=fitz, matrix=matrix, max_edge=max_edge)
                 ocr_text = normalize_extracted_text(ocr_image(image)).strip()
                 merged_text = ocr_text
-                if page_kind_obj == PageKind.text:
-                    if (
-                        text_quality.score >= _DEFAULT_MERGE_MIN_SCORE
-                        and table_likelihood < _DEFAULT_TABLE_OCR_LIKELIHOOD_MIN
-                    ):
-                        merged_text, merge_stats = merge_ocr_with_pymupdf(ocr_text, normalized_text)
-                        if merge_stats.changed_char_count:
-                            selected_source = "merged"
-                            progress_message = (
-                                f"page {page_number} (merged {merge_stats.changed_char_count})"
-                            )
-                elif page_kind_obj == PageKind.table and has_text_layer:
+                if page_kind_obj == PageKind.table and has_text_layer:
+                    merge_reason = f"page_kind={page_kind_obj.value}"
                     if text_quality.score >= _DEFAULT_TABLE_MERGE_MIN_SCORE:
                         merged_table_text, table_merge_stats = (
                             merge_markdown_tables_with_pymupdf_words(ocr_text, words)
@@ -413,13 +405,41 @@ def pdf_to_markdown(
                             confidence=None,
                             reason=f"text_quality<{_DEFAULT_TABLE_MERGE_MIN_SCORE}",
                         )
+                elif page_kind_obj in (PageKind.text, PageKind.mixed) and has_text_layer:
+                    if table_likelihood >= _DEFAULT_TABLE_OCR_LIKELIHOOD_MIN:
+                        merge_reason = f"table_likelihood>={_DEFAULT_TABLE_OCR_LIKELIHOOD_MIN}"
+                    elif text_quality.score < _DEFAULT_MERGE_MIN_SCORE:
+                        merge_reason = f"text_quality<{_DEFAULT_MERGE_MIN_SCORE}"
+                    else:
+                        merged_text, merge_stats = merge_ocr_with_pymupdf(ocr_text, normalized_text)
+                        if merge_stats.changed_char_count:
+                            selected_source = "merged"
+                            merge_reason = f"changed_chars={merge_stats.changed_char_count}"
+                            progress_message = (
+                                f"page {page_number} (merged {merge_stats.changed_char_count})"
+                            )
+                        else:
+                            merge_reason = "attempted_no_changes"
+                else:
+                    if not has_text_layer:
+                        merge_reason = "no_text_layer"
+                    else:
+                        merge_reason = f"page_kind={page_kind_obj.value}"
                 if selected_source != "merged":
                     selected_source = "ocr"
+                if table_merge_stats is not None and table_merge_stats.applied:
+                    selected_source_reason = "table_merge_applied"
+                elif selected_source == "merged":
+                    selected_source_reason = "text_merge_applied"
+                else:
+                    selected_source_reason = "ocr"
                 if merged_text:
                     page_texts.append(merged_text)
             else:
                 merged_text = pymupdf_text
                 selected_source = "pymupdf"
+                selected_source_reason = "ocr_skipped"
+                merge_reason = "ocr_skipped"
                 if merged_text:
                     page_texts.append(merged_text)
                 progress_message = f"page {page_number} (skip ocr)"
@@ -483,8 +503,11 @@ def pdf_to_markdown(
                     "table_likelihood": table_likelihood,
                     "image_count": image_count,
                     "image_area_ratio": image_area_ratio,
+                    "selected_source_reason": selected_source_reason,
                     "merge": {
                         "applied": merge_stats is not None,
+                        "reason": merge_reason,
+                        "used": selected_source == "merged",
                         "changed_chars": (
                             int(merge_stats.changed_char_count) if merge_stats is not None else 0
                         ),
