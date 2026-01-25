@@ -1,13 +1,11 @@
 from __future__ import annotations
 
 import logging
-import os
 import uuid
-from contextlib import asynccontextmanager
 from dataclasses import dataclass, replace
 from enum import Enum
 from pathlib import Path
-from threading import Event, Lock, Semaphore, Thread
+from threading import Lock, Semaphore
 from typing import Any
 
 from fastapi import BackgroundTasks, FastAPI, File, HTTPException, Request, UploadFile
@@ -24,91 +22,10 @@ STATIC_DIR = Path(__file__).resolve().parent / "static"
 templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
 
 
-@asynccontextmanager
-async def _lifespan(_app: FastAPI) -> Any:
-    _start_warmup_if_enabled()
-    yield
-
-
-app = FastAPI(lifespan=_lifespan)
+app = FastAPI()
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
 logger = logging.getLogger(__name__)
-
-ENV_WARMUP_ON_START = "RAGPREP_WARMUP_ON_START"
-
-
-def _env_truthy(name: str) -> bool:
-    value = os.getenv(name)
-    if value is None:
-        return False
-    return value.strip().lower() in {"1", "true", "t", "yes", "y", "on"}
-
-
-_warmup_lock = Lock()
-_warmup_started = False
-_warmup_done = Event()
-_warmup_error: str | None = None
-
-
-def _get_lightonocr_backend_for_warmup() -> str:
-    raw = os.getenv("LIGHTONOCR_BACKEND")
-    if raw is None or not raw.strip():
-        return "cli"
-
-    value = raw.strip().lower()
-    if value in {"cli"}:
-        return "cli"
-    if value in {"python", "py"}:
-        return "python"
-
-    return "invalid"
-
-
-def _warmup_impl() -> None:
-    backend = _get_lightonocr_backend_for_warmup()
-    if backend != "python":
-        return
-
-    from ragprep.ocr import lightonocr
-
-    settings = lightonocr.get_settings()
-
-    from ragprep.ocr.llamacpp_runtime import _get_runtime_cached
-
-    _get_runtime_cached(
-        settings.gguf_model_path,
-        settings.gguf_mmproj_path,
-        settings.llama_n_ctx,
-        settings.llama_n_threads,
-        settings.llama_n_gpu_layers,
-    )
-
-
-def _run_warmup_thread() -> None:
-    global _warmup_error
-    try:
-        _warmup_impl()
-    except Exception as exc:  # noqa: BLE001
-        logger.exception("Warmup failed")
-        _warmup_error = str(exc)
-    finally:
-        _warmup_done.set()
-
-
-def _start_warmup_if_enabled() -> None:
-    global _warmup_started
-
-    if not _env_truthy(ENV_WARMUP_ON_START):
-        return
-
-    with _warmup_lock:
-        if _warmup_started:
-            return
-        _warmup_started = True
-
-        thread = Thread(target=_run_warmup_thread, name="ragprep_warmup", daemon=True)
-        thread.start()
 
 
 class JobStatus(str, Enum):
@@ -187,16 +104,6 @@ def _run_job(job_id: str, pdf_bytes: bytes) -> None:
             total_pages=0,
             progress_message=None,
         )
-
-        _start_warmup_if_enabled()
-        if _env_truthy(ENV_WARMUP_ON_START) and not _warmup_done.is_set():
-            jobs.update(
-                job_id,
-                phase="warming_up",
-                progress_message="Warming up OCR runtime...",
-            )
-            _warmup_done.wait()
-            jobs.update(job_id, phase="starting", progress_message=None)
 
         def on_progress(update: PdfToMarkdownProgress) -> None:
             jobs.update(
