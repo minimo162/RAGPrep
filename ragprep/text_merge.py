@@ -10,8 +10,8 @@ _DEFAULT_MERGE_MAX_CHANGED_RATIO = 0.08
 
 _REPLACEMENT_CHAR = "\ufffd"
 
-_EMAIL_RE = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}")
-_URL_RE = re.compile(r"https?://|www\\.", flags=re.IGNORECASE)
+_EMAIL_RE = re.compile(r"[^\s@＠]+[@＠][^\s@＠]+[\.．][^\s@＠]+")
+_URL_RE = re.compile(r"https?://|https?[:：][\\/／]{2}|www\\.", flags=re.IGNORECASE)
 
 
 @dataclass(frozen=True)
@@ -81,7 +81,11 @@ def merge_ocr_with_pymupdf(ocr_text: str, pymupdf_text: str) -> tuple[str, Merge
         if diff_count > max_changed:
             continue
 
-        if _looks_like_url_or_email(ocr_compact) or _looks_like_url_or_email(pym_compact):
+        if (
+            _looks_like_url_or_email(ocr_compact)
+            or _looks_like_url_or_email(pym_compact)
+            or _looks_like_url_or_email(_extract_non_whitespace_span(ocr_normalized, start, end))
+        ):
             continue
 
         non_ws_count = sum(1 for ch in template if not ch.isspace())
@@ -154,6 +158,18 @@ def _is_japanese_char(ch: str) -> bool:
 
 def _looks_like_url_or_email(text: str) -> bool:
     return bool(_URL_RE.search(text) or _EMAIL_RE.search(text))
+
+
+def _extract_non_whitespace_span(text: str, start: int, end: int) -> str:
+    if not text:
+        return ""
+    left = max(0, min(len(text), start))
+    right = max(0, min(len(text), end))
+    while left > 0 and not text[left - 1].isspace():
+        left -= 1
+    while right < len(text) and not text[right].isspace():
+        right += 1
+    return text[left:right]
 
 
 def _token_spans(text: str, tokens: list[str]) -> list[tuple[int, int]]:
