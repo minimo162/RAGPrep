@@ -139,22 +139,27 @@ def _expected_pymupdf_page_text(pdf_bytes: bytes, page_index: int) -> str:
         return normalize_extracted_text(str(page.get_text("text") or "")).strip()
 
 
-def test_pdf_to_markdown_text_first_skips_rendering_and_ocr_for_high_quality_text_page(
+def test_pdf_to_markdown_text_first_forces_rendering_and_ocr_for_high_quality_text_page(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     pdf_bytes = _make_pdf_bytes([_LONG_JP_TEXT])
-    expected = _expected_pymupdf_page_text(pdf_bytes, 0)
 
-    def fail_render(*_args: object, **_kwargs: object) -> object:
-        raise AssertionError("Rendering should be skipped")
+    calls = {"render": 0, "ocr": 0}
 
-    monkeypatch.setattr("ragprep.pipeline._render_page_to_image", fail_render)
-    monkeypatch.setattr(
-        "ragprep.pipeline.ocr_image",
-        lambda _image: (_ for _ in ()).throw(AssertionError("OCR should be skipped")),
-    )
+    def fake_render(*_args: object, **_kwargs: object) -> object:
+        calls["render"] += 1
+        return object()
 
-    assert pdf_to_markdown(pdf_bytes) == expected
+    monkeypatch.setattr("ragprep.pipeline._render_page_to_image", fake_render)
+
+    def fake_ocr(_image: object) -> str:
+        calls["ocr"] += 1
+        return "OCR1"
+
+    monkeypatch.setattr("ragprep.pipeline.ocr_image", fake_ocr)
+
+    assert pdf_to_markdown(pdf_bytes) == "OCR1"
+    assert calls == {"render": 1, "ocr": 1}
 
 
 def test_pdf_to_markdown_text_first_renders_only_ocr_pages_and_writes_artifacts(
@@ -178,14 +183,14 @@ def test_pdf_to_markdown_text_first_renders_only_ocr_pages_and_writes_artifacts(
 
     def fake_ocr(_image: object) -> str:
         ocr_calls["n"] += 1
-        return "OCR2"
+        return "OCR1" if ocr_calls["n"] == 1 else "OCR2"
 
     monkeypatch.setattr("ragprep.pipeline.ocr_image", fake_ocr)
 
     result = pdf_to_markdown(pdf_bytes, page_output_dir=out_dir)
-    assert result == f"{expected_pymupdf_1}\n\nOCR2"
-    assert render_calls["n"] == 1
-    assert ocr_calls["n"] == 1
+    assert result == "OCR1\n\nOCR2"
+    assert render_calls["n"] == 2
+    assert ocr_calls["n"] == 2
 
     p1_ocr = out_dir / "page-0001.ocr.md"
     p1_pym = out_dir / "page-0001.pymupdf.md"
@@ -200,17 +205,19 @@ def test_pdf_to_markdown_text_first_renders_only_ocr_pages_and_writes_artifacts(
     assert p1_ocr.exists() and p1_pym.exists() and p1_merged.exists() and p1_meta.exists()
     assert p2_ocr.exists() and p2_pym.exists() and p2_merged.exists() and p2_meta.exists()
 
-    assert p1_ocr.read_text(encoding="utf-8").strip() == ""
+    assert p1_ocr.read_text(encoding="utf-8").strip() == "OCR1"
     assert p1_pym.read_text(encoding="utf-8").strip() == expected_pymupdf_1
-    assert p1_merged.read_text(encoding="utf-8").strip() == expected_pymupdf_1
+    assert p1_merged.read_text(encoding="utf-8").strip() == "OCR1"
 
     meta1 = json.loads(p1_meta.read_text(encoding="utf-8"))
     assert meta1["page_number"] == 1
     assert meta1["page_kind"] == "text"
     assert meta1["analysis_available"] is True
-    assert meta1["selected_source"] == "pymupdf"
-    assert meta1["ocr_required"] is False
-    assert isinstance(meta1["ocr_reason"], str) and meta1["ocr_reason"]
+    assert meta1["selected_source"] == "ocr"
+    assert meta1["ocr_required"] is True
+    assert meta1["ocr_skipped"] is False
+    assert meta1["ocr_reason"] == "forced_all_pages"
+    assert meta1["selected_source_reason"] == "ocr"
 
     assert p2_ocr.read_text(encoding="utf-8").strip() == "OCR2"
     assert p2_pym.read_text(encoding="utf-8").strip() == expected_pymupdf_2
@@ -222,7 +229,9 @@ def test_pdf_to_markdown_text_first_renders_only_ocr_pages_and_writes_artifacts(
     assert meta2["analysis_available"] is True
     assert meta2["selected_source"] == "ocr"
     assert meta2["ocr_required"] is True
-    assert isinstance(meta2["ocr_reason"], str) and meta2["ocr_reason"]
+    assert meta2["ocr_skipped"] is False
+    assert meta2["ocr_reason"] == "forced_all_pages"
+    assert meta2["selected_source_reason"] == "ocr"
 
     merged_pages = [
         p1_merged.read_text(encoding="utf-8").strip(),

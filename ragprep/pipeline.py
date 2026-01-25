@@ -32,6 +32,7 @@ _DEFAULT_SKIP_OCR_MIN_SCORE = 0.85
 _DEFAULT_TABLE_OCR_LIKELIHOOD_MIN = 0.45
 _DEFAULT_MERGE_MIN_SCORE = 0.55
 _DEFAULT_TABLE_MERGE_MIN_SCORE = 0.15
+_FORCE_OCR_ALL_PAGES = True
 
 
 class ProgressPhase(str, Enum):
@@ -362,20 +363,29 @@ def pdf_to_markdown(
                 table_likelihood=table_likelihood,
             )
 
-            requires_ocr = _requires_ocr_for_page(
-                page_kind_obj,
-                text_quality_score=text_quality.score,
-                table_likelihood=table_likelihood,
-            )
-
-            if page_kind_obj in (PageKind.table, PageKind.image, PageKind.mixed, PageKind.empty):
-                ocr_reason = f"page_kind={page_kind_obj.value}"
-            elif table_likelihood >= _DEFAULT_TABLE_OCR_LIKELIHOOD_MIN:
-                ocr_reason = f"table_likelihood>={_DEFAULT_TABLE_OCR_LIKELIHOOD_MIN}"
-            elif text_quality.score < _DEFAULT_SKIP_OCR_MIN_SCORE:
-                ocr_reason = f"text_quality<{_DEFAULT_SKIP_OCR_MIN_SCORE}"
+            if _FORCE_OCR_ALL_PAGES:
+                requires_ocr = True
+                ocr_reason = "forced_all_pages"
             else:
-                ocr_reason = f"text_quality>={_DEFAULT_SKIP_OCR_MIN_SCORE}"
+                requires_ocr = _requires_ocr_for_page(
+                    page_kind_obj,
+                    text_quality_score=text_quality.score,
+                    table_likelihood=table_likelihood,
+                )
+
+                if page_kind_obj in (
+                    PageKind.table,
+                    PageKind.image,
+                    PageKind.mixed,
+                    PageKind.empty,
+                ):
+                    ocr_reason = f"page_kind={page_kind_obj.value}"
+                elif table_likelihood >= _DEFAULT_TABLE_OCR_LIKELIHOOD_MIN:
+                    ocr_reason = f"table_likelihood>={_DEFAULT_TABLE_OCR_LIKELIHOOD_MIN}"
+                elif text_quality.score < _DEFAULT_SKIP_OCR_MIN_SCORE:
+                    ocr_reason = f"text_quality<{_DEFAULT_SKIP_OCR_MIN_SCORE}"
+                else:
+                    ocr_reason = f"text_quality>={_DEFAULT_SKIP_OCR_MIN_SCORE}"
 
             ocr_text = ""
             merged_text = ""
