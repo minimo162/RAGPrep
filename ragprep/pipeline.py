@@ -25,6 +25,7 @@ from ragprep.pdf_text import (
     score_text_quality,
     tokenize_by_char_class,
 )
+from ragprep.pymupdf4llm_markdown import pdf_bytes_to_markdown
 from ragprep.table_merge import TableMergeStats, merge_markdown_tables_with_pymupdf_words
 from ragprep.text_merge import MergeStats, merge_ocr_with_pymupdf
 
@@ -144,7 +145,7 @@ def _short_unified_diff(a_text: str, b_text: str, *, max_lines: int = 60) -> lis
     return lines
 
 
-def pdf_to_markdown(
+def _pdf_to_markdown_ocr_legacy(
     pdf_bytes: bytes,
     *,
     on_progress: ProgressCallback | None = None,
@@ -589,3 +590,68 @@ def pdf_to_markdown(
         ),
     )
     return "\n\n".join(page_texts).strip()
+
+
+def pdf_to_markdown(
+    pdf_bytes: bytes,
+    *,
+    on_progress: ProgressCallback | None = None,
+    page_output_dir: Path | None = None,
+) -> str:
+    """
+    Convert a PDF (bytes) into a Markdown/text string.
+
+    This function is intentionally pure and synchronous; it converts the entire document
+    in a single pass via pymupdf-layout + pymupdf4llm.
+    """
+
+    if not pdf_bytes:
+        raise ValueError("pdf_bytes is empty")
+
+    if page_output_dir is not None:
+        page_output_dir.mkdir(parents=True, exist_ok=True)
+
+    settings = get_settings()
+    if len(pdf_bytes) > settings.max_upload_bytes:
+        raise ValueError(
+            f"PDF too large ({len(pdf_bytes)} bytes), max_bytes={settings.max_upload_bytes}"
+        )
+
+    try:
+        import pymupdf
+
+        doc = pymupdf.open(stream=pdf_bytes, filetype="pdf")
+    except Exception as exc:  # noqa: BLE001
+        raise ValueError("Invalid PDF data") from exc
+
+    with doc:
+        total_pages = int(doc.page_count)
+
+    if total_pages > settings.max_pages:
+        raise ValueError(f"PDF has {total_pages} pages, max_pages={settings.max_pages}")
+
+    _notify_progress(
+        on_progress,
+        PdfToMarkdownProgress(
+            phase=ProgressPhase.rendering,
+            current=0,
+            total=total_pages,
+            message="converting",
+        ),
+    )
+
+    markdown = pdf_bytes_to_markdown(pdf_bytes)
+
+    if page_output_dir is not None:
+        _write_text_artifact(page_output_dir / "document.md", markdown)
+
+    _notify_progress(
+        on_progress,
+        PdfToMarkdownProgress(
+            phase=ProgressPhase.done,
+            current=total_pages,
+            total=total_pages,
+            message="done",
+        ),
+    )
+    return markdown

@@ -4,6 +4,7 @@ from typing import cast
 import pytest
 from fastapi.testclient import TestClient
 
+from ragprep import pymupdf4llm_markdown
 from ragprep.web.app import app
 
 
@@ -43,16 +44,11 @@ def test_convert_creates_job_and_downloads_markdown(monkeypatch: pytest.MonkeyPa
 
     calls: dict[str, int] = {"n": 0}
 
-    def fake_ocr_image(_image: object) -> str:
+    def fake_to_markdown(_doc: object) -> str:
         calls["n"] += 1
-        if calls["n"] == 1:
-            return "page1\r\n"
-        if calls["n"] == 2:
-            return "page2\r"
-        raise AssertionError("Unexpected extra page")
+        return "page1\r\n\r\npage2\r"
 
-    monkeypatch.setenv("RAGPREP_RENDER_DPI", "72")
-    monkeypatch.setattr("ragprep.pipeline.ocr_image", fake_ocr_image)
+    monkeypatch.setattr(pymupdf4llm_markdown.pymupdf4llm, "to_markdown", fake_to_markdown)
 
     files = {"file": ("test.pdf", pdf_bytes, "application/pdf")}
     response = client.post("/convert", files=files)
@@ -78,11 +74,11 @@ def test_convert_creates_job_and_downloads_markdown(monkeypatch: pytest.MonkeyPa
     assert download.text == "page1\n\npage2"
     assert "text/markdown" in download.headers["content-type"]
     assert f"{job_id}.md" in download.headers["content-disposition"]
-    assert calls["n"] == 2
+    assert calls["n"] == 1
 
     _ = client.get(f"/jobs/{job_id}/status")
     _ = client.get(f"/download/{job_id}.md")
-    assert calls["n"] == 2
+    assert calls["n"] == 1
 
 
 def test_bad_pdf_job_reports_error() -> None:
