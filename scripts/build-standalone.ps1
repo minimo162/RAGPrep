@@ -64,6 +64,8 @@ try {
         $OutputDir = "dist/standalone"
     }
     $OutputDir = [System.IO.Path]::GetFullPath($OutputDir)
+    $cacheDir = Join-Path $OutputDir "_cache"
+    $pipCacheDir = Join-Path $cacheDir "pip"
 
     $pipTempRootResolved = $PipTempRoot
     if ([string]::IsNullOrWhiteSpace($pipTempRootResolved)) {
@@ -79,6 +81,7 @@ try {
     Write-Host "  clean:      $($Clean.IsPresent)" -ForegroundColor DarkGray
     Write-Host "  gguf_fetch: $(-not $SkipGgufPrefetch.IsPresent)" -ForegroundColor DarkGray
     Write-Host "  pip_temp:   $pipTempRootResolved" -ForegroundColor DarkGray
+    Write-Host "  pip_cache:  $pipCacheDir" -ForegroundColor DarkGray
 
     if ($Clean -and (Test-Path $OutputDir)) {
         try {
@@ -98,7 +101,6 @@ try {
 
     New-Item -ItemType Directory -Force -Path $OutputDir | Out-Null
 
-    $cacheDir = Join-Path $OutputDir "_cache"
     $extractDir = Join-Path $OutputDir "_extract"
     $pythonDir = Join-Path $OutputDir "python"
     $sitePackagesDir = Join-Path $OutputDir "site-packages"
@@ -244,10 +246,12 @@ try {
         throw "python.exe missing under $pythonDir after extraction."
     }
 
-    Write-Host "Exporting locked requirements..." -ForegroundColor Cyan
+    $currentStep = "uv export requirements"
+    Write-Host "Exporting locked requirements (uv.lock)..." -ForegroundColor Cyan
     uv export --format requirements.txt --no-dev --frozen --no-hashes --no-emit-project -o $requirementsPath | Out-Null
     Assert-LastExitCode "uv export"
 
+    $currentStep = "bootstrap pip"
     Write-Host "Bootstrapping pip..." -ForegroundColor Cyan
     try {
         & $pythonExe -m pip --version | Out-Null
@@ -261,7 +265,9 @@ try {
 
     Write-Host "Installing dependencies (this can take a while)..." -ForegroundColor Cyan
     if (Test-Path $sitePackagesDir) {
-        Remove-Item -Recurse -Force $sitePackagesDir
+        Invoke-RetryIO -Step "Remove site-packages dir" -Retries 3 -Action {
+            Remove-Item -LiteralPath $sitePackagesDir -Recurse -Force
+        } | Out-Null
     }
     New-Item -ItemType Directory -Force -Path $sitePackagesDir | Out-Null
 
@@ -269,6 +275,7 @@ try {
     $origTmp = $env:TMP
     $origGitConfig = $env:GIT_CONFIG_PARAMETERS
     $origPipVersionCheck = $env:PIP_DISABLE_PIP_VERSION_CHECK
+    $origPipCacheDir = $env:PIP_CACHE_DIR
     $pipTempRoot = $pipTempRootResolved
     $pipTempName = "p" + [guid]::NewGuid().ToString("N").Substring(0, 8)
     $pipTemp = Join-Path $pipTempRoot $pipTempName
@@ -279,9 +286,19 @@ try {
     $env:TMP = $pipTemp
     $env:GIT_CONFIG_PARAMETERS = "'core.longpaths=true'"
     $env:PIP_DISABLE_PIP_VERSION_CHECK = "1"
+    $env:PIP_CACHE_DIR = $pipCacheDir
+    New-Item -ItemType Directory -Force -Path $pipCacheDir | Out-Null
 
     $currentStep = "pip install dependencies"
-    $pipArgs = @("install", "--no-deps", "--target", $sitePackagesDir, "-r", $requirementsPath)
+    $pipArgs = @(
+        "install",
+        "--no-deps",
+        "--target", $sitePackagesDir,
+        "--no-input",
+        "--progress-bar", "off",
+        "--retries", "10",
+        "--timeout", "60"
+    )
     $needsLlamaCppWheelIndex = Select-String -LiteralPath $requirementsPath -Pattern "^llama-cpp-python" -Quiet
     if ($needsLlamaCppWheelIndex) {
         $llamaExtraIndexUrl = $LlamaCppPythonExtraIndexUrl.Trim()
@@ -289,15 +306,12 @@ try {
             throw "LlamaCppPythonExtraIndexUrl must be non-empty because requirements include llama-cpp-python."
         }
 
-        $pipArgs = @(
-            "install",
-            "--no-deps",
-            "--target", $sitePackagesDir,
+        $pipArgs += @(
             "--only-binary", "llama-cpp-python",
-            "--extra-index-url", $llamaExtraIndexUrl,
-            "-r", $requirementsPath
+            "--extra-index-url", $llamaExtraIndexUrl
         )
     }
+    $pipArgs += @("-r", $requirementsPath)
     try {
         & $pythonExe -m pip @pipArgs
         Assert-LastExitCode "pip install"
@@ -305,9 +319,17 @@ try {
     finally {
         $env:TEMP = $origTemp
         $env:TMP = $origTmp
-        $env:GIT_CONFIG_PARAMETERS = $origGitConfig
-        $env:PIP_DISABLE_PIP_VERSION_CHECK = $origPipVersionCheck
-        Remove-Item -Recurse -Force $pipTemp -ErrorAction SilentlyContinue
+        if ($null -ne $origGitConfig) { $env:GIT_CONFIG_PARAMETERS = $origGitConfig } else { Remove-Item env:GIT_CONFIG_PARAMETERS -ErrorAction SilentlyContinue }
+        if ($null -ne $origPipVersionCheck) { $env:PIP_DISABLE_PIP_VERSION_CHECK = $origPipVersionCheck } else { Remove-Item env:PIP_DISABLE_PIP_VERSION_CHECK -ErrorAction SilentlyContinue }
+        if ($null -ne $origPipCacheDir) { $env:PIP_CACHE_DIR = $origPipCacheDir } else { Remove-Item env:PIP_CACHE_DIR -ErrorAction SilentlyContinue }
+        if (Test-Path $pipTemp) {
+            try {
+                Invoke-RetryIO -Step "Cleanup pip temp dir" -Retries 3 -Action { Remove-Item -LiteralPath $pipTemp -Recurse -Force } | Out-Null
+            }
+            catch {
+                Write-Warning "Failed to clean up pip temp dir (best-effort): $pipTemp"
+            }
+        }
     }
 
     $currentStep = "copy app source"
@@ -624,6 +646,8 @@ catch {
     Write-Warning "  output: $OutputDir"
     Write-Warning "  python: $PythonVersion ($TargetTriple)"
     Write-Warning "  pbs:    $PbsRelease"
+    Write-Warning "  pip_temp:  $pipTempRootResolved"
+    Write-Warning "  pip_cache: $pipCacheDir"
     throw
 }
 finally {
