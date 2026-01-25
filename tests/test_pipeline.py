@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from typing import cast
 
 import pytest
@@ -92,13 +93,14 @@ def test_merge_ocr_with_pymupdf_corrects_single_kanji() -> None:
 
 def _analysis(
     *,
+    page_number: int = 1,
     page_kind: PageKind,
     score: float,
     table_likelihood: float = 0.0,
     normalized_text: str = "pymupdf",
 ) -> PageAnalysis:
     return PageAnalysis(
-        page_number=1,
+        page_number=page_number,
         raw_text=normalized_text,
         normalized_text=normalized_text,
         tokens=("t",),
@@ -200,3 +202,81 @@ def test_pdf_to_markdown_requires_ocr_for_table_and_ambiguous_table_pages(
     calls["n"] = 0
     assert pdf_to_markdown(b"pdf") == "OCR"
     assert calls["n"] == 1
+
+
+def test_pdf_to_markdown_writes_page_artifacts_and_meta(
+    tmp_path_factory: pytest.TempPathFactory,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    out_dir = tmp_path_factory.mktemp("artifacts")
+
+    analyses = [
+        _analysis(page_number=1, page_kind=PageKind.text, score=1.0, normalized_text="PYM1"),
+        _analysis(
+            page_number=2,
+            page_kind=PageKind.table,
+            score=1.0,
+            normalized_text="PYM2",
+            table_likelihood=1.0,
+        ),
+    ]
+
+    monkeypatch.setattr("ragprep.pipeline.analyze_pdf_pages", lambda *_a, **_k: analyses)
+    monkeypatch.setattr(
+        "ragprep.pipeline.iter_pdf_images",
+        lambda _pdf_bytes: (2, iter([object(), object()])),
+    )
+
+    calls = {"n": 0}
+
+    def fake_ocr(_image: object) -> str:
+        calls["n"] += 1
+        return "OCR2"
+
+    monkeypatch.setattr("ragprep.pipeline.ocr_image", fake_ocr)
+
+    result = pdf_to_markdown(b"pdf", page_output_dir=out_dir)
+    assert result == "PYM1\n\nOCR2"
+    assert calls["n"] == 1
+
+    p1_ocr = out_dir / "page-0001.ocr.md"
+    p1_pym = out_dir / "page-0001.pymupdf.md"
+    p1_merged = out_dir / "page-0001.merged.md"
+    p1_meta = out_dir / "page-0001.meta.json"
+
+    p2_ocr = out_dir / "page-0002.ocr.md"
+    p2_pym = out_dir / "page-0002.pymupdf.md"
+    p2_merged = out_dir / "page-0002.merged.md"
+    p2_meta = out_dir / "page-0002.meta.json"
+
+    assert p1_ocr.exists() and p1_pym.exists() and p1_merged.exists() and p1_meta.exists()
+    assert p2_ocr.exists() and p2_pym.exists() and p2_merged.exists() and p2_meta.exists()
+
+    assert p1_ocr.read_text(encoding="utf-8").strip() == ""
+    assert p1_pym.read_text(encoding="utf-8").strip() == "PYM1"
+    assert p1_merged.read_text(encoding="utf-8").strip() == "PYM1"
+
+    meta1 = json.loads(p1_meta.read_text(encoding="utf-8"))
+    assert meta1["page_number"] == 1
+    assert meta1["page_kind"] == "text"
+    assert meta1["selected_source"] == "pymupdf"
+    assert meta1["ocr_required"] is False
+    assert isinstance(meta1["ocr_reason"], str) and meta1["ocr_reason"]
+
+    assert p2_ocr.read_text(encoding="utf-8").strip() == "OCR2"
+    assert p2_pym.read_text(encoding="utf-8").strip() == "PYM2"
+    assert p2_merged.read_text(encoding="utf-8").strip() == "OCR2"
+
+    meta2 = json.loads(p2_meta.read_text(encoding="utf-8"))
+    assert meta2["page_number"] == 2
+    assert meta2["page_kind"] == "table"
+    assert meta2["selected_source"] == "ocr"
+    assert meta2["ocr_required"] is True
+    assert isinstance(meta2["ocr_reason"], str) and meta2["ocr_reason"]
+
+    merged_pages = [
+        p1_merged.read_text(encoding="utf-8").strip(),
+        p2_merged.read_text(encoding="utf-8").strip(),
+    ]
+    combined = "\n\n".join(p for p in merged_pages if p.strip()).strip()
+    assert combined == result

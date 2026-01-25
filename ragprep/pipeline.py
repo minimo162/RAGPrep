@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 import difflib
+import json
 import re
 from collections.abc import Callable
 from dataclasses import dataclass
 from enum import Enum
+from pathlib import Path
+from typing import Any
 
 from ragprep.ocr.lightonocr import ocr_image
 from ragprep.pdf_render import iter_pdf_images
@@ -58,6 +61,7 @@ class MergeStats:
     changed_token_count: int
     applied_block_count: int
     samples: tuple[str, ...] = ()
+    replacements: tuple[tuple[str, str], ...] = ()
 
 
 def _is_japanese_char(ch: str) -> bool:
@@ -126,6 +130,7 @@ def merge_ocr_with_pymupdf(ocr_text: str, pymupdf_text: str) -> tuple[str, Merge
     changed_token_count = 0
     applied_block_count = 0
     samples: list[str] = []
+    replacements: list[tuple[str, str]] = []
 
     matcher = difflib.SequenceMatcher(a=ocr_tokens, b=pymupdf_tokens, autojunk=False)
     for tag, i1, i2, j1, j2 in matcher.get_opcodes():
@@ -196,8 +201,12 @@ def merge_ocr_with_pymupdf(ocr_text: str, pymupdf_text: str) -> tuple[str, Merge
         applied_block_count += 1
         if len(samples) < 3:
             samples.append(f"{ocr_compact[:40]} -> {merged_compact[:40]}")
+        if len(replacements) < 20:
+            before = ocr_compact if len(ocr_compact) <= 80 else (ocr_compact[:80] + "…")
+            after = merged_compact if len(merged_compact) <= 80 else (merged_compact[:80] + "…")
+            replacements.append((before, after))
 
-    merged_text = "".join(out_chars).strip()
+        merged_text = "".join(out_chars).strip()
     return (
         merged_text,
         MergeStats(
@@ -205,6 +214,7 @@ def merge_ocr_with_pymupdf(ocr_text: str, pymupdf_text: str) -> tuple[str, Merge
             changed_token_count=changed_token_count,
             applied_block_count=applied_block_count,
             samples=tuple(samples),
+            replacements=tuple(replacements),
         ),
     )
 
@@ -222,7 +232,61 @@ def _requires_ocr_for_page(
     return text_quality_score < _DEFAULT_SKIP_OCR_MIN_SCORE
 
 
-def pdf_to_markdown(pdf_bytes: bytes, *, on_progress: ProgressCallback | None = None) -> str:
+def _write_text_artifact(path: Path, text: str) -> None:
+    path.write_text(text + ("\n" if text else ""), encoding="utf-8")
+
+
+def _write_json_artifact(path: Path, payload: dict[str, Any]) -> None:
+    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+
+def _estimate_replace_counts(a_text: str, b_text: str) -> tuple[int, int]:
+    a = normalize_extracted_text(a_text)
+    b = normalize_extracted_text(b_text)
+
+    a_tokens = tokenize_by_char_class(a)
+    b_tokens = tokenize_by_char_class(b)
+    if not a_tokens or not b_tokens:
+        return 0, 0
+
+    replaced_tokens_estimated = 0
+    replaced_chars_estimated = 0
+    matcher = difflib.SequenceMatcher(a=a_tokens, b=b_tokens, autojunk=False)
+    for tag, i1, i2, j1, j2 in matcher.get_opcodes():
+        if tag != "replace":
+            continue
+        replaced_tokens_estimated += max(i2 - i1, j2 - j1)
+        replaced_chars_estimated += max(
+            len("".join(a_tokens[i1:i2])),
+            len("".join(b_tokens[j1:j2])),
+        )
+    return replaced_tokens_estimated, replaced_chars_estimated
+
+
+def _short_unified_diff(a_text: str, b_text: str, *, max_lines: int = 60) -> list[str]:
+    try:
+        lines = list(
+            difflib.unified_diff(
+                a_text.splitlines(),
+                b_text.splitlines(),
+                fromfile="ocr",
+                tofile="pymupdf",
+                lineterm="",
+            )
+        )
+    except Exception:  # noqa: BLE001
+        return []
+    if len(lines) > max_lines:
+        return lines[:max_lines] + ["...(truncated)..."]
+    return lines
+
+
+def pdf_to_markdown(
+    pdf_bytes: bytes,
+    *,
+    on_progress: ProgressCallback | None = None,
+    page_output_dir: Path | None = None,
+) -> str:
     """
     Convert a PDF (bytes) into a Markdown/text string.
 
@@ -239,6 +303,9 @@ def pdf_to_markdown(pdf_bytes: bytes, *, on_progress: ProgressCallback | None = 
     except Exception:  # noqa: BLE001
         page_analyses = None
 
+    if page_output_dir is not None:
+        page_output_dir.mkdir(parents=True, exist_ok=True)
+
     _notify_progress(
         on_progress,
         PdfToMarkdownProgress(
@@ -249,6 +316,7 @@ def pdf_to_markdown(pdf_bytes: bytes, *, on_progress: ProgressCallback | None = 
         ),
     )
     total_pages, images = iter_pdf_images(pdf_bytes)
+    pad = max(4, len(str(total_pages)))
     if page_analyses is not None and len(page_analyses) != total_pages:
         page_analyses = None
     _notify_progress(
@@ -271,20 +339,41 @@ def pdf_to_markdown(pdf_bytes: bytes, *, on_progress: ProgressCallback | None = 
     )
     page_texts: list[str] = []
     for page_number, image in enumerate(images, start=1):
+        page_prefix = f"page-{page_number:0{pad}d}"
+
         analysis = page_analyses[page_number - 1] if page_analyses is not None else None
         requires_ocr = True
+        ocr_reason = "analysis_unavailable"
         if analysis is not None:
             requires_ocr = _requires_ocr_for_page(
                 analysis.page_kind,
                 text_quality_score=analysis.text_quality.score,
                 table_likelihood=analysis.table_likelihood,
             )
+            if analysis.page_kind in (
+                PageKind.table,
+                PageKind.image,
+                PageKind.mixed,
+                PageKind.empty,
+            ):
+                ocr_reason = f"page_kind={analysis.page_kind.value}"
+            elif analysis.table_likelihood >= _DEFAULT_TABLE_OCR_LIKELIHOOD_MIN:
+                ocr_reason = f"table_likelihood>={_DEFAULT_TABLE_OCR_LIKELIHOOD_MIN}"
+            elif analysis.text_quality.score < _DEFAULT_SKIP_OCR_MIN_SCORE:
+                ocr_reason = f"text_quality<{_DEFAULT_SKIP_OCR_MIN_SCORE}"
+            else:
+                ocr_reason = f"text_quality>={_DEFAULT_SKIP_OCR_MIN_SCORE}"
+
+        pymupdf_text = analysis.normalized_text.strip() if analysis is not None else ""
+        ocr_text = ""
+        merged_text = ""
+        selected_source = "ocr"
+        merge_stats: MergeStats | None = None
 
         progress_message = f"page {page_number}"
         if requires_ocr:
             ocr_text = normalize_extracted_text(ocr_image(image)).strip()
             merged_text = ocr_text
-            merge_stats = None
             if analysis is not None and analysis.page_kind == PageKind.text:
                 if (
                     analysis.text_quality.score >= _DEFAULT_MERGE_MIN_SCORE
@@ -294,16 +383,90 @@ def pdf_to_markdown(pdf_bytes: bytes, *, on_progress: ProgressCallback | None = 
                         ocr_text, analysis.normalized_text
                     )
                     if merge_stats.changed_char_count:
+                        selected_source = "merged"
                         progress_message = (
                             f"page {page_number} (merged {merge_stats.changed_char_count})"
                         )
+            if selected_source != "merged":
+                selected_source = "ocr"
             if merged_text:
                 page_texts.append(merged_text)
         else:
-            text_layer = analysis.normalized_text.strip() if analysis is not None else ""
-            if text_layer:
-                page_texts.append(text_layer)
+            merged_text = pymupdf_text
+            selected_source = "pymupdf"
+            if merged_text:
+                page_texts.append(merged_text)
             progress_message = f"page {page_number} (skip ocr)"
+
+        if page_output_dir is not None:
+            ocr_path = page_output_dir / f"{page_prefix}.ocr.md"
+            pymupdf_path = page_output_dir / f"{page_prefix}.pymupdf.md"
+            merged_path = page_output_dir / f"{page_prefix}.merged.md"
+            meta_path = page_output_dir / f"{page_prefix}.meta.json"
+
+            _write_text_artifact(ocr_path, ocr_text)
+            _write_text_artifact(pymupdf_path, pymupdf_text)
+            _write_text_artifact(merged_path, merged_text)
+
+            replaced_tokens_estimated = 0
+            replaced_chars_estimated = 0
+            diff_preview: list[str] = []
+            if ocr_text and pymupdf_text:
+                replaced_tokens_estimated, replaced_chars_estimated = _estimate_replace_counts(
+                    ocr_text, pymupdf_text
+                )
+                diff_preview = _short_unified_diff(ocr_text, pymupdf_text)
+
+            meta: dict[str, Any] = {
+                "page_number": page_number,
+                "page_kind": analysis.page_kind.value if analysis is not None else "unknown",
+                "analysis_available": analysis is not None,
+                "selected_source": selected_source,
+                "ocr_required": bool(requires_ocr),
+                "ocr_skipped": not requires_ocr,
+                "ocr_reason": ocr_reason,
+                "pymupdf": {
+                    "score": analysis.text_quality.score if analysis is not None else None,
+                    "visible_char_count": (
+                        analysis.text_quality.visible_char_count if analysis is not None else None
+                    ),
+                    "replacement_char_ratio": (
+                        analysis.text_quality.replacement_char_ratio
+                        if analysis is not None
+                        else None
+                    ),
+                    "symbol_ratio": analysis.text_quality.symbol_ratio
+                    if analysis is not None
+                    else None,
+                },
+                "table_likelihood": analysis.table_likelihood if analysis is not None else None,
+                "image_count": analysis.image_count if analysis is not None else None,
+                "image_area_ratio": analysis.image_area_ratio if analysis is not None else None,
+                "merge": {
+                    "applied": merge_stats is not None,
+                    "changed_chars": (
+                        int(merge_stats.changed_char_count) if merge_stats is not None else 0
+                    ),
+                    "changed_tokens": (
+                        int(merge_stats.changed_token_count) if merge_stats is not None else 0
+                    ),
+                    "applied_blocks": (
+                        int(merge_stats.applied_block_count) if merge_stats is not None else 0
+                    ),
+                    "samples": list(merge_stats.samples) if merge_stats is not None else [],
+                    "replacements": (
+                        [{"before": b, "after": a} for (b, a) in merge_stats.replacements]
+                        if merge_stats is not None
+                        else []
+                    ),
+                },
+                "diff_estimate": {
+                    "replaced_tokens": int(replaced_tokens_estimated),
+                    "replaced_chars": int(replaced_chars_estimated),
+                },
+                "diff_preview": diff_preview,
+            }
+            _write_json_artifact(meta_path, meta)
 
         _notify_progress(
             on_progress,
