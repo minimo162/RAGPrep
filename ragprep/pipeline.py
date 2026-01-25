@@ -442,23 +442,17 @@ def pdf_to_markdown(
                 if (
                     table_merge_stats is not None
                     and table_merge_stats.reason == "no_table"
-                    and page_kind_obj in (PageKind.text, PageKind.mixed)
                     and has_text_layer
                 ):
-                    if table_likelihood >= _DEFAULT_TABLE_OCR_LIKELIHOOD_MIN:
-                        merge_reason = f"table_likelihood>={_DEFAULT_TABLE_OCR_LIKELIHOOD_MIN}"
-                    elif text_quality.score < _DEFAULT_MERGE_MIN_SCORE:
-                        merge_reason = f"text_quality<{_DEFAULT_MERGE_MIN_SCORE}"
+                    merged_text, merge_stats = merge_ocr_with_pymupdf(ocr_text, normalized_text)
+                    if merge_stats.changed_char_count:
+                        selected_source = "merged"
+                        merge_reason = f"changed_chars={merge_stats.changed_char_count}"
+                        progress_message = (
+                            f"page {page_number} (merged {merge_stats.changed_char_count})"
+                        )
                     else:
-                        merged_text, merge_stats = merge_ocr_with_pymupdf(ocr_text, normalized_text)
-                        if merge_stats.changed_char_count:
-                            selected_source = "merged"
-                            merge_reason = f"changed_chars={merge_stats.changed_char_count}"
-                            progress_message = (
-                                f"page {page_number} (merged {merge_stats.changed_char_count})"
-                            )
-                        else:
-                            merge_reason = "attempted_no_changes"
+                        merge_reason = "attempted_no_changes"
 
                 if merge_reason is None:
                     if not has_text_layer:

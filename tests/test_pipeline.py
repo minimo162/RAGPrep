@@ -241,6 +241,48 @@ def test_pdf_to_markdown_text_first_renders_only_ocr_pages_and_writes_artifacts(
     assert combined == result
 
 
+def test_pdf_to_markdown_applies_text_merge_and_concatenates_pages(
+    tmp_path_factory: pytest.TempPathFactory,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    out_dir = tmp_path_factory.mktemp("merge-artifacts")
+    pdf_bytes = _make_pdf_bytes(["ABCDE", "HELLO"])
+    expected_pymupdf_1 = _expected_pymupdf_page_text(pdf_bytes, 0)
+    expected_pymupdf_2 = _expected_pymupdf_page_text(pdf_bytes, 1)
+
+    monkeypatch.setattr("ragprep.pipeline._render_page_to_image", lambda *_a, **_k: object())
+
+    calls = {"n": 0}
+
+    def fake_ocr(_image: object) -> str:
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return "AB\ufffdDE"
+        if calls["n"] == 2:
+            return "HE\ufffdLO"
+        raise AssertionError("Unexpected extra page")
+
+    monkeypatch.setattr("ragprep.pipeline.ocr_image", fake_ocr)
+
+    result = pdf_to_markdown(pdf_bytes, page_output_dir=out_dir)
+    assert calls["n"] == 2
+    assert result == f"{expected_pymupdf_1}\n\n{expected_pymupdf_2}"
+
+    meta1 = json.loads((out_dir / "page-0001.meta.json").read_text(encoding="utf-8"))
+    assert meta1["ocr_reason"] == "forced_all_pages"
+    assert meta1["selected_source"] == "merged"
+    assert meta1["selected_source_reason"] == "text_merge_applied"
+    assert meta1["merge"]["used"] is True
+    assert meta1["merge"]["changed_chars"] == 1
+
+    meta2 = json.loads((out_dir / "page-0002.meta.json").read_text(encoding="utf-8"))
+    assert meta2["ocr_reason"] == "forced_all_pages"
+    assert meta2["selected_source"] == "merged"
+    assert meta2["selected_source_reason"] == "text_merge_applied"
+    assert meta2["merge"]["used"] is True
+    assert meta2["merge"]["changed_chars"] == 1
+
+
 def test_pdf_to_markdown_table_page_applies_table_cell_merge_and_records_meta(
     tmp_path_factory: pytest.TempPathFactory,
     monkeypatch: pytest.MonkeyPatch,
