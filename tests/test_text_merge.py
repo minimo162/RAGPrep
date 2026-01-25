@@ -80,3 +80,14 @@ def test_merge_ocr_with_pymupdf_does_not_modify_email_like_spans() -> None:
     assert merged == ocr_text
     assert stats.changed_char_count == 0
     assert stats.applied_block_count == 0
+
+
+def test_merge_ocr_with_pymupdf_can_fix_replacement_char_with_insertions() -> None:
+    ocr_text = "AB\ufffdDE"
+    pymupdf_text = "ABZCDE"
+
+    merged, stats = merge_ocr_with_pymupdf(ocr_text, pymupdf_text)
+
+    assert merged == "ABCDE"
+    assert stats.changed_char_count == 1
+    assert stats.applied_block_count == 1
