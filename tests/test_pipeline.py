@@ -26,6 +26,27 @@ def _make_pdf_bytes(page_texts: list[str]) -> bytes:
     return cast(bytes, doc.tobytes())
 
 
+def _make_table_pdf_bytes(rows: int = 20) -> bytes:
+    import fitz
+
+    doc = fitz.open()
+    page = doc.new_page()
+
+    y = 72
+    page.insert_text((72, y), "Item")
+    page.insert_text((200, y), "N")
+    page.insert_text((320, y), "Value")
+    y += 12
+
+    for i in range(rows):
+        page.insert_text((72, y), f"Item{i}")
+        page.insert_text((200, y), f"{i}")
+        page.insert_text((320, y), f"{i * 10}")
+        y += 12
+
+    return cast(bytes, doc.tobytes())
+
+
 def test_pdf_to_markdown_concatenates_pages_and_normalizes_newlines(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -192,3 +213,39 @@ def test_pdf_to_markdown_text_first_renders_only_ocr_pages_and_writes_artifacts(
     ]
     combined = "\n\n".join(p for p in merged_pages if p.strip()).strip()
     assert combined == result
+
+
+def test_pdf_to_markdown_table_page_applies_table_cell_merge_and_records_meta(
+    tmp_path_factory: pytest.TempPathFactory,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    out_dir = tmp_path_factory.mktemp("table-artifacts")
+    pdf_bytes = _make_table_pdf_bytes(rows=20)
+
+    monkeypatch.setattr("ragprep.pipeline._render_page_to_image", lambda *_a, **_k: object())
+
+    rows = []
+    for i in range(20):
+        item = f"Item{i}"
+        if i == 5:
+            item = f"It\ufffdm{i}"
+        rows.append(f"| {item} | {i} | {i * 10} |")
+
+    ocr_md = "\n".join(
+        [
+            "| Item | N | Value |",
+            "|---|---|---|",
+            *rows,
+        ]
+    )
+    monkeypatch.setattr("ragprep.pipeline.ocr_image", lambda _image: ocr_md)
+
+    result = pdf_to_markdown(pdf_bytes, page_output_dir=out_dir)
+    assert "Item5" in result
+    assert "It\ufffdm5" not in result
+
+    meta = json.loads((out_dir / "page-0001.meta.json").read_text(encoding="utf-8"))
+    assert meta["page_kind"] == "table"
+    assert meta["table_merge"]["applied"] is True
+    assert meta["table_merge"]["changed_cells"] >= 1
+    assert meta["table_merge"]["changed_chars"] >= 1

@@ -24,11 +24,13 @@ from ragprep.pdf_text import (
     score_text_quality,
     tokenize_by_char_class,
 )
+from ragprep.table_merge import TableMergeStats, merge_markdown_tables_with_pymupdf_words
 from ragprep.text_merge import MergeStats, merge_ocr_with_pymupdf
 
 _DEFAULT_SKIP_OCR_MIN_SCORE = 0.85
 _DEFAULT_TABLE_OCR_LIKELIHOOD_MIN = 0.45
 _DEFAULT_MERGE_MIN_SCORE = 0.55
+_DEFAULT_TABLE_MERGE_MIN_SCORE = 0.15
 
 
 class ProgressPhase(str, Enum):
@@ -378,6 +380,7 @@ def pdf_to_markdown(
             merged_text = ""
             selected_source = "ocr"
             merge_stats = None
+            table_merge_stats: TableMergeStats | None = None
 
             progress_message = f"page {page_number}"
             if requires_ocr:
@@ -395,6 +398,21 @@ def pdf_to_markdown(
                             progress_message = (
                                 f"page {page_number} (merged {merge_stats.changed_char_count})"
                             )
+                elif page_kind_obj == PageKind.table and has_text_layer:
+                    if text_quality.score >= _DEFAULT_TABLE_MERGE_MIN_SCORE:
+                        merged_table_text, table_merge_stats = (
+                            merge_markdown_tables_with_pymupdf_words(ocr_text, words)
+                        )
+                        if table_merge_stats.applied:
+                            merged_text = merged_table_text
+                    else:
+                        table_merge_stats = TableMergeStats(
+                            applied=False,
+                            changed_cells=0,
+                            changed_chars=0,
+                            confidence=None,
+                            reason=f"text_quality<{_DEFAULT_TABLE_MERGE_MIN_SCORE}",
+                        )
                 if selected_source != "merged":
                     selected_source = "ocr"
                 if merged_text:
@@ -424,6 +442,29 @@ def pdf_to_markdown(
                         ocr_text, pymupdf_text
                     )
                     diff_preview = _short_unified_diff(ocr_text, pymupdf_text)
+
+                table_merge_meta: dict[str, Any] = {
+                    "attempted": table_merge_stats is not None,
+                    "applied": bool(table_merge_stats.applied) if table_merge_stats else False,
+                    "changed_cells": (
+                        int(table_merge_stats.changed_cells) if table_merge_stats is not None else 0
+                    ),
+                    "changed_chars": (
+                        int(table_merge_stats.changed_chars) if table_merge_stats is not None else 0
+                    ),
+                    "confidence": (
+                        float(table_merge_stats.confidence)
+                        if (
+                            table_merge_stats is not None
+                            and table_merge_stats.confidence is not None
+                        )
+                        else None
+                    ),
+                    "reason": table_merge_stats.reason if table_merge_stats is not None else None,
+                    "samples": list(table_merge_stats.samples)
+                    if table_merge_stats is not None
+                    else [],
+                }
 
                 meta = {
                     "page_number": page_number,
@@ -460,6 +501,7 @@ def pdf_to_markdown(
                             else []
                         ),
                     },
+                    "table_merge": table_merge_meta,
                     "diff_estimate": {
                         "replaced_tokens": int(replaced_tokens_estimated),
                         "replaced_chars": int(replaced_chars_estimated),
