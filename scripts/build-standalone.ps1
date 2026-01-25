@@ -489,7 +489,8 @@ if __name__ == "__main__":
     $runPs1 = @"
 [CmdletBinding()]
 param(
-    [string]`$Host = "127.0.0.1",
+    [Alias("Host")]
+    [string]`$BindHost = "127.0.0.1",
     [int]`$Port = 8000
 )
 
@@ -532,7 +533,7 @@ if (-not `$env:LIGHTONOCR_LLAVA_CLI_PATH -or [string]::IsNullOrWhiteSpace(`$env:
 `$env:PYTHONUTF8 = "1"
 `$env:PYTHONPATH = (Join-Path `$root "app") + ";" + (Join-Path `$root "site-packages")
 
-& `$pythonExe -m uvicorn ragprep.web.app:app --host `$Host --port `$Port
+& `$pythonExe -m uvicorn ragprep.web.app:app --host `$BindHost --port `$Port
 "@
     Set-Content -Path (Join-Path $OutputDir "run.ps1") -Value $runPs1 -Encoding UTF8
 
@@ -542,7 +543,7 @@ setlocal
 set ROOT=%~dp0
 if "%HF_HOME%"=="" (
   set HF_HOME=%ROOT%data\hf
-  if not exist "%HF_HOME%" mkdir "%HF_HOME%"
+  if not exist "%ROOT%data\hf" mkdir "%ROOT%data\hf"
 )
 if "%LIGHTONOCR_GGUF_MODEL_PATH%"=="" (
   set LIGHTONOCR_GGUF_MODEL_PATH=%ROOT%data\models\lightonocr-gguf\$ggufModelFileTrimmed
