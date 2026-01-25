@@ -29,15 +29,56 @@ function Assert-LastExitCode {
     }
 }
 
+function Get-RequiredTrimmedString {
+    param(
+        [Parameter(Mandatory = $true)][string]$Name,
+        [Parameter(Mandatory = $false)][string]$Value
+    )
+
+    if ($null -eq $Value) {
+        throw "$Name must be non-empty (got: <null>)"
+    }
+
+    $trimmed = $Value.Trim()
+    if ([string]::IsNullOrWhiteSpace($trimmed)) {
+        throw "$Name must be non-empty (got: '$Value')"
+    }
+
+    return $trimmed
+}
+
+$currentStep = "initializing"
+$startedAt = Get-Date
+
 # filesystem helpers (retry + robust move)
 . (Join-Path $PSScriptRoot "standalone-io.ps1")
 
 Push-Location $repoRoot
 try {
+    $currentStep = "normalize parameters"
+    $PythonVersion = Get-RequiredTrimmedString -Name "PythonVersion" -Value $PythonVersion
+    $TargetTriple = Get-RequiredTrimmedString -Name "TargetTriple" -Value $TargetTriple
+    $PbsRelease = Get-RequiredTrimmedString -Name "PbsRelease" -Value $PbsRelease
+
     if ([string]::IsNullOrWhiteSpace($OutputDir)) {
         $OutputDir = "dist/standalone"
     }
     $OutputDir = [System.IO.Path]::GetFullPath($OutputDir)
+
+    $pipTempRootResolved = $PipTempRoot
+    if ([string]::IsNullOrWhiteSpace($pipTempRootResolved)) {
+        $pipTempRootResolved = Join-Path $env:LOCALAPPDATA "t"
+    }
+    $pipTempRootResolved = [System.IO.Path]::GetFullPath($pipTempRootResolved)
+
+    Write-Host "RAGPrep standalone build" -ForegroundColor Cyan
+    Write-Host "  repo:       $repoRoot" -ForegroundColor DarkGray
+    Write-Host "  output:     $OutputDir" -ForegroundColor DarkGray
+    Write-Host "  python:     $PythonVersion ($TargetTriple)" -ForegroundColor DarkGray
+    Write-Host "  pbs:        $PbsRelease" -ForegroundColor DarkGray
+    Write-Host "  clean:      $($Clean.IsPresent)" -ForegroundColor DarkGray
+    Write-Host "  gguf_fetch: $(-not $SkipGgufPrefetch.IsPresent)" -ForegroundColor DarkGray
+    Write-Host "  pip_temp:   $pipTempRootResolved" -ForegroundColor DarkGray
 
     if ($Clean -and (Test-Path $OutputDir)) {
         try {
@@ -75,6 +116,7 @@ try {
         throw "tar not found on PATH. Install bsdtar or use Windows 10+ built-in tar."
     }
 
+    $currentStep = "fetch python-build-standalone release metadata"
     $headers = @{ "User-Agent" = "ragprep-standalone-build" }
     if ($PbsRelease -eq "latest") {
         $release = Invoke-RestMethod `
@@ -96,6 +138,7 @@ try {
 
     $archivePath = Join-Path $cacheDir $asset.name
     if (-not (Test-Path $archivePath)) {
+        $currentStep = "download python-build-standalone archive"
         Write-Host "Downloading $($asset.name)..." -ForegroundColor Cyan
         Invoke-WebRequest -Uri $asset.browser_download_url -OutFile $archivePath
     }
@@ -108,10 +151,12 @@ try {
     }
     New-Item -ItemType Directory -Force -Path $extractDir | Out-Null
 
+    $currentStep = "extract python runtime"
     Write-Host "Extracting Python runtime..." -ForegroundColor Cyan
     & tar -xf $archivePath -C $extractDir
     Assert-LastExitCode "tar extract"
 
+    $currentStep = "relocate python runtime"
     $pythonExeCandidate = Get-ChildItem -Path $extractDir -Recurse -File -Filter python.exe |
         Where-Object {
             $dll = Get-ChildItem -Path $_.Directory.FullName -File -Filter "python*.dll" -ErrorAction SilentlyContinue |
@@ -224,10 +269,7 @@ try {
     $origTmp = $env:TMP
     $origGitConfig = $env:GIT_CONFIG_PARAMETERS
     $origPipVersionCheck = $env:PIP_DISABLE_PIP_VERSION_CHECK
-    $pipTempRoot = $PipTempRoot
-    if ([string]::IsNullOrWhiteSpace($pipTempRoot)) {
-        $pipTempRoot = Join-Path $env:LOCALAPPDATA "t"
-    }
+    $pipTempRoot = $pipTempRootResolved
     $pipTempName = "p" + [guid]::NewGuid().ToString("N").Substring(0, 8)
     $pipTemp = Join-Path $pipTempRoot $pipTempName
     New-Item -ItemType Directory -Force -Path $pipTempRoot | Out-Null
@@ -238,6 +280,7 @@ try {
     $env:GIT_CONFIG_PARAMETERS = "'core.longpaths=true'"
     $env:PIP_DISABLE_PIP_VERSION_CHECK = "1"
 
+    $currentStep = "pip install dependencies"
     $pipArgs = @("install", "--no-deps", "--target", $sitePackagesDir, "-r", $requirementsPath)
     $needsLlamaCppWheelIndex = Select-String -LiteralPath $requirementsPath -Pattern "^llama-cpp-python" -Quiet
     if ($needsLlamaCppWheelIndex) {
@@ -267,6 +310,7 @@ try {
         Remove-Item -Recurse -Force $pipTemp -ErrorAction SilentlyContinue
     }
 
+    $currentStep = "copy app source"
     Write-Host "Copying app source..." -ForegroundColor Cyan
     if (Test-Path $appDir) {
         Remove-Item -Recurse -Force $appDir
@@ -301,6 +345,7 @@ try {
     $ggufMmprojPath = Join-Path $ggufOutDir $ggufMmprojFileTrimmed
 
     if (-not $SkipGgufPrefetch) {
+        $currentStep = "prefetch gguf artifacts"
         $ggufRepoIdTrimmed = $GgufRepoId.Trim()
         if ([string]::IsNullOrWhiteSpace($ggufRepoIdTrimmed)) {
             throw "GgufRepoId must be non-empty (got: $GgufRepoId)"
@@ -425,6 +470,7 @@ if __name__ == "__main__":
 
     # Bundle llama.cpp (vision CLI) for standalone
     # NOTE: We pin URL + SHA256 to avoid supply-chain drift.
+    $currentStep = "bundle llama.cpp"
     $llamaCppTag = "b7815"
     $llamaCppAsset = "llama-$llamaCppTag-bin-win-cpu-x64.zip"
     $llamaCppSha256 = "7d0fea9f0879cff4a3b6ad16051d28d394566abe7870a20e7f8c14abf9973b57"
@@ -486,6 +532,7 @@ if __name__ == "__main__":
         Write-Host "  llava-cli: $(Join-Path $llamaCppBinDir "llava-cli.exe")" -ForegroundColor DarkGray
     }
 
+    $currentStep = "write run scripts"
     $runPs1 = @"
 [CmdletBinding()]
 param(
@@ -568,6 +615,16 @@ set PYTHONPATH=%ROOT%app;%ROOT%site-packages
     Write-Host "Done." -ForegroundColor Green
     Write-Host "Output: $OutputDir"
     Write-Host "Run:    $OutputDir/run.ps1"
+}
+catch {
+    $duration = (Get-Date) - $startedAt
+    Write-Warning "Standalone build failed after $([int]$duration.TotalSeconds)s."
+    Write-Warning "  step:   $currentStep"
+    Write-Warning "  repo:   $repoRoot"
+    Write-Warning "  output: $OutputDir"
+    Write-Warning "  python: $PythonVersion ($TargetTriple)"
+    Write-Warning "  pbs:    $PbsRelease"
+    throw
 }
 finally {
     Pop-Location
