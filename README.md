@@ -29,6 +29,16 @@ Optional env vars:
 Optional app env vars:
 - `RAGPREP_WARMUP_ON_START=1` (warm up the OCR runtime on startup; effective with `LIGHTONOCR_BACKEND=python`)
 
+## Troubleshooting: `The filename, directory name, or volume label syntax is incorrect.`
+
+If you see this message right before Uvicorn starts when launching the standalone via `dist/standalone/run.cmd`,
+your `run.cmd` is likely outdated.
+
+Fix:
+- Rebuild the standalone (`scripts/build-standalone.ps1`) to regenerate `dist/standalone/run.cmd`.
+- Or edit `dist/standalone/run.cmd` and replace `if not exist "%HF_HOME%" mkdir "%HF_HOME%"` with
+  `if not exist "%ROOT%data\hf" mkdir "%ROOT%data\hf"`.
+
 ## Performance benchmark (render/ocr/total breakdown)
 
 Run the benchmark script to measure where time is spent.
