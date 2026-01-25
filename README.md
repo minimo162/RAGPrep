@@ -39,34 +39,14 @@ Fix:
 - Or edit `dist/standalone/run.cmd` and replace `if not exist "%HF_HOME%" mkdir "%HF_HOME%"` with
   `if not exist "%ROOT%data\hf" mkdir "%ROOT%data\hf"`.
 
-## Performance benchmark (render/ocr/total breakdown)
-
-Run the benchmark script to measure where time is spent.
+## Performance benchmark (conversion total)
 
 Examples (PowerShell):
-- Render-dominant (no inference): `$env:LIGHTONOCR_DRY_RUN='1'; uv run python scripts/bench_pdf_to_markdown.py --synthetic-pages 3`
-- Real OCR (requires GGUF env vars): `uv run python scripts/bench_pdf_to_markdown.py --pdf .\\path\\to\\input.pdf`
-- Compare backends: `$env:LIGHTONOCR_BACKEND='cli'` vs `$env:LIGHTONOCR_BACKEND='python'`
-- Hybrid benchmark (skips OCR on high-quality text pages; table/image pages still OCR): `uv run python scripts/bench_pdf_to_markdown.py --pdf .\\path\\to\\input.pdf --hybrid`
-- Report table_merge stats from artifacts: `uv run python scripts/bench_pdf_to_markdown.py --pdf .\\path\\to\\input.pdf --hybrid --artifacts-dir .\\out\\input-pages`
+- Synthetic (no file I/O): `uv run python scripts/bench_pdf_to_markdown.py --synthetic-pages 3`
+- Local PDF: `uv run python scripts/bench_pdf_to_markdown.py --pdf .\\path\\to\\input.pdf`
 
-Per-page artifacts (diff-friendly):
-- `uv run python scripts/pdf_to_markdown_pages.py --pdf .\\path\\to\\input.pdf --out-dir .\\out\\input-pages --overwrite`
-
-Outputs (in `--out-dir`):
-- `page-0001.pymupdf.md` (PyMuPDF extracted text)
-- `page-0001.ocr.md` (OCR output; empty if skipped)
-- `page-0001.merged.md` (selected output for this page)
-- `page-0001.meta.json` (page_kind, scores, OCR required/skipped, table_merge stats, etc.)
-- `page-0001.diff.txt` (unified diff between OCR and PyMuPDF; only when OCR ran and both sides have text)
-- `merged.md` (concatenated merged pages)
-- `summary.json` (run summary; includes table_merge aggregates)
-
-Notes:
-- PyMuPDF cannot read text inside images, so image pages always require OCR.
-- PyMuPDF often fails to preserve table structure, so table pages use OCR output for structure, then optionally
-  correct OCR table cell text using PyMuPDF words (disable with `--no-table-merge`).
-- PyMuPDF `page.find_tables()` is not perfectly accurate; `--use-find-tables` treats it as a weak hint only (do not rely on it alone).
+Convert a PDF to Markdown:
+- `uv run python scripts/pdf_to_markdown.py --pdf .\\path\\to\\input.pdf --out .\\out\\input.md --overwrite`
 
 Speed-first recommended env preset (PowerShell):
 
@@ -154,7 +134,7 @@ Web UI（`/`）は HTMX のポーリング（1秒間隔）で進捗を更新し�
 PDF -> 画像 -> LightOnOCR（GGUF + llama.cpp）-> Markdown を実行し、出力ファイルを書き込みます。
 事前に GGUF ファイルをローカルに用意し、`LIGHTONOCR_GGUF_MODEL_PATH` / `LIGHTONOCR_GGUF_MMPROJ_PATH` を設定してください。
 
-- 実行: `uv run python scripts/smoke-real-ocr.py path/to/file.pdf`
+- 実行: `uv run python scripts/pdf_to_markdown.py --pdf path/to/file.pdf --out path/to/file.md --overwrite`
 - 出力: `path/to/file.md`（`--out ...` と `--overwrite` を使用）
 
 環境変数:
