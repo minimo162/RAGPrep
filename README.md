@@ -105,7 +105,7 @@ Then you are pointing at a deprecated `llava-cli` shim. Fix options:
 - Point `LIGHTONOCR_LLAVA_CLI_PATH` to `llama-llava-cli.exe` from your llama.cpp release (this project already searches for it), or install/upgrade llama.cpp so `llava-cli` works.
 - For the standalone bundle, ensure the actual llama.cpp CLI + required DLLs are present under `dist/standalone/bin/llama.cpp/` (the self-check prints what it resolved).
 
-LightOnOCR-2-1B（GGUF + llama.cpp）を使った PDF -> Markdown 変換アプリ（FastAPI + htmx）のスキャフォールドです。
+granite-docling-258M（GGUF + llama.cpp）を使った PDF -> Markdown 変換アプリ（FastAPI + htmx）のスキャフォールドです。
 
 ## 推奨パラメータ（llama-mtmd-cli）
 このプロジェクトは `ragprep/ocr/lightonocr.py` から llama.cpp CLI（`llama-mtmd-cli`）を呼び出します。
@@ -160,8 +160,8 @@ PDF -> 画像 -> LightOnOCR（GGUF + llama.cpp）-> Markdown を実行し、出�
 環境変数:
 - `LIGHTONOCR_MAX_NEW_TOKENS`（デフォルト: `1000`）
 - `LIGHTONOCR_DRY_RUN`（truthy で実推論をスキップ）
-- `LIGHTONOCR_GGUF_MODEL_PATH`（必須: `LightOnOCR-2-1B-Q4_K_M.gguf`）
-- `LIGHTONOCR_GGUF_MMPROJ_PATH`（必須: `LightOnOCR-2-1B-mmproj-f16.gguf`）
+- `LIGHTONOCR_GGUF_MODEL_PATH`（必須: `granite-docling-258M-Q4_K_M.gguf`）
+- `LIGHTONOCR_GGUF_MMPROJ_PATH`（必須: `mmproj-model-f16.gguf`）
 - `LIGHTONOCR_LLAMA_N_CTX`（任意: int、未設定時は `4096`）
 - `LIGHTONOCR_LLAMA_N_THREADS`（任意: int）
 - `LIGHTONOCR_LLAMA_N_GPU_LAYERS`（任意: int、未設定時は `99`）
@@ -174,14 +174,14 @@ PDF -> 画像 -> LightOnOCR（GGUF + llama.cpp）-> Markdown を実行し、出�
 GGUF 量子化済モデルを llama.cpp で実行します。
 
 必須モデル（Hugging Face）:
-- `wangjazz/LightOnOCR-2-1B-gguf/LightOnOCR-2-1B-Q4_K_M.gguf`
-- `wangjazz/LightOnOCR-2-1B-gguf/LightOnOCR-2-1B-mmproj-f16.gguf`
+- `mrutkows/granite-docling-258M-GGUF/granite-docling-258M-Q4_K_M.gguf`
+- `mrutkows/granite-docling-258M-GGUF/mmproj-model-f16.gguf`
 
 セットアップ（開発環境例）:
 1) 依存関係のインストール: `uv sync --dev`
 2) 環境変数を設定して実行:
-   - `LIGHTONOCR_GGUF_MODEL_PATH=<...\\LightOnOCR-2-1B-Q4_K_M.gguf>`
-   - `LIGHTONOCR_GGUF_MMPROJ_PATH=<...\\LightOnOCR-2-1B-mmproj-f16.gguf>`
+   - `LIGHTONOCR_GGUF_MODEL_PATH=<...\\granite-docling-258M-Q4_K_M.gguf>`
+   - `LIGHTONOCR_GGUF_MMPROJ_PATH=<...\\mmproj-model-f16.gguf>`
 
 スタンドアロンで `-SkipGgufPrefetch` を指定しない場合は、GGUF は `dist/standalone/data/models/lightonocr-gguf/` にステージされ、`dist/standalone/run.ps1` / `run.cmd` がデフォルトで `LIGHTONOCR_GGUF_MODEL_PATH` / `LIGHTONOCR_GGUF_MMPROJ_PATH` を設定します（未設定の場合）。
 
@@ -203,9 +203,9 @@ GGUF 量子化済モデルを llama.cpp で実行します。
 - `-TargetTriple x86_64-pc-windows-msvc`
 - `-PbsRelease latest`（再現性のために `20260114` のような tag も指定可能）
 - `-PipTempRoot <path>`（デフォルト: `%LOCALAPPDATA%\\t`; パス長エラーが出る場合は短いパスを指定）
-- `-GgufRepoId wangjazz/LightOnOCR-2-1B-gguf`（GGUF の取得元リポジトリ）
-- `-GgufModelFile LightOnOCR-2-1B-Q4_K_M.gguf`（量子化済 LLM）
-- `-GgufMmprojFile LightOnOCR-2-1B-mmproj-f16.gguf`（Vision encoder + projector）
+- `-GgufRepoId mrutkows/granite-docling-258M-GGUF`（GGUF の取得元リポジトリ）
+- `-GgufModelFile granite-docling-258M-Q4_K_M.gguf`（量子化済 LLM）
+- `-GgufMmprojFile mmproj-model-f16.gguf`（Vision encoder + projector）
 - `-SkipGgufPrefetch`（ビルド時に GGUF + mmproj をステージしない）
 
 `dist/standalone/` への出力:
