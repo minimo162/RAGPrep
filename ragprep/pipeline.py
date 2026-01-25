@@ -11,6 +11,7 @@ from typing import Any
 from PIL import Image
 
 from ragprep.config import get_settings
+from ragprep.markdown_table import TableBlock, parse_markdown_blocks
 from ragprep.ocr.lightonocr import ocr_image
 from ragprep.pdf_render import _import_fitz, _pixmap_to_rgb_image, iter_pdf_images
 from ragprep.pdf_text import (
@@ -382,6 +383,8 @@ def pdf_to_markdown(
             merge_stats = None
             merge_reason: str | None = None
             table_merge_stats: TableMergeStats | None = None
+            ocr_markdown_table_detected = False
+            ocr_markdown_table_count = 0
             selected_source_reason: str | None = None
 
             progress_message = f"page {page_number}"
@@ -389,23 +392,49 @@ def pdf_to_markdown(
                 image = _render_page_to_image(page, fitz=fitz, matrix=matrix, max_edge=max_edge)
                 ocr_text = normalize_extracted_text(ocr_image(image)).strip()
                 merged_text = ocr_text
-                if page_kind_obj == PageKind.table and has_text_layer:
-                    merge_reason = f"page_kind={page_kind_obj.value}"
-                    if text_quality.score >= _DEFAULT_TABLE_MERGE_MIN_SCORE:
-                        merged_table_text, table_merge_stats = (
-                            merge_markdown_tables_with_pymupdf_words(ocr_text, words)
-                        )
-                        if table_merge_stats.applied:
-                            merged_text = merged_table_text
-                    else:
-                        table_merge_stats = TableMergeStats(
-                            applied=False,
-                            changed_cells=0,
-                            changed_chars=0,
-                            confidence=None,
-                            reason=f"text_quality<{_DEFAULT_TABLE_MERGE_MIN_SCORE}",
-                        )
-                elif page_kind_obj in (PageKind.text, PageKind.mixed) and has_text_layer:
+                if ocr_text:
+                    blocks = parse_markdown_blocks(ocr_text)
+                    ocr_markdown_table_count = sum(1 for b in blocks if isinstance(b, TableBlock))
+                    ocr_markdown_table_detected = ocr_markdown_table_count > 0
+
+                if not ocr_markdown_table_detected:
+                    table_merge_stats = TableMergeStats(
+                        applied=False,
+                        changed_cells=0,
+                        changed_chars=0,
+                        confidence=None,
+                        reason="no_table",
+                    )
+                elif not has_text_layer:
+                    table_merge_stats = TableMergeStats(
+                        applied=False,
+                        changed_cells=0,
+                        changed_chars=0,
+                        confidence=None,
+                        reason="no_text_layer",
+                    )
+                elif text_quality.score < _DEFAULT_TABLE_MERGE_MIN_SCORE:
+                    table_merge_stats = TableMergeStats(
+                        applied=False,
+                        changed_cells=0,
+                        changed_chars=0,
+                        confidence=None,
+                        reason=f"text_quality<{_DEFAULT_TABLE_MERGE_MIN_SCORE}",
+                    )
+                else:
+                    merge_reason = "ocr_markdown_table_detected"
+                    merged_table_text, table_merge_stats = merge_markdown_tables_with_pymupdf_words(
+                        ocr_text, words
+                    )
+                    if table_merge_stats.applied:
+                        merged_text = merged_table_text
+
+                if (
+                    table_merge_stats is not None
+                    and table_merge_stats.reason == "no_table"
+                    and page_kind_obj in (PageKind.text, PageKind.mixed)
+                    and has_text_layer
+                ):
                     if table_likelihood >= _DEFAULT_TABLE_OCR_LIKELIHOOD_MIN:
                         merge_reason = f"table_likelihood>={_DEFAULT_TABLE_OCR_LIKELIHOOD_MIN}"
                     elif text_quality.score < _DEFAULT_MERGE_MIN_SCORE:
@@ -420,7 +449,8 @@ def pdf_to_markdown(
                             )
                         else:
                             merge_reason = "attempted_no_changes"
-                else:
+
+                if merge_reason is None:
                     if not has_text_layer:
                         merge_reason = "no_text_layer"
                     else:
@@ -464,6 +494,8 @@ def pdf_to_markdown(
                     diff_preview = _short_unified_diff(ocr_text, pymupdf_text)
 
                 table_merge_meta: dict[str, Any] = {
+                    "ocr_markdown_table_detected": bool(ocr_markdown_table_detected),
+                    "ocr_markdown_table_count": int(ocr_markdown_table_count),
                     "attempted": table_merge_stats is not None,
                     "applied": bool(table_merge_stats.applied) if table_merge_stats else False,
                     "changed_cells": (

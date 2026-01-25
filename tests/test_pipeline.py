@@ -268,6 +268,47 @@ def test_pdf_to_markdown_table_page_applies_table_cell_merge_and_records_meta(
     assert meta["table_merge"]["changed_chars"] >= 1
 
 
+def test_pdf_to_markdown_text_page_with_markdown_table_applies_table_merge(
+    tmp_path_factory: pytest.TempPathFactory,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    out_dir = tmp_path_factory.mktemp("table-trigger-artifacts")
+    pdf_bytes = _make_table_pdf_bytes(rows=20)
+
+    monkeypatch.setattr("ragprep.pipeline._render_page_to_image", lambda *_a, **_k: object())
+    monkeypatch.setattr("ragprep.pipeline._requires_ocr_for_page", lambda *_a, **_k: True)
+    monkeypatch.setattr("ragprep.pipeline.estimate_table_likelihood", lambda _words: 0.0)
+    monkeypatch.setattr("ragprep.pipeline._safe_find_tables_score", lambda _page: 0.0)
+
+    rows = []
+    for i in range(20):
+        item = f"Item{i}"
+        if i == 5:
+            item = f"It\ufffdm{i}"
+        rows.append(f"| {item} | {i} | {i * 10} |")
+
+    ocr_md = "\n".join(
+        [
+            "| Item | N | Value |",
+            "|---|---|---|",
+            *rows,
+        ]
+    )
+    monkeypatch.setattr("ragprep.pipeline.ocr_image", lambda _image: ocr_md)
+
+    result = pdf_to_markdown(pdf_bytes, page_output_dir=out_dir)
+    assert "Item5" in result
+    assert "It\ufffdm5" not in result
+
+    meta = json.loads((out_dir / "page-0001.meta.json").read_text(encoding="utf-8"))
+    assert meta["page_kind"] == "text"
+    assert meta["selected_source"] == "ocr"
+    assert meta["selected_source_reason"] == "table_merge_applied"
+    assert meta["table_merge"]["ocr_markdown_table_detected"] is True
+    assert meta["table_merge"]["ocr_markdown_table_count"] == 1
+    assert meta["table_merge"]["applied"] is True
+
+
 def test_pdf_to_markdown_mixed_page_applies_text_merge_and_records_meta_reason(
     tmp_path_factory: pytest.TempPathFactory,
     monkeypatch: pytest.MonkeyPatch,
