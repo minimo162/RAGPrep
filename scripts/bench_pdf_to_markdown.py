@@ -20,6 +20,10 @@ class BenchRun:
     pages_image: int
     pages_mixed: int
     replacements_total_estimated: int | None
+    table_merge_attempted_pages: int | None
+    table_merge_applied_pages: int | None
+    table_merge_changed_cells_total: int | None
+    table_merge_changed_chars_total: int | None
     read_s: float
     open_s: float
     analyze_s: float
@@ -257,11 +261,19 @@ def _run_once(
     pages_mixed = sum(1 for p in analyses if p.page_kind.value == "mixed")
 
     replacements_total_estimated: int | None = None
+    table_merge_attempted_pages: int | None = None
+    table_merge_applied_pages: int | None = None
+    table_merge_changed_cells_total: int | None = None
+    table_merge_changed_chars_total: int | None = None
     if artifacts_dir is not None:
         try:
             import json
 
             total = 0
+            tm_attempted = 0
+            tm_applied = 0
+            tm_cells = 0
+            tm_chars = 0
             for meta_path in sorted(artifacts_dir.glob("page-*.meta.json")):
                 data = json.loads(meta_path.read_text(encoding="utf-8"))
                 if not isinstance(data, dict):
@@ -274,9 +286,30 @@ def _run_once(
                 value2 = data.get("replacements_total")
                 if isinstance(value2, int):
                     total += value2
+
+                table_merge = data.get("table_merge")
+                if isinstance(table_merge, dict):
+                    if table_merge.get("attempted") is True:
+                        tm_attempted += 1
+                    if table_merge.get("applied") is True:
+                        tm_applied += 1
+                    changed_cells = table_merge.get("changed_cells")
+                    if isinstance(changed_cells, int):
+                        tm_cells += changed_cells
+                    changed_chars = table_merge.get("changed_chars")
+                    if isinstance(changed_chars, int):
+                        tm_chars += changed_chars
             replacements_total_estimated = total
+            table_merge_attempted_pages = tm_attempted
+            table_merge_applied_pages = tm_applied
+            table_merge_changed_cells_total = tm_cells
+            table_merge_changed_chars_total = tm_chars
         except Exception:  # noqa: BLE001
             replacements_total_estimated = None
+            table_merge_attempted_pages = None
+            table_merge_applied_pages = None
+            table_merge_changed_cells_total = None
+            table_merge_changed_chars_total = None
 
     doc, page_count, open_s = _open_pdf(pdf_bytes)
     if page_count > max_pages:
@@ -345,6 +378,10 @@ def _run_once(
         pages_image=pages_image,
         pages_mixed=pages_mixed,
         replacements_total_estimated=replacements_total_estimated,
+        table_merge_attempted_pages=table_merge_attempted_pages,
+        table_merge_applied_pages=table_merge_applied_pages,
+        table_merge_changed_cells_total=table_merge_changed_cells_total,
+        table_merge_changed_chars_total=table_merge_changed_chars_total,
         read_s=read_s,
         open_s=open_s,
         analyze_s=analyze_s,
@@ -370,6 +407,16 @@ def _print_run(run: BenchRun, *, label: str) -> None:
         print(f"replacements_total_estimated={run.replacements_total_estimated}")
     else:
         print("replacements_total_estimated=n/a")
+    if run.table_merge_attempted_pages is not None:
+        print(
+            "table_merge:"
+            f" attempted_pages={run.table_merge_attempted_pages}"
+            f" applied_pages={run.table_merge_applied_pages}"
+            f" changed_cells_total={run.table_merge_changed_cells_total}"
+            f" changed_chars_total={run.table_merge_changed_chars_total}"
+        )
+    else:
+        print("table_merge=n/a")
     print(
         "timing_s:"
         f" read={run.read_s:.3f}"
@@ -475,6 +522,10 @@ def main(argv: list[str]) -> int:
         pages_image=runs[-1].pages_image,
         pages_mixed=runs[-1].pages_mixed,
         replacements_total_estimated=runs[-1].replacements_total_estimated,
+        table_merge_attempted_pages=runs[-1].table_merge_attempted_pages,
+        table_merge_applied_pages=runs[-1].table_merge_applied_pages,
+        table_merge_changed_cells_total=runs[-1].table_merge_changed_cells_total,
+        table_merge_changed_chars_total=runs[-1].table_merge_changed_chars_total,
         read_s=mean(r.read_s for r in runs),
         open_s=mean(r.open_s for r in runs),
         analyze_s=mean(r.analyze_s for r in runs),
@@ -498,6 +549,10 @@ def main(argv: list[str]) -> int:
                 "pages_image": r.pages_image,
                 "pages_mixed": r.pages_mixed,
                 "replacements_total_estimated": r.replacements_total_estimated,
+                "table_merge_attempted_pages": r.table_merge_attempted_pages,
+                "table_merge_applied_pages": r.table_merge_applied_pages,
+                "table_merge_changed_cells_total": r.table_merge_changed_cells_total,
+                "table_merge_changed_chars_total": r.table_merge_changed_chars_total,
                 "read_s": r.read_s,
                 "open_s": r.open_s,
                 "analyze_s": r.analyze_s,

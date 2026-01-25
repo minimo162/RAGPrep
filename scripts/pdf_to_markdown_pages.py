@@ -6,8 +6,12 @@ import os
 import sys
 import time
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from PIL import Image
+
+if TYPE_CHECKING:
+    from ragprep.pdf_text import Word
 
 
 def _parse_args(argv: list[str]) -> argparse.Namespace:
@@ -60,6 +64,20 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
         action="store_true",
         help="Do not write per-page unified diff files",
     )
+    group_table_merge = parser.add_mutually_exclusive_group()
+    group_table_merge.add_argument(
+        "--table-merge",
+        dest="table_merge",
+        action="store_true",
+        help="Enable table cell text correction using PyMuPDF words (default)",
+    )
+    group_table_merge.add_argument(
+        "--no-table-merge",
+        dest="table_merge",
+        action="store_false",
+        help="Disable table cell text correction using PyMuPDF words",
+    )
+    parser.set_defaults(table_merge=True)
     parser.add_argument(
         "--json",
         action="store_true",
@@ -70,6 +88,49 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
 
 def _normalize_newlines(text: str) -> str:
     return text.replace("\r\n", "\n").replace("\r", "\n")
+
+
+def _extract_words(page: object) -> list[Word]:
+    from ragprep.pdf_text import Word
+
+    get_text = getattr(page, "get_text", None)
+    if get_text is None:
+        return []
+
+    words_raw = get_text("words") or []
+    words: list[Word] = []
+    if not isinstance(words_raw, list):
+        return words
+
+    for item in words_raw:
+        if not isinstance(item, (list, tuple)) or len(item) < 8:
+            continue
+        try:
+            x0 = float(item[0])
+            y0 = float(item[1])
+            x1 = float(item[2])
+            y1 = float(item[3])
+            text = str(item[4] or "")
+            block_no = int(item[5])
+            line_no = int(item[6])
+            word_no = int(item[7])
+        except Exception:  # noqa: BLE001
+            continue
+        if not text:
+            continue
+        words.append(
+            Word(
+                x0=x0,
+                y0=y0,
+                x1=x1,
+                y1=y1,
+                text=text,
+                block_no=block_no,
+                line_no=line_no,
+                word_no=word_no,
+            )
+        )
+    return words
 
 
 def _render_page_to_image(page: object, *, dpi: int, max_edge: int) -> Image.Image:
@@ -127,6 +188,7 @@ def main(argv: list[str]) -> int:
             normalize_extracted_text,
             tokenize_by_char_class,
         )
+        from ragprep.table_merge import TableMergeStats, merge_markdown_tables_with_pymupdf_words
     except Exception as exc:  # noqa: BLE001
         print(f"ERROR: Failed to import modules: {exc}", file=sys.stderr)
         return 1
@@ -187,6 +249,10 @@ def main(argv: list[str]) -> int:
     pages_ocr = 0
     pages_skipped = 0
     replacements_total_estimated = 0
+    table_merge_attempted_pages = 0
+    table_merge_applied_pages = 0
+    table_merge_changed_cells_total = 0
+    table_merge_changed_chars_total = 0
 
     with doc:
         for analysis in analyses:
@@ -218,6 +284,8 @@ def main(argv: list[str]) -> int:
             ocr_text = ""
             render_s: float | None = None
             ocr_s: float | None = None
+            table_merge_stats: TableMergeStats | None = None
+            merged_text = ""
 
             if selected_source == "ocr":
                 page = doc.load_page(page_index)
@@ -231,6 +299,38 @@ def main(argv: list[str]) -> int:
                 ocr_s = time.perf_counter() - ocr_start
 
                 pages_ocr += 1
+                merged_text = ocr_text
+
+                if (
+                    bool(args.table_merge)
+                    and page_kind == "table"
+                    and bool(analysis.has_text_layer)
+                ):
+                    threshold = float(args.pymupdf_score_threshold)
+                    if score >= threshold:
+                        try:
+                            words = _extract_words(page)
+                            merged_table_text, table_merge_stats = (
+                                merge_markdown_tables_with_pymupdf_words(ocr_text, words)
+                            )
+                            if table_merge_stats.applied:
+                                merged_text = merged_table_text
+                        except Exception:  # noqa: BLE001
+                            table_merge_stats = TableMergeStats(
+                                applied=False,
+                                changed_cells=0,
+                                changed_chars=0,
+                                confidence=None,
+                                reason="exception",
+                            )
+                    else:
+                        table_merge_stats = TableMergeStats(
+                            applied=False,
+                            changed_cells=0,
+                            changed_chars=0,
+                            confidence=None,
+                            reason=f"text_quality<{threshold}",
+                        )
             else:
                 pages_skipped += 1
 
@@ -240,7 +340,8 @@ def main(argv: list[str]) -> int:
                 ocr_path.write_text("", encoding="utf-8")
 
             if selected_source == "ocr":
-                merged_text = ocr_text
+                if not merged_text:
+                    merged_text = ocr_text
             elif selected_source == "pymupdf":
                 merged_text = pymupdf_text
             else:
@@ -248,6 +349,13 @@ def main(argv: list[str]) -> int:
 
             merged_path.write_text(merged_text + ("\n" if merged_text else ""), encoding="utf-8")
             merged_pages.append(merged_text)
+
+            if table_merge_stats is not None:
+                table_merge_attempted_pages += 1
+                if table_merge_stats.applied:
+                    table_merge_applied_pages += 1
+                table_merge_changed_cells_total += int(table_merge_stats.changed_cells)
+                table_merge_changed_chars_total += int(table_merge_stats.changed_chars)
 
             replaced_tokens_estimated = 0
             replaced_chars_estimated = 0
@@ -303,6 +411,28 @@ def main(argv: list[str]) -> int:
                 "table_likelihood": analysis.table_likelihood,
                 "image_count": analysis.image_count,
                 "image_area_ratio": analysis.image_area_ratio,
+                "table_merge": {
+                    "attempted": table_merge_stats is not None,
+                    "applied": bool(table_merge_stats.applied) if table_merge_stats else False,
+                    "changed_cells": (
+                        int(table_merge_stats.changed_cells) if table_merge_stats is not None else 0
+                    ),
+                    "changed_chars": (
+                        int(table_merge_stats.changed_chars) if table_merge_stats is not None else 0
+                    ),
+                    "confidence": (
+                        float(table_merge_stats.confidence)
+                        if (
+                            table_merge_stats is not None
+                            and table_merge_stats.confidence is not None
+                        )
+                        else None
+                    ),
+                    "reason": table_merge_stats.reason if table_merge_stats is not None else None,
+                    "samples": list(table_merge_stats.samples)
+                    if table_merge_stats is not None
+                    else [],
+                },
                 "timing_s": {"render": render_s, "ocr": ocr_s},
                 "diff_estimate": {
                     "replaced_tokens": replaced_tokens_estimated,
@@ -325,6 +455,7 @@ def main(argv: list[str]) -> int:
             "use_find_tables": bool(args.use_find_tables),
             "pymupdf_score_threshold": float(args.pymupdf_score_threshold),
             "force_ocr": bool(args.force_ocr),
+            "table_merge": bool(args.table_merge),
         },
         "pages_total": pages_total,
         "pages_ocr": pages_ocr,
@@ -333,6 +464,12 @@ def main(argv: list[str]) -> int:
         "pages_image": pages_image,
         "pages_mixed": pages_mixed,
         "replacements_total_estimated": replacements_total_estimated,
+        "table_merge": {
+            "attempted_pages": table_merge_attempted_pages,
+            "applied_pages": table_merge_applied_pages,
+            "changed_cells_total": table_merge_changed_cells_total,
+            "changed_chars_total": table_merge_changed_chars_total,
+        },
     }
     (out_dir / "summary.json").write_text(
         json.dumps(summary, ensure_ascii=False, indent=2) + "\n",
