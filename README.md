@@ -43,6 +43,56 @@ uv run python scripts/bench_pdf_to_markdown.py --pdf .\path\to\input.pdf --repea
 - `RAGPREP_MAX_PAGES`（デフォルト: 50）
 - `RAGPREP_MAX_CONCURRENCY`（デフォルト: 1）
 
+## スタンドアロン配布（Windows）
+
+### 前提
+- Windows + PowerShell
+- `uv`（依存: `scripts/build-standalone.ps1`）
+- `tar`（依存: `scripts/build-standalone.ps1`）
+- `7z`（依存: `scripts/package-standalone.ps1`）
+- ネットワーク接続（Python runtime / 依存 / llama.cpp 等の取得に使用）
+
+### ビルド
+```powershell
+cd C:\Users\Administrator\RAGPrep
+.\scripts\build-standalone.ps1 -Clean
+```
+
+GGUF prefetch をスキップする場合:
+```powershell
+.\scripts\build-standalone.ps1 -SkipGgufPrefetch -Clean
+```
+
+### パッケージ（zip）
+```powershell
+.\scripts\package-standalone.ps1 -Force
+```
+
+`7z.exe` が PATH に無い場合:
+```powershell
+.\scripts\package-standalone.ps1 -SevenZipPath "C:\Program Files\7-Zip\7z.exe" -Force
+```
+
+### 起動
+PowerShell:
+```powershell
+.\dist\standalone\run.ps1
+.\dist\standalone\run.ps1 -BindHost 0.0.0.0 -Port 8001
+```
+
+CMD:
+```bat
+dist\standalone\run.cmd
+dist\standalone\run.cmd 0.0.0.0 8001
+```
+
+`run.cmd` は環境変数 `RAGPREP_BIND_HOST` / `RAGPREP_PORT` でも指定できます。
+
+### よくある失敗（standalone）
+- `uv` / `tar` / `7z` が見つからない: インストールして PATH を通す（または `-SevenZipPath` を指定）
+- `GGUF prefetch failed`: `-SkipGgufPrefetch` を付けて再実行
+- `AccessDenied` / ファイルロック: Explorer で `dist/standalone` を開いている場合は閉じる、ウイルス対策/インデクサのロックが疑わしい場合は少し待って再実行（`-Clean` 推奨）
+
 ## 開発（品質ゲート）
 ```bash
 cd C:\Users\Administrator\RAGPrep
