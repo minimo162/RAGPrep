@@ -610,6 +610,19 @@ if (-not `$env:LIGHTONOCR_LLAVA_CLI_PATH -or [string]::IsNullOrWhiteSpace(`$env:
 @echo off
 setlocal
 set ROOT=%~dp0
+
+if /I "%~1"=="-h" goto :usage
+if /I "%~1"=="--help" goto :usage
+if "%~1"=="/?" goto :usage
+
+set "BIND_HOST=127.0.0.1"
+if not "%RAGPREP_BIND_HOST%"=="" set "BIND_HOST=%RAGPREP_BIND_HOST%"
+if not "%~1"=="" set "BIND_HOST=%~1"
+
+set "PORT=8000"
+if not "%RAGPREP_PORT%"=="" set "PORT=%RAGPREP_PORT%"
+if not "%~2"=="" set "PORT=%~2"
+
 if "%HF_HOME%"=="" (
   set HF_HOME=%ROOT%data\hf
   if not exist "%ROOT%data\hf" mkdir "%ROOT%data\hf"
@@ -630,13 +643,21 @@ if "%LIGHTONOCR_LLAVA_CLI_PATH%"=="" (
 set PYTHONNOUSERSITE=1
 set PYTHONUTF8=1
 set PYTHONPATH=%ROOT%app;%ROOT%site-packages
-"%ROOT%python\python.exe" -m uvicorn ragprep.web.app:app --host 127.0.0.1 --port 8000
+"%ROOT%python\python.exe" -m uvicorn ragprep.web.app:app --host %BIND_HOST% --port %PORT%
+exit /b %ERRORLEVEL%
+
+:usage
+echo Usage: %~nx0 [bind_host] [port]
+echo   Defaults: 127.0.0.1 8000
+echo   Or set env vars: RAGPREP_BIND_HOST / RAGPREP_PORT
+exit /b 0
 "@
     Set-Content -Path (Join-Path $OutputDir "run.cmd") -Value $runCmd -Encoding ASCII
 
     Write-Host "Done." -ForegroundColor Green
     Write-Host "Output: $OutputDir"
     Write-Host "Run:    $OutputDir/run.ps1"
+    Write-Host "        $OutputDir/run.cmd"
 }
 catch {
     $duration = (Get-Date) - $startedAt
