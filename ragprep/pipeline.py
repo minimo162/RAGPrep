@@ -6,6 +6,7 @@ from enum import Enum
 from pathlib import Path
 
 from ragprep.config import get_settings
+from ragprep.pymupdf4llm_json import pdf_bytes_to_json
 from ragprep.pymupdf4llm_markdown import pdf_bytes_to_markdown
 
 
@@ -25,7 +26,29 @@ class PdfToMarkdownProgress:
 ProgressCallback = Callable[[PdfToMarkdownProgress], None]
 
 
+@dataclass(frozen=True)
+class PdfToJsonProgress:
+    phase: ProgressPhase
+    current: int
+    total: int
+    message: str | None = None
+
+
+JsonProgressCallback = Callable[[PdfToJsonProgress], None]
+
+
 def _notify_progress(on_progress: ProgressCallback | None, update: PdfToMarkdownProgress) -> None:
+    if on_progress is None:
+        return
+    try:
+        on_progress(update)
+    except Exception:  # noqa: BLE001
+        return
+
+
+def _notify_json_progress(
+    on_progress: JsonProgressCallback | None, update: PdfToJsonProgress
+) -> None:
     if on_progress is None:
         return
     try:
@@ -101,4 +124,69 @@ def pdf_to_markdown(
         ),
     )
     return markdown
+
+
+def pdf_to_json(
+    pdf_bytes: bytes,
+    *,
+    on_progress: JsonProgressCallback | None = None,
+    page_output_dir: Path | None = None,
+) -> str:
+    """
+    Convert a PDF (bytes) into a JSON string.
+
+    This function is intentionally pure and synchronous; it converts the entire document
+    in a single pass via pymupdf-layout + pymupdf4llm.
+    """
+
+    if not pdf_bytes:
+        raise ValueError("pdf_bytes is empty")
+
+    if page_output_dir is not None:
+        page_output_dir.mkdir(parents=True, exist_ok=True)
+
+    settings = get_settings()
+    if len(pdf_bytes) > settings.max_upload_bytes:
+        raise ValueError(
+            f"PDF too large ({len(pdf_bytes)} bytes), max_bytes={settings.max_upload_bytes}"
+        )
+
+    try:
+        import pymupdf
+
+        doc = pymupdf.open(stream=pdf_bytes, filetype="pdf")
+    except Exception as exc:  # noqa: BLE001
+        raise ValueError("Invalid PDF data") from exc
+
+    with doc:
+        total_pages = int(doc.page_count)
+
+    if total_pages > settings.max_pages:
+        raise ValueError(f"PDF has {total_pages} pages, max_pages={settings.max_pages}")
+
+    _notify_json_progress(
+        on_progress,
+        PdfToJsonProgress(
+            phase=ProgressPhase.rendering,
+            current=0,
+            total=total_pages,
+            message="converting",
+        ),
+    )
+
+    json_output = pdf_bytes_to_json(pdf_bytes)
+
+    if page_output_dir is not None:
+        _write_text_artifact(page_output_dir / "document.json", json_output)
+
+    _notify_json_progress(
+        on_progress,
+        PdfToJsonProgress(
+            phase=ProgressPhase.done,
+            current=total_pages,
+            total=total_pages,
+            message="done",
+        ),
+    )
+    return json_output
 

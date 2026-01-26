@@ -5,10 +5,13 @@ from typing import cast
 
 import pytest
 
+import ragprep.pipeline as pipeline
 from ragprep import pymupdf4llm_markdown
 from ragprep.pipeline import (
+    PdfToJsonProgress,
     PdfToMarkdownProgress,
     ProgressPhase,
+    pdf_to_json,
     pdf_to_markdown,
 )
 
@@ -182,6 +185,21 @@ def test_pdf_to_markdown_reports_progress(monkeypatch: pytest.MonkeyPatch) -> No
     ]
 
 
+def test_pdf_to_json_reports_progress(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(pipeline, "pdf_bytes_to_json", lambda _bytes: '{"ok": true}')
+
+    updates: list[PdfToJsonProgress] = []
+
+    def on_progress(update: PdfToJsonProgress) -> None:
+        updates.append(update)
+
+    assert pdf_to_json(_make_pdf_bytes(page_count=2), on_progress=on_progress) == '{"ok": true}'
+    assert [(u.phase, u.current, u.total) for u in updates] == [
+        (ProgressPhase.rendering, 0, 2),
+        (ProgressPhase.done, 2, 2),
+    ]
+
+
 def test_pdf_to_markdown_writes_document_artifact(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -197,9 +215,29 @@ def test_pdf_to_markdown_writes_document_artifact(
     assert artifact.read_text(encoding="utf-8") == "hello\n"
 
 
+def test_pdf_to_json_writes_document_artifact(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(pipeline, "pdf_bytes_to_json", lambda _bytes: '{"hello": "json"}')
+
+    out_dir = tmp_path / "artifacts"
+    result = pdf_to_json(_make_pdf_bytes(page_count=1), page_output_dir=out_dir)
+    assert result == '{"hello": "json"}'
+
+    artifact = out_dir / "document.json"
+    assert artifact.exists()
+    assert artifact.read_text(encoding="utf-8") == '{"hello": "json"}\n'
+
+
 def test_pdf_to_markdown_invalid_pdf_raises_invalid_pdf_data() -> None:
     with pytest.raises(ValueError, match="Invalid PDF data"):
         pdf_to_markdown(b"not a pdf")
+
+
+def test_pdf_to_json_rejects_empty_input() -> None:
+    with pytest.raises(ValueError, match="pdf_bytes is empty"):
+        pdf_to_json(b"")
 
 
 def test_pdf_to_markdown_inserts_sidebar_near_reading_position() -> None:
