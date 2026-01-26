@@ -104,7 +104,7 @@ def get_settings() -> LightOnOCRSettings:
         missing_str = ", ".join(missing)
         raise ValueError(
             f"Set {missing_str} to local GGUF paths "
-            "(model: LightOnOCR-2-1B-Q4_K_M.gguf, mmproj: LightOnOCR-2-1B-mmproj-f16.gguf). "
+            "(model: LightOnOCR-2-1B-Q6_K.gguf, mmproj: mmproj-BF16.gguf). "
             "If you're using the standalone build, these are typically under "
             "dist/standalone/data/models/lightonocr-gguf/."
         )

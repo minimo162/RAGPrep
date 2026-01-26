@@ -5,8 +5,12 @@ import subprocess
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
+from urllib.parse import urlparse
+from urllib.request import url2pathname
 
 from PIL import Image
+
+_REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
 @dataclass(frozen=True)
@@ -19,9 +23,39 @@ class LlamaCppCliSettings:
     n_gpu_layers: int | None
 
 
-def _validate_paths(settings: LlamaCppCliSettings) -> None:
-    model_path = Path(settings.model_path)
-    mmproj_path = Path(settings.mmproj_path)
+def _normalize_path_value(value: str | None) -> str:
+    if value is None:
+        return ""
+    raw = value.strip()
+    if not raw:
+        return ""
+
+    wrappers = [('"', '"'), ("'", "'"), ("<", ">")]
+    for start, end in wrappers:
+        if raw.startswith(start) and raw.endswith(end) and len(raw) >= 2:
+            raw = raw[1:-1].strip()
+
+    if raw.lower().startswith("file://"):
+        try:
+            parsed = urlparse(raw)
+            if parsed.scheme.lower() == "file":
+                raw = url2pathname(parsed.path).strip()
+        except Exception:
+            return raw
+
+    return raw
+
+
+def _validate_paths(settings: LlamaCppCliSettings) -> tuple[str, str]:
+    model_path_value = _normalize_path_value(settings.model_path)
+    mmproj_path_value = _normalize_path_value(settings.mmproj_path)
+    if not model_path_value:
+        raise RuntimeError("GGUF model path is empty.")
+    if not mmproj_path_value:
+        raise RuntimeError("GGUF mmproj path is empty.")
+
+    model_path = Path(model_path_value)
+    mmproj_path = Path(mmproj_path_value)
     try:
         model_is_file = model_path.is_file()
     except OSError as exc:
@@ -35,29 +69,63 @@ def _validate_paths(settings: LlamaCppCliSettings) -> None:
         raise RuntimeError(f"GGUF model file not found: {model_path}")
     if not mmproj_is_file:
         raise RuntimeError(f"GGUF mmproj file not found: {mmproj_path}")
+    return model_path_value, mmproj_path_value
 
 
-def _resolve_llava_cli(settings: LlamaCppCliSettings) -> str:
-    candidates: list[str] = []
+def _standalone_cli_candidates(repo_root: Path) -> list[Path]:
+    base_dir = repo_root / "dist" / "standalone" / "bin" / "llama.cpp"
+    names = [
+        "llama-mtmd-cli.exe",
+        "llama-mtmd-cli",
+        "llava-cli.exe",
+        "llava-cli",
+        "llama-llava-cli.exe",
+        "llama-llava-cli",
+    ]
+    return [base_dir / name for name in names]
 
-    if settings.llava_cli_path:
-        candidates.append(settings.llava_cli_path)
 
-    candidates.extend(["llava-cli", "llava-cli.exe"])
+def _resolve_llava_cli(
+    settings: LlamaCppCliSettings,
+    *,
+    repo_root: Path | None = None,
+) -> str:
+    resolved_root = _REPO_ROOT if repo_root is None else repo_root
+    explicit = _normalize_path_value(settings.llava_cli_path)
 
-    for candidate in candidates:
-        candidate_path = Path(candidate)
-        if candidate_path.is_file():
-            return str(candidate_path)
+    path_candidates: list[Path] = []
+    if explicit:
+        path_candidates.append(Path(explicit))
+    path_candidates.extend(_standalone_cli_candidates(resolved_root))
 
-        found = shutil.which(candidate)
-        if found:
+    for path_candidate in path_candidates:
+        if path_candidate.is_file():
+            return str(path_candidate)
+
+    name_candidates = [
+        "llama-mtmd-cli",
+        "llama-mtmd-cli.exe",
+        "llava-cli",
+        "llava-cli.exe",
+        "llama-llava-cli",
+        "llama-llava-cli.exe",
+    ]
+    for name_candidate in name_candidates:
+        found: str | None = shutil.which(name_candidate)
+        if found is not None:
             return found
 
+    details: list[str] = []
+    if explicit:
+        details.append(f"Explicit path not found: {explicit}")
+    details.append(f"Standalone dir checked: {resolved_root / 'dist' / 'standalone'}")
+
+    detail_text = ("\n" + "\n".join(details)) if details else ""
     raise RuntimeError(
-        "llava-cli executable not found. "
-        "Set LIGHTONOCR_LLAVA_CLI_PATH to the full path of llava-cli(.exe) "
-        "or ensure llava-cli is available on PATH."
+        "llama.cpp multimodal CLI executable not found. "
+        "Set LIGHTONOCR_LLAVA_CLI_PATH to the full path of llama-mtmd-cli(.exe) "
+        "(or llava-cli(.exe) / llama-llava-cli(.exe)), "
+        "or ensure it is available on PATH." + detail_text
     )
 
 
@@ -65,6 +133,8 @@ def _build_argv(
     *,
     llava_cli: str,
     settings: LlamaCppCliSettings,
+    model_path: str,
+    mmproj_path: str,
     image_path: Path,
     prompt: str,
     max_new_tokens: int,
@@ -72,9 +142,9 @@ def _build_argv(
     argv = [
         llava_cli,
         "-m",
-        settings.model_path,
+        model_path,
         "--mmproj",
-        settings.mmproj_path,
+        mmproj_path,
         "--image",
         str(image_path),
         "-p",
@@ -114,7 +184,7 @@ def _extract_text(stdout: str) -> str:
 
 
 def ocr_image(*, image: Image.Image, settings: LlamaCppCliSettings, max_new_tokens: int) -> str:
-    _validate_paths(settings)
+    model_path, mmproj_path = _validate_paths(settings)
     llava_cli = _resolve_llava_cli(settings)
 
     prompt = "Extract all text from this image and return it as Markdown."
@@ -129,6 +199,8 @@ def ocr_image(*, image: Image.Image, settings: LlamaCppCliSettings, max_new_toke
         argv = _build_argv(
             llava_cli=llava_cli,
             settings=settings,
+            model_path=model_path,
+            mmproj_path=mmproj_path,
             image_path=image_path,
             prompt=prompt,
             max_new_tokens=max_new_tokens,
