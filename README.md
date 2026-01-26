@@ -1,6 +1,7 @@
 # RAGPrep
 
-PyMuPDF Layout（`pymupdf-layout`）+ PyMuPDF4LLM（`pymupdf4llm`）を使って、PDF を **全ページ一括**で Markdown に変換するツールです。
+PyMuPDF Layout（`pymupdf-layout`）+ PyMuPDF4LLM（`pymupdf4llm`）を使って、PDF を **全ページ一括**で JSON に変換するツールです。
+JSON 出力ではページの header/footer を除外します。
 
 ## 前提・制約
 - **OCR は廃止**しています（スキャンPDF等の画像文字は変換できません）。
@@ -33,8 +34,8 @@ uv run python -m ragprep.desktop
 
 起動すると GUI が自動で開きます。GUI を閉じるとアプリも終了します。
 
-変換が完了したら、結果画面の `Download .md` をクリックして Markdown を保存します。
-- **ファイル名**: 元のPDFファイル名の拡張子を `.md` に変更（例: `foo.pdf` → `foo.md`）
+変換が完了したら、結果画面の `Download .json` をクリックして JSON を保存します。
+- **ファイル名**: 元のPDFファイル名の拡張子を `.json` に変更（例: `foo.pdf` → `foo.json`）
 - **GUI**: 保存ダイアログが開き、任意の場所に保存
 - **Web**: ブラウザのダウンロードとして保存
 
@@ -51,18 +52,25 @@ uv run uvicorn ragprep.web.app:app --reload
 
 ブラウザで `http://127.0.0.1:8000` を開き、PDF をアップロードしてください。
 
-## 実行（CLI: PDF → Markdown）
+## 実行（CLI: PDF → JSON）
+```bash
+cd C:\Users\Administrator\RAGPrep
+uv run python scripts/pdf_to_json.py --pdf .\path\to\input.pdf --out .\out\input.json --overwrite
+```
+
+標準出力へ出す場合:
+```bash
+uv run python scripts/pdf_to_json.py --pdf .\path\to\input.pdf --stdout
+```
+
+## Legacy（Markdown 出力）
+Markdown が必要な場合は、既存の CLI を利用してください。
 ```bash
 cd C:\Users\Administrator\RAGPrep
 uv run python scripts/pdf_to_markdown.py --pdf .\path\to\input.pdf --out .\out\input.md --overwrite
 ```
 
-標準出力へ出す場合:
-```bash
-uv run python scripts/pdf_to_markdown.py --pdf .\path\to\input.pdf --stdout
-```
-
-## ベンチマーク（変換全体時間）
+## ベンチマーク（変換全体時間 / Legacy: Markdown）
 ```bash
 cd C:\Users\Administrator\RAGPrep
 uv run python scripts/bench_pdf_to_markdown.py --synthetic-pages 3
