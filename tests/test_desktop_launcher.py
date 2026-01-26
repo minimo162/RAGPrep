@@ -41,9 +41,10 @@ def test_desktop_launcher_calls_webview_and_stops_server(monkeypatch: pytest.Mon
     webview_stub = ModuleType("webview")
     calls: dict[str, object] = {}
 
-    def create_window(title: str, url: str) -> None:
+    def create_window(title: str, url: str, *, js_api: object | None = None) -> None:
         calls["title"] = title
         calls["url"] = url
+        calls["js_api"] = js_api
 
     def start() -> None:
         calls["started"] = True
@@ -61,6 +62,7 @@ def test_desktop_launcher_calls_webview_and_stops_server(monkeypatch: pytest.Mon
     assert calls["title"] == "RAGPrep"
     assert calls["url"] == "http://127.0.0.1:8000/"
     assert calls["started"] is True
+    assert calls["js_api"] is not None
 
     server = StubServer.last_instance
     assert server is not None

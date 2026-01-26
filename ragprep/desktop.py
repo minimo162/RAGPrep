@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 import argparse
+import re
 import sys
 import threading
 import time
-from typing import Final
+from pathlib import Path
+from typing import Any, Final
 from urllib.error import URLError
+from urllib.parse import unquote
 from urllib.request import Request, urlopen
 
 import uvicorn
@@ -43,6 +46,72 @@ def _wait_for_health(*, health_url: str, timeout_s: float) -> bool:
         time.sleep(0.2)
 
     return False
+
+
+_FILENAME_STAR_RE: Final[re.Pattern[str]] = re.compile(
+    r"filename\\*=UTF-8''(?P<name>[^;]+)",
+    re.IGNORECASE,
+)
+_FILENAME_RE: Final[re.Pattern[str]] = re.compile(
+    r'filename="?([^";]+)"?',
+    re.IGNORECASE,
+)
+
+
+def _filename_from_content_disposition(content_disposition: str) -> str | None:
+    match = _FILENAME_STAR_RE.search(content_disposition)
+    if match is not None:
+        name = unquote(match.group("name"))
+        return Path(name.replace("\r", "").replace("\n", "")).name
+
+    match = _FILENAME_RE.search(content_disposition)
+    if match is not None:
+        name = match.group(1)
+        return Path(name.replace("\r", "").replace("\n", "")).name
+
+    return None
+
+
+class _DesktopApi:
+    def __init__(self, *, base_url: str, webview: Any) -> None:
+        self._base_url = base_url.rstrip("/")
+        self._webview = webview
+
+    def save_markdown(self, job_id: str, download_url: str | None = None) -> dict[str, str]:
+        url = download_url or f"{self._base_url}/download/{job_id}.md"
+        request = Request(url, headers={"User-Agent": "ragprep-desktop"})
+
+        try:
+            with urlopen(request, timeout=30.0) as response:
+                if response.status != 200:
+                    return {"status": "error", "message": f"download failed: {response.status}"}
+                markdown_bytes = response.read()
+                content_disposition = response.headers.get("Content-Disposition", "")
+        except Exception as exc:  # noqa: BLE001
+            return {"status": "error", "message": f"download failed: {exc}"}
+
+        filename = _filename_from_content_disposition(content_disposition) or f"{job_id}.md"
+
+        try:
+            selection = self._webview.create_file_dialog(
+                self._webview.SAVE_DIALOG,
+                save_filename=filename,
+                file_types=[("Markdown (*.md)", "*.md"), ("All files (*.*)", "*.*")],
+            )
+        except Exception as exc:  # noqa: BLE001
+            return {"status": "error", "message": f"save dialog failed: {exc}"}
+
+        if not selection:
+            return {"status": "cancelled"}
+
+        selected_path = selection[0] if isinstance(selection, (list, tuple)) else selection
+        try:
+            with open(str(selected_path), "wb") as handle:
+                handle.write(markdown_bytes)
+        except Exception as exc:  # noqa: BLE001
+            return {"status": "error", "message": f"write failed: {exc}"}
+
+        return {"status": "ok", "path": str(selected_path), "filename": filename}
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -83,8 +152,10 @@ def main(argv: list[str] | None = None) -> int:
             print(f"[ERROR] Failed to import pywebview: {exc}", file=sys.stderr)
             return 1
 
-        url = f"http://{client_host}:{args.port}/"
-        webview.create_window("RAGPrep", url)
+        base_url = f"http://{client_host}:{args.port}"
+        api = _DesktopApi(base_url=base_url, webview=webview)
+        web_url = f"{base_url}/"
+        webview.create_window("RAGPrep", web_url, js_api=api)
         webview.start()
         return 0
     finally:
