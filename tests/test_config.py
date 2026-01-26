@@ -5,10 +5,10 @@ import pytest
 from ragprep import config
 
 
-def test_default_pdf_backend_is_pymupdf(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_default_pdf_backend_is_lightonocr(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("RAGPREP_PDF_BACKEND", raising=False)
     settings = config.get_settings()
-    assert settings.pdf_backend == "pymupdf"
+    assert settings.pdf_backend == "lightonocr"
 
 
 def test_pdf_backend_accepts_lightonocr(monkeypatch: pytest.MonkeyPatch) -> None:

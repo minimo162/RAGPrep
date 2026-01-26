@@ -17,6 +17,11 @@ from ragprep.pipeline import (
 )
 
 
+@pytest.fixture(autouse=True)
+def _use_pymupdf_backend(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("RAGPREP_PDF_BACKEND", "pymupdf")
+
+
 def _make_pdf_bytes(page_count: int) -> bytes:
     import fitz
 

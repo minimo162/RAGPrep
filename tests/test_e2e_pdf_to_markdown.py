@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from typing import cast
 
+import pytest
+
 from ragprep.pipeline import pdf_to_markdown
 
 
@@ -19,7 +21,8 @@ def _squash_ws(text: str) -> str:
     return "".join(text.split())
 
 
-def test_pdf_to_markdown_e2e_contains_text() -> None:
+def test_pdf_to_markdown_e2e_contains_text(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("RAGPREP_PDF_BACKEND", "pymupdf")
     pdf_bytes = _make_pdf_bytes(["Hello E2E 1", "Hello E2E 2"])
 
     markdown = pdf_to_markdown(pdf_bytes)
