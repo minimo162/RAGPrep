@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
 
-from ragprep.config import get_settings
+from ragprep.config import Settings, get_settings
 from ragprep.pymupdf4llm_json import pdf_bytes_to_json
 from ragprep.pymupdf4llm_markdown import pdf_bytes_to_markdown
 
@@ -61,6 +61,14 @@ def _write_text_artifact(path: Path, text: str) -> None:
     path.write_text(text + ("\n" if text else ""), encoding="utf-8")
 
 
+def _pdf_to_markdown_lightonocr(pdf_bytes: bytes, *, settings: Settings) -> str:
+    raise NotImplementedError("LightOnOCR backend is not wired yet (task-03).")
+
+
+def _pdf_to_json_lightonocr(pdf_bytes: bytes, *, settings: Settings) -> str:
+    raise NotImplementedError("LightOnOCR backend is not wired yet (task-03).")
+
+
 def pdf_to_markdown(
     pdf_bytes: bytes,
     *,
@@ -109,7 +117,10 @@ def pdf_to_markdown(
         ),
     )
 
-    markdown = pdf_bytes_to_markdown(pdf_bytes)
+    if settings.pdf_backend == "lightonocr":
+        markdown = _pdf_to_markdown_lightonocr(pdf_bytes, settings=settings)
+    else:
+        markdown = pdf_bytes_to_markdown(pdf_bytes)
 
     if page_output_dir is not None:
         _write_text_artifact(page_output_dir / "document.md", markdown)
@@ -174,7 +185,10 @@ def pdf_to_json(
         ),
     )
 
-    json_output = pdf_bytes_to_json(pdf_bytes)
+    if settings.pdf_backend == "lightonocr":
+        json_output = _pdf_to_json_lightonocr(pdf_bytes, settings=settings)
+    else:
+        json_output = pdf_bytes_to_json(pdf_bytes)
 
     if page_output_dir is not None:
         _write_text_artifact(page_output_dir / "document.json", json_output)

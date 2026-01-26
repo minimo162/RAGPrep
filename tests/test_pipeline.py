@@ -320,3 +320,41 @@ def test_pdf_to_markdown_two_columns_inserts_textbox_callout_near_y() -> None:
 
     compact = "".join(ch for ch in markdown if ch.isalnum() or ch == "_")
     assert compact.count("NOTE_BOX") == 1
+
+
+def test_pdf_to_markdown_uses_lightonocr_backend(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    pdf_bytes = _make_pdf_bytes(page_count=1)
+    monkeypatch.setenv("RAGPREP_PDF_BACKEND", "lightonocr")
+    monkeypatch.setattr(
+        pipeline,
+        "_pdf_to_markdown_lightonocr",
+        lambda _bytes, *, settings: "ocr-markdown",
+    )
+
+    def _fail(*_args: object, **_kwargs: object) -> str:
+        pytest.fail("pymupdf backend should not be used when lightonocr is selected")
+
+    monkeypatch.setattr(pipeline, "pdf_bytes_to_markdown", _fail)
+
+    assert pdf_to_markdown(pdf_bytes) == "ocr-markdown"
+
+
+def test_pdf_to_json_uses_lightonocr_backend(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    pdf_bytes = _make_pdf_bytes(page_count=1)
+    monkeypatch.setenv("RAGPREP_PDF_BACKEND", "lightonocr")
+    monkeypatch.setattr(
+        pipeline,
+        "_pdf_to_json_lightonocr",
+        lambda _bytes, *, settings: '{"ok": true}',
+    )
+
+    def _fail(*_args: object, **_kwargs: object) -> str:
+        pytest.fail("pymupdf backend should not be used when lightonocr is selected")
+
+    monkeypatch.setattr(pipeline, "pdf_bytes_to_json", _fail)
+
+    assert pdf_to_json(pdf_bytes) == '{"ok": true}'
