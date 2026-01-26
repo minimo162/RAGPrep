@@ -15,6 +15,7 @@ dependencies = [
   "fastapi>=0.110",
   "jinja2>=3.1",
   "pillow>=10",
+  "pypdfium2>=4.30.0",
   "pymupdf>=1.25",
   "pymupdf-layout",
   "pymupdf4llm",

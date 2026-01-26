@@ -3,8 +3,9 @@ from __future__ import annotations
 from typing import cast
 
 import pytest
+from PIL import Image
 
-from ragprep.pdf_render import _pixmap_to_rgb_image, render_pdf_to_images
+from ragprep.pdf_render import _bitmap_to_rgb_image, render_pdf_to_images
 
 
 def _make_pdf_bytes(page_count: int) -> bytes:
@@ -17,22 +18,19 @@ def _make_pdf_bytes(page_count: int) -> bytes:
     return cast(bytes, doc.tobytes())
 
 
-def test_pixmap_to_rgb_image_does_not_use_png_roundtrip() -> None:
-    class FakePixmap:
-        width = 2
-        height = 1
-        n = 3
-        alpha = 0
-        stride = 0
+def test_bitmap_to_rgb_image_converts_rgba_to_rgb() -> None:
+    class FakeBitmap:
+        def __init__(self, image: Image.Image) -> None:
+            self._image = image
 
-        @property
-        def samples(self) -> bytes:
-            return bytes([255, 0, 0, 0, 255, 0])
+        def to_pil(self) -> Image.Image:
+            return self._image
 
-        def tobytes(self, *_args: object, **_kwargs: object) -> bytes:
-            raise AssertionError("PNG roundtrip should not be used in _pixmap_to_rgb_image")
+    rgba = Image.new("RGBA", (2, 1))
+    rgba.putpixel((0, 0), (255, 0, 0, 255))
+    rgba.putpixel((1, 0), (0, 255, 0, 128))
 
-    image = _pixmap_to_rgb_image(FakePixmap())
+    image = _bitmap_to_rgb_image(FakeBitmap(rgba))
     assert image.mode == "RGB"
     assert image.size == (2, 1)
     assert image.getpixel((0, 0)) == (255, 0, 0)

@@ -1,34 +1,35 @@
 from __future__ import annotations
 
 from collections.abc import Iterator
-from typing import Any
+from typing import Any, Protocol
 
 from PIL import Image
 
 from ragprep.config import get_settings
 
 
-def _import_fitz() -> Any:
+class _PdfiumBitmap(Protocol):
+    def to_pil(self) -> Image.Image: ...
+
+
+def _import_pdfium() -> Any:
     try:
-        import fitz  # PyMuPDF
+        import pypdfium2 as pdfium
     except Exception as exc:  # noqa: BLE001
-        raise ImportError("PyMuPDF is required for PDF rendering. Install `pymupdf`.") from exc
+        raise ImportError(
+            "pypdfium2 is required for PDF rendering. Install `pypdfium2`."
+        ) from exc
 
-    return fitz
+    return pdfium
 
 
-def _pixmap_to_rgb_image(pix: Any) -> Image.Image:
-    width = int(pix.width)
-    height = int(pix.height)
-
-    samples = pix.samples
-    stride = int(getattr(pix, "stride", 0)) or width * int(getattr(pix, "n", 3))
-
-    if getattr(pix, "alpha", 0) or int(getattr(pix, "n", 0)) == 4:
-        rgba = Image.frombuffer("RGBA", (width, height), samples, "raw", "RGBA", stride, 1)
-        return rgba.convert("RGB")
-
-    return Image.frombuffer("RGB", (width, height), samples, "raw", "RGB", stride, 1)
+def _bitmap_to_rgb_image(bitmap: _PdfiumBitmap) -> Image.Image:
+    image = bitmap.to_pil()
+    if image.mode == "RGBA":
+        return image.convert("RGB")
+    if image.mode != "RGB":
+        return image.convert("RGB")
+    return image
 
 
 def iter_pdf_images(
@@ -58,14 +59,14 @@ def iter_pdf_images(
     if len(pdf_bytes) > max_bytes:
         raise ValueError(f"PDF too large ({len(pdf_bytes)} bytes), max_bytes={max_bytes}")
 
-    fitz = _import_fitz()
     try:
-        doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+        pdfium = _import_pdfium()
+        doc = pdfium.PdfDocument(pdf_bytes)
     except Exception as exc:  # noqa: BLE001
         raise ValueError("Invalid PDF data") from exc
 
     try:
-        page_count = int(doc.page_count)
+        page_count = int(len(doc))
     except Exception as exc:  # noqa: BLE001
         doc.close()
         raise RuntimeError("Failed to read PDF page count") from exc
@@ -73,15 +74,14 @@ def iter_pdf_images(
         doc.close()
         raise ValueError(f"PDF has {page_count} pages, max_pages={max_pages}")
 
-    zoom = dpi / 72.0
-    matrix = fitz.Matrix(zoom, zoom)
+    scale = dpi / 72.0
 
     def generate() -> Iterator[Image.Image]:
-        with doc:
+        try:
             for page_index in range(page_count):
-                page = doc.load_page(page_index)
-                pix = page.get_pixmap(matrix=matrix, colorspace=fitz.csRGB, alpha=False)
-                rgb = _pixmap_to_rgb_image(pix)
+                page = doc[page_index]
+                bitmap = page.render(scale=scale)
+                rgb = _bitmap_to_rgb_image(bitmap)
 
                 width, height = rgb.size
                 current_max_edge = max(width, height)
@@ -98,6 +98,8 @@ def iter_pdf_images(
                     )
 
                 yield rgb
+        finally:
+            doc.close()
 
     return page_count, generate()
 
