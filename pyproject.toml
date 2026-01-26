@@ -17,8 +17,6 @@ dependencies = [
   "pillow>=10",
   "pypdfium2>=4.30.0",
   "pymupdf>=1.25",
-  "pymupdf-layout",
-  "pymupdf4llm",
   "pywebview>=5.0.0",
   "python-multipart>=0.0.9",
   "uvicorn>=0.27",

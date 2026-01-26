@@ -20,7 +20,7 @@ DEFAULT_RENDER_DPI: Final[int] = 200
 DEFAULT_RENDER_MAX_EDGE: Final[int] = 1540
 DEFAULT_MAX_CONCURRENCY: Final[int] = 1
 DEFAULT_PDF_BACKEND: Final[str] = "lightonocr"
-SUPPORTED_PDF_BACKENDS: Final[tuple[str, ...]] = ("pymupdf", "lightonocr")
+SUPPORTED_PDF_BACKENDS: Final[tuple[str, ...]] = ("lightonocr",)
 
 
 @dataclass(frozen=True)
