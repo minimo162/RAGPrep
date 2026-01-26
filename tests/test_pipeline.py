@@ -23,6 +23,30 @@ def _make_pdf_bytes(page_count: int) -> bytes:
     return cast(bytes, doc.tobytes())
 
 
+def _make_pdf_bytes_single_column_with_sidebar() -> bytes:
+    import fitz
+
+    doc = fitz.open()
+    page = doc.new_page(width=595, height=842)
+
+    y0 = 72
+    line_h = 14
+    for i in range(10):
+        page.insert_text((72, y0 + i * line_h), f"BODY{i + 1}")
+
+    rect_top = y0 + 1 * line_h - 2  # place NOTE_A between BODY3 and BODY4 (by y)
+    rect = fitz.Rect(320, rect_top, 520, rect_top + 60)
+
+    shape = page.new_shape()
+    shape.draw_rect(rect)
+    shape.finish(fill=(0.9, 0.9, 0.9), color=(0.9, 0.9, 0.9))
+    shape.commit()
+
+    page.insert_textbox(rect, "NOTE_A\nNOTE_B", fontsize=12)
+
+    return cast(bytes, doc.tobytes())
+
+
 def test_pdf_to_markdown_returns_markdown_and_normalizes_newlines(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -76,3 +100,16 @@ def test_pdf_to_markdown_writes_document_artifact(
 def test_pdf_to_markdown_invalid_pdf_raises_invalid_pdf_data() -> None:
     with pytest.raises(ValueError, match="Invalid PDF data"):
         pdf_to_markdown(b"not a pdf")
+
+
+def test_pdf_to_markdown_inserts_sidebar_near_reading_position() -> None:
+    markdown = pdf_to_markdown(_make_pdf_bytes_single_column_with_sidebar())
+
+    body3 = markdown.find("BODY3")
+    note_a = markdown.find("NOTE_A")
+    body4 = markdown.find("BODY4")
+
+    assert body3 != -1
+    assert note_a != -1
+    assert body4 != -1
+    assert body3 < note_a < body4
