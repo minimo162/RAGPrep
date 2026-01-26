@@ -214,3 +214,8 @@ def download_markdown(job_id: str) -> PlainTextResponse:
         media_type="text/markdown; charset=utf-8",
         headers=headers,
     )
+
+
+@app.get("/health")
+def health() -> PlainTextResponse:
+    return PlainTextResponse("ok", media_type="text/plain; charset=utf-8")
