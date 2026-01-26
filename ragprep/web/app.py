@@ -15,7 +15,7 @@ from fastapi.templating import Jinja2Templates
 from starlette.responses import Response
 
 from ragprep.config import get_settings
-from ragprep.pipeline import PdfToMarkdownProgress, pdf_to_markdown
+from ragprep.pipeline import PdfToJsonProgress, pdf_to_json
 
 TEMPLATES_DIR = Path(__file__).resolve().parent / "templates"
 STATIC_DIR = Path(__file__).resolve().parent / "static"
@@ -44,7 +44,7 @@ class Job:
     processed_pages: int = 0
     total_pages: int = 0
     progress_message: str | None = None
-    markdown: str | None = None
+    json_output: str | None = None
     error: str | None = None
 
 
@@ -105,7 +105,7 @@ def _run_job(job_id: str, pdf_bytes: bytes) -> None:
             progress_message=None,
         )
 
-        def on_progress(update: PdfToMarkdownProgress) -> None:
+        def on_progress(update: PdfToJsonProgress) -> None:
             jobs.update(
                 job_id,
                 phase=update.phase.value,
@@ -115,12 +115,18 @@ def _run_job(job_id: str, pdf_bytes: bytes) -> None:
             )
 
         try:
-            markdown = pdf_to_markdown(pdf_bytes, on_progress=on_progress)
+            json_output = pdf_to_json(pdf_bytes, on_progress=on_progress)
         except Exception as exc:  # noqa: BLE001
             logger.exception("Job %s failed", job_id)
             jobs.update(job_id, status=JobStatus.error, phase="error", error=str(exc))
             return
-        jobs.update(job_id, status=JobStatus.done, phase="done", markdown=markdown, error=None)
+        jobs.update(
+            job_id,
+            status=JobStatus.done,
+            phase="done",
+            json_output=json_output,
+            error=None,
+        )
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -128,7 +134,7 @@ def index(request: Request) -> Response:
     return templates.TemplateResponse(
         request,
         "index.html",
-        {"markdown": None, "error": None},
+        {"json_output": None, "error": None},
     )
 
 
@@ -146,7 +152,7 @@ async def convert(
         return templates.TemplateResponse(
             request,
             "_result.html",
-            {"markdown": None, "error": "Empty upload."},
+            {"json_output": None, "error": "Empty upload."},
             status_code=400,
         )
     if len(content) > settings.max_upload_bytes:
@@ -154,7 +160,7 @@ async def convert(
             request,
             "_result.html",
             {
-                "markdown": None,
+                "json_output": None,
                 "error": f"File too large (>{settings.max_upload_bytes} bytes).",
             },
             status_code=413,
@@ -163,7 +169,7 @@ async def convert(
         return templates.TemplateResponse(
             request,
             "_result.html",
-            {"markdown": None, "error": "Please upload a .pdf file."},
+            {"json_output": None, "error": "Please upload a .pdf file."},
             status_code=400,
         )
 
@@ -194,7 +200,7 @@ def job_result(request: Request, job_id: str) -> Response:
         return templates.TemplateResponse(
             request,
             "_result.html",
-            {"markdown": None, "error": "Result not ready yet."},
+            {"json_output": None, "error": "Result not ready yet."},
             status_code=409,
         )
     return templates.TemplateResponse(request, "_job_result.html", {"job": job})
@@ -206,22 +212,22 @@ def _download_filename_from_upload(upload_filename: str) -> str:
     stem = Path(name).stem.replace('"', "")
     if not stem or stem in {".", ".."}:
         stem = "download"
-    return f"{stem}.md"
+    return f"{stem}.json"
 
 
-@app.get("/download/{job_id}.md")
-def download_markdown(job_id: str) -> PlainTextResponse:
+@app.get("/download/{job_id}.json")
+def download_json(job_id: str) -> PlainTextResponse:
     job = jobs.get(job_id)
     if job is None:
         raise HTTPException(status_code=404, detail="job not found")
-    if job.status != JobStatus.done or job.markdown is None:
+    if job.status != JobStatus.done or job.json_output is None:
         raise HTTPException(status_code=409, detail="job not complete")
 
     download_filename = _download_filename_from_upload(job.filename)
     headers = {"Content-Disposition": f'attachment; filename="{download_filename}"'}
     return PlainTextResponse(
-        job.markdown,
-        media_type="text/markdown; charset=utf-8",
+        job.json_output,
+        media_type="application/json; charset=utf-8",
         headers=headers,
     )
 

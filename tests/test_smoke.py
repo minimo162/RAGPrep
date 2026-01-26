@@ -4,7 +4,7 @@ from typing import cast
 import pytest
 from fastapi.testclient import TestClient
 
-from ragprep import pymupdf4llm_markdown
+import ragprep.web.app as web_app
 from ragprep.web.app import app
 
 
@@ -37,18 +37,18 @@ def _make_pdf_bytes(page_count: int) -> bytes:
     return cast(bytes, doc.tobytes())
 
 
-def test_convert_creates_job_and_downloads_markdown(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_convert_creates_job_and_downloads_json(monkeypatch: pytest.MonkeyPatch) -> None:
     client = TestClient(app)
 
     pdf_bytes = _make_pdf_bytes(page_count=2)
 
     calls: dict[str, int] = {"n": 0}
 
-    def fake_to_markdown(_doc: object) -> str:
+    def fake_to_json(_bytes: bytes, *, on_progress: object | None = None) -> str:
         calls["n"] += 1
-        return "page1\r\n\r\npage2\r"
+        return '{"page1": true, "page2": true}'
 
-    monkeypatch.setattr(pymupdf4llm_markdown.pymupdf4llm, "to_markdown", fake_to_markdown)
+    monkeypatch.setattr(web_app, "pdf_to_json", fake_to_json)
 
     files = {"file": ("test.pdf", pdf_bytes, "application/pdf")}
     response = client.post("/convert", files=files)
@@ -67,18 +67,18 @@ def test_convert_creates_job_and_downloads_markdown(monkeypatch: pytest.MonkeyPa
 
     assert "page1" in result.text
     assert "page2" in result.text
-    assert f"/download/{job_id}.md" in result.text
-    assert "save_markdown" in result.text
+    assert f"/download/{job_id}.json" in result.text
+    assert "save_json" in result.text
 
-    download = client.get(f"/download/{job_id}.md")
+    download = client.get(f"/download/{job_id}.json")
     assert download.status_code == 200
-    assert download.text == "page1\n\npage2"
-    assert "text/markdown" in download.headers["content-type"]
-    assert "test.md" in download.headers["content-disposition"]
+    assert download.text == '{"page1": true, "page2": true}'
+    assert "application/json" in download.headers["content-type"]
+    assert "test.json" in download.headers["content-disposition"]
     assert calls["n"] == 1
 
     _ = client.get(f"/jobs/{job_id}/status")
-    _ = client.get(f"/download/{job_id}.md")
+    _ = client.get(f"/download/{job_id}.json")
     assert calls["n"] == 1
 
 
@@ -97,7 +97,7 @@ def test_bad_pdf_job_reports_error() -> None:
     else:
         pytest.fail("expected invalid pdf error")
 
-    download = client.get(f"/download/{job_id}.md")
+    download = client.get(f"/download/{job_id}.json")
     assert download.status_code == 409
 
 

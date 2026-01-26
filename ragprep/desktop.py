@@ -77,26 +77,26 @@ class _DesktopApi:
         self._base_url = base_url.rstrip("/")
         self._webview = webview
 
-    def save_markdown(self, job_id: str, download_url: str | None = None) -> dict[str, str]:
-        url = download_url or f"{self._base_url}/download/{job_id}.md"
+    def save_json(self, job_id: str, download_url: str | None = None) -> dict[str, str]:
+        url = download_url or f"{self._base_url}/download/{job_id}.json"
         request = Request(url, headers={"User-Agent": "ragprep-desktop"})
 
         try:
             with urlopen(request, timeout=30.0) as response:
                 if response.status != 200:
                     return {"status": "error", "message": f"download failed: {response.status}"}
-                markdown_bytes = response.read()
+                json_bytes = response.read()
                 content_disposition = response.headers.get("Content-Disposition", "")
         except Exception as exc:  # noqa: BLE001
             return {"status": "error", "message": f"download failed: {exc}"}
 
-        filename = _filename_from_content_disposition(content_disposition) or f"{job_id}.md"
+        filename = _filename_from_content_disposition(content_disposition) or f"{job_id}.json"
 
         try:
             selection = self._webview.create_file_dialog(
                 self._webview.SAVE_DIALOG,
                 save_filename=filename,
-                file_types=[("Markdown (*.md)", "*.md"), ("All files (*.*)", "*.*")],
+                file_types=[("JSON (*.json)", "*.json"), ("All files (*.*)", "*.*")],
             )
         except Exception as exc:  # noqa: BLE001
             return {"status": "error", "message": f"save dialog failed: {exc}"}
@@ -107,11 +107,14 @@ class _DesktopApi:
         selected_path = selection[0] if isinstance(selection, (list, tuple)) else selection
         try:
             with open(str(selected_path), "wb") as handle:
-                handle.write(markdown_bytes)
+                handle.write(json_bytes)
         except Exception as exc:  # noqa: BLE001
             return {"status": "error", "message": f"write failed: {exc}"}
 
         return {"status": "ok", "path": str(selected_path), "filename": filename}
+
+    def save_markdown(self, job_id: str, download_url: str | None = None) -> dict[str, str]:
+        return self.save_json(job_id, download_url)
 
 
 def main(argv: list[str] | None = None) -> int:

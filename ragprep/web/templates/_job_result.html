@@ -3,11 +3,11 @@
     <div class="muted">Job {{ job.id }} — done</div>
     <a
       class="link"
-      href="/download/{{ job.id }}.md"
-      onclick="if (window.pywebview && window.pywebview.api && window.pywebview.api.save_markdown) { window.pywebview.api.save_markdown('{{ job.id }}', this.href); return false; }"
-      >Download .md</a
+      href="/download/{{ job.id }}.json"
+      onclick="if (window.pywebview && window.pywebview.api) { if (window.pywebview.api.save_json) { window.pywebview.api.save_json('{{ job.id }}', this.href); return false; } if (window.pywebview.api.save_markdown) { window.pywebview.api.save_markdown('{{ job.id }}', this.href); return false; } }"
+      >Download .json</a
     >
   </div>
   <h2>Result</h2>
-  <pre class="markdown">{{ job.markdown }}</pre>
+  <pre class="json-output">{{ job.json_output }}</pre>
 </div>

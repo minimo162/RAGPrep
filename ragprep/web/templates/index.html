@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>PDF to Markdown</title>
+    <title>PDF to JSON</title>
     <style>
       :root {
         --fg: #111827;
@@ -65,7 +65,7 @@
         white-space: pre-wrap;
         word-wrap: break-word;
       }
-      pre.markdown {
+      pre.json-output {
         white-space: pre-wrap;
         word-wrap: break-word;
         background: #0b1020;
@@ -89,8 +89,8 @@
   </head>
   <body>
     <main class="container">
-      <h1>PDF to Markdown</h1>
-      <p class="muted">Upload a PDF and wait for conversion to finish.</p>
+      <h1>PDF to JSON</h1>
+      <p class="muted">Upload a PDF and wait for JSON conversion to finish.</p>
 
       <form
         hx-post="/convert"
