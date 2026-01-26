@@ -598,6 +598,10 @@ if (-not `$env:LIGHTONOCR_LLAVA_CLI_PATH -or [string]::IsNullOrWhiteSpace(`$env:
     }
 }
 
+if (-not `$env:RAGPREP_PDF_BACKEND -or [string]::IsNullOrWhiteSpace(`$env:RAGPREP_PDF_BACKEND)) {
+    `$env:RAGPREP_PDF_BACKEND = "lightonocr"
+}
+
 `$env:PYTHONNOUSERSITE = "1"
 `$env:PYTHONUTF8 = "1"
 `$env:PYTHONPATH = (Join-Path `$root "app") + ";" + (Join-Path `$root "site-packages")
@@ -639,6 +643,9 @@ if "%LIGHTONOCR_LLAVA_CLI_PATH%"=="" (
   ) else (
     set LIGHTONOCR_LLAVA_CLI_PATH=%ROOT%bin\llama.cpp\llava-cli.exe
   )
+)
+if "%RAGPREP_PDF_BACKEND%"=="" (
+  set RAGPREP_PDF_BACKEND=lightonocr
 )
 set PYTHONNOUSERSITE=1
 set PYTHONUTF8=1
