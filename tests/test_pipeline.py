@@ -124,6 +124,29 @@ def _make_pdf_bytes_two_columns_with_overlapping_callout() -> bytes:
     return cast(bytes, doc.tobytes())
 
 
+def _make_pdf_bytes_two_columns_with_textbox_callout() -> bytes:
+    import fitz
+
+    doc = fitz.open()
+    page = doc.new_page(width=595, height=842)
+
+    for y, line in [(72, "L_TOP_1"), (86, "L_TOP_2"), (220, "L_BOT_1"), (234, "L_BOT_2")]:
+        page.insert_text((72, y), line)
+
+    for y, line in [(72, "R_TOP_1"), (86, "R_TOP_2"), (220, "R_BOT_1"), (234, "R_BOT_2")]:
+        page.insert_text((320, y), line)
+
+    # A callout textbox that lives inside the left column, between the top and bottom blocks.
+    rect = fitz.Rect(72, 140, 220, 190)
+    shape = page.new_shape()
+    shape.draw_rect(rect)
+    shape.finish(fill=(0.9, 0.9, 0.9), color=(0.9, 0.9, 0.9))
+    shape.commit()
+    page.insert_textbox(rect, "NOTE_BOX", fontsize=12)
+
+    return cast(bytes, doc.tobytes())
+
+
 def test_pdf_to_markdown_returns_markdown_and_normalizes_newlines(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -237,3 +260,25 @@ def test_pdf_to_markdown_deduplicates_overlapping_callout_in_columns() -> None:
     markdown = pdf_to_markdown(_make_pdf_bytes_two_columns_with_overlapping_callout())
 
     assert markdown.count("NOTE_OVERLAP") == 1
+
+
+def test_pdf_to_markdown_two_columns_inserts_textbox_callout_near_y() -> None:
+    markdown = pdf_to_markdown(_make_pdf_bytes_two_columns_with_textbox_callout())
+
+    l_top_2 = markdown.find("L_TOP_2")
+    note_box = markdown.find("NOTE_BOX")
+    l_bot_1 = markdown.find("L_BOT_1")
+    l_bot_2 = markdown.find("L_BOT_2")
+    r_top_1 = markdown.find("R_TOP_1")
+
+    assert l_top_2 != -1
+    assert note_box != -1
+    assert l_bot_1 != -1
+    assert l_bot_2 != -1
+    assert r_top_1 != -1
+
+    assert l_top_2 < note_box < l_bot_1
+    assert l_bot_2 < r_top_1
+
+    compact = "".join(ch for ch in markdown if ch.isalnum() or ch == "_")
+    assert compact.count("NOTE_BOX") == 1
