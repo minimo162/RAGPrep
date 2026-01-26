@@ -47,6 +47,37 @@ def _make_pdf_bytes_single_column_with_sidebar() -> bytes:
     return cast(bytes, doc.tobytes())
 
 
+def _make_pdf_bytes_two_columns_with_gap() -> bytes:
+    import fitz
+
+    doc = fitz.open()
+    page = doc.new_page(width=595, height=842)
+
+    # Left column (two separate blocks to force a non-trivial reading order)
+    y = 72
+    for line in ["L_TOP_1", "L_TOP_2"]:
+        page.insert_text((72, y), line)
+        y += 14
+
+    y = 300
+    for line in ["L_BOT_1", "L_BOT_2"]:
+        page.insert_text((72, y), line)
+        y += 14
+
+    # Right column
+    y = 72
+    for line in ["R_TOP_1", "R_TOP_2"]:
+        page.insert_text((320, y), line)
+        y += 14
+
+    y = 300
+    for line in ["R_BOT_1", "R_BOT_2"]:
+        page.insert_text((320, y), line)
+        y += 14
+
+    return cast(bytes, doc.tobytes())
+
+
 def test_pdf_to_markdown_returns_markdown_and_normalizes_newlines(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -113,3 +144,14 @@ def test_pdf_to_markdown_inserts_sidebar_near_reading_position() -> None:
     assert note_a != -1
     assert body4 != -1
     assert body3 < note_a < body4
+
+
+def test_pdf_to_markdown_orders_two_columns_column_major() -> None:
+    markdown = pdf_to_markdown(_make_pdf_bytes_two_columns_with_gap())
+
+    l_bot_2 = markdown.find("L_BOT_2")
+    r_top_1 = markdown.find("R_TOP_1")
+
+    assert l_bot_2 != -1
+    assert r_top_1 != -1
+    assert l_bot_2 < r_top_1
