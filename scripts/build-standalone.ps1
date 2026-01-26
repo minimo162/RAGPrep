@@ -602,7 +602,7 @@ if (-not `$env:LIGHTONOCR_LLAVA_CLI_PATH -or [string]::IsNullOrWhiteSpace(`$env:
 `$env:PYTHONUTF8 = "1"
 `$env:PYTHONPATH = (Join-Path `$root "app") + ";" + (Join-Path `$root "site-packages")
 
-& `$pythonExe -m uvicorn ragprep.web.app:app --host `$BindHost --port `$Port
+& `$pythonExe -m ragprep.desktop --host `$BindHost --port `$Port
 "@
     Set-Content -Path (Join-Path $OutputDir "run.ps1") -Value $runPs1 -Encoding UTF8
 
@@ -643,7 +643,7 @@ if "%LIGHTONOCR_LLAVA_CLI_PATH%"=="" (
 set PYTHONNOUSERSITE=1
 set PYTHONUTF8=1
 set PYTHONPATH=%ROOT%app;%ROOT%site-packages
-"%ROOT%python\python.exe" -m uvicorn ragprep.web.app:app --host %BIND_HOST% --port %PORT%
+"%ROOT%python\python.exe" -m ragprep.desktop --host %BIND_HOST% --port %PORT%
 exit /b %ERRORLEVEL%
 
 :usage
