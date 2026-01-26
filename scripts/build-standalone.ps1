@@ -6,9 +6,9 @@ param(
     [string]$PbsRelease = "latest",
     [string]$PipTempRoot = "",
     [string]$LlamaCppPythonExtraIndexUrl = "https://abetlen.github.io/llama-cpp-python/whl/cpu",
-    [string]$GgufRepoId = "mrutkows/granite-docling-258M-GGUF",
-    [string]$GgufModelFile = "granite-docling-258M-Q4_K_M.gguf",
-    [string]$GgufMmprojFile = "mmproj-model-f16.gguf",
+    [string]$GgufRepoId = "noctrex/LightOnOCR-2-1B-GGUF",
+    [string]$GgufModelFile = "LightOnOCR-2-1B-Q6_K.gguf",
+    [string]$GgufMmprojFile = "mmproj-BF16.gguf",
     [switch]$SkipGgufPrefetch,
     [switch]$Clean
 )

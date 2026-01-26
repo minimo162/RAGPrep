@@ -139,8 +139,8 @@ if (-not $SkipStandaloneCheck) {
 
     if (Test-Path -LiteralPath $StandaloneDir -PathType Container) {
         if ([string]::IsNullOrWhiteSpace($envModelPathRaw) -and [string]::IsNullOrWhiteSpace($envMmprojPathRaw)) {
-            $stagedModel = Join-Path $StandaloneDir "data\\models\\lightonocr-gguf\\granite-docling-258M-Q4_K_M.gguf"
-            $stagedMmproj = Join-Path $StandaloneDir "data\\models\\lightonocr-gguf\\mmproj-model-f16.gguf"
+            $stagedModel = Join-Path $StandaloneDir "data\\models\\lightonocr-gguf\\LightOnOCR-2-1B-Q6_K.gguf"
+            $stagedMmproj = Join-Path $StandaloneDir "data\\models\\lightonocr-gguf\\mmproj-BF16.gguf"
             Assert-True (Test-Path -LiteralPath $stagedModel -PathType Leaf) "Missing staged GGUF model: $stagedModel"
             Assert-True (Test-Path -LiteralPath $stagedMmproj -PathType Leaf) "Missing staged GGUF mmproj: $stagedMmproj"
             Write-Host "OK: Standalone staged GGUF files found under $StandaloneDir" -ForegroundColor Green

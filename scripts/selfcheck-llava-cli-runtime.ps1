@@ -22,8 +22,8 @@ $ProgressPreference = "SilentlyContinue"
 #   - LIGHTONOCR_GGUF_MMPROJ_PATH
 #   - LIGHTONOCR_LLAVA_CLI_PATH (can point to llama-mtmd-cli.exe / llava-cli.exe / llama-llava-cli.exe)
 # - If the GGUF env vars are unset, and a standalone dir is available, this script falls back to:
-#   - <standalone>/data/models/lightonocr-gguf/granite-docling-258M-Q4_K_M.gguf
-#   - <standalone>/data/models/lightonocr-gguf/mmproj-model-f16.gguf
+#   - <standalone>/data/models/lightonocr-gguf/LightOnOCR-2-1B-Q6_K.gguf
+#   - <standalone>/data/models/lightonocr-gguf/mmproj-BF16.gguf
 
 function Assert-True {
     param(
@@ -240,8 +240,8 @@ $mmprojPath = Resolve-PathFromRepo -RepoRoot $repoRoot -PathValue $envMmprojRaw
 
 if ([string]::IsNullOrWhiteSpace($envModelRaw) -or [string]::IsNullOrWhiteSpace($envMmprojRaw)) {
     if (-not $SkipStandaloneFallback -and (Test-Path -LiteralPath $StandaloneDir -PathType Container)) {
-        $fallbackModel = Join-Path $StandaloneDir "data\models\lightonocr-gguf\granite-docling-258M-Q4_K_M.gguf"
-        $fallbackMmproj = Join-Path $StandaloneDir "data\models\lightonocr-gguf\mmproj-model-f16.gguf"
+        $fallbackModel = Join-Path $StandaloneDir "data\models\lightonocr-gguf\LightOnOCR-2-1B-Q6_K.gguf"
+        $fallbackMmproj = Join-Path $StandaloneDir "data\models\lightonocr-gguf\mmproj-BF16.gguf"
         if ((Test-Path -LiteralPath $fallbackModel -PathType Leaf) -and (Test-Path -LiteralPath $fallbackMmproj -PathType Leaf)) {
             $modelPath = $fallbackModel
             $mmprojPath = $fallbackMmproj
