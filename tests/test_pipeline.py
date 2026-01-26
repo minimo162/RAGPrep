@@ -341,6 +341,45 @@ def test_pdf_to_markdown_uses_lightonocr_backend(
     assert pdf_to_markdown(pdf_bytes) == "ocr-markdown"
 
 
+def test_pdf_to_markdown_lightonocr_renders_and_joins_pages(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from PIL import Image
+
+    from ragprep.config import get_settings
+    from ragprep.ocr import lightonocr
+
+    images = [Image.new("RGB", (2, 2)), Image.new("RGB", (2, 2))]
+
+    def _fake_iter_pdf_images(
+        _pdf_bytes: bytes,
+        *,
+        dpi: int | None = None,
+        max_edge: int | None = None,
+        max_pages: int | None = None,
+        max_bytes: int | None = None,
+    ) -> tuple[int, object]:
+        return 2, iter(images)
+
+    calls: list[str] = []
+
+    def _fake_ocr_image(_image: Image.Image) -> str:
+        calls.append("ok")
+        return f"PAGE{len(calls)}"
+
+    monkeypatch.setattr(
+        "ragprep.pdf_render.iter_pdf_images",
+        _fake_iter_pdf_images,
+    )
+    monkeypatch.setattr(lightonocr, "ocr_image", _fake_ocr_image)
+
+    settings = get_settings()
+    result = pipeline._pdf_to_markdown_lightonocr(b"%PDF", settings=settings)
+
+    assert result == "PAGE1\n\nPAGE2"
+    assert len(calls) == 2
+
+
 def test_pdf_to_json_uses_lightonocr_backend(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

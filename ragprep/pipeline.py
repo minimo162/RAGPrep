@@ -62,7 +62,31 @@ def _write_text_artifact(path: Path, text: str) -> None:
 
 
 def _pdf_to_markdown_lightonocr(pdf_bytes: bytes, *, settings: Settings) -> str:
-    raise NotImplementedError("LightOnOCR backend is not wired yet (task-03).")
+    from ragprep.ocr import lightonocr
+    from ragprep.pdf_render import iter_pdf_images
+
+    try:
+        _total_pages, images = iter_pdf_images(
+            pdf_bytes,
+            dpi=settings.render_dpi,
+            max_edge=settings.render_max_edge,
+            max_pages=settings.max_pages,
+            max_bytes=settings.max_upload_bytes,
+        )
+    except Exception as exc:  # noqa: BLE001
+        raise RuntimeError("Failed to render PDF for LightOnOCR.") from exc
+
+    parts: list[str] = []
+    for page_index, image in enumerate(images, start=1):
+        try:
+            text = lightonocr.ocr_image(image)
+        except Exception as exc:  # noqa: BLE001
+            raise RuntimeError(f"LightOnOCR failed on page {page_index}.") from exc
+        normalized = str(text).replace("\r\n", "\n").replace("\r", "\n").strip()
+        if normalized:
+            parts.append(normalized)
+
+    return "\n\n".join(parts).strip()
 
 
 def _pdf_to_json_lightonocr(pdf_bytes: bytes, *, settings: Settings) -> str:
