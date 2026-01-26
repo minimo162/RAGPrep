@@ -68,6 +68,7 @@ def test_convert_creates_job_and_downloads_markdown(monkeypatch: pytest.MonkeyPa
     assert "page1" in result.text
     assert "page2" in result.text
     assert f"/download/{job_id}.md" in result.text
+    assert "save_markdown" in result.text
 
     download = client.get(f"/download/{job_id}.md")
     assert download.status_code == 200
