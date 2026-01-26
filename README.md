@@ -12,6 +12,19 @@ cd C:\Users\Administrator\RAGPrep
 uv sync --dev
 ```
 
+## 実行（GUI）
+```bash
+cd C:\Users\Administrator\RAGPrep
+uv run python -m ragprep.desktop
+```
+
+起動すると GUI が自動で開きます。GUI を閉じるとアプリも終了します。
+
+### トラブルシュート（GUI）
+- GUI が開かない場合: Microsoft Edge WebView2 Runtime が必要です（未導入の場合はインストールしてください）。
+- 起動直後に終了する場合: ポート競合の可能性があります。`--port 8001` などでポートを変更してください。
+- 詳細ログ: PowerShell/CMD から起動するとエラーメッセージが表示されます。
+
 ## 実行（Web）
 ```bash
 cd C:\Users\Administrator\RAGPrep
@@ -79,6 +92,8 @@ PowerShell:
 .\dist\standalone\run.ps1
 .\dist\standalone\run.ps1 -BindHost 0.0.0.0 -Port 8001
 ```
+
+起動すると GUI が自動で開きます。GUI を閉じるとアプリも終了します。
 
 CMD:
 ```bat
