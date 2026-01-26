@@ -200,6 +200,15 @@ def job_result(request: Request, job_id: str) -> Response:
     return templates.TemplateResponse(request, "_job_result.html", {"job": job})
 
 
+def _download_filename_from_upload(upload_filename: str) -> str:
+    name = Path(upload_filename).name
+    name = name.replace("\r", "").replace("\n", "")
+    stem = Path(name).stem.replace('"', "")
+    if not stem or stem in {".", ".."}:
+        stem = "download"
+    return f"{stem}.md"
+
+
 @app.get("/download/{job_id}.md")
 def download_markdown(job_id: str) -> PlainTextResponse:
     job = jobs.get(job_id)
@@ -208,7 +217,8 @@ def download_markdown(job_id: str) -> PlainTextResponse:
     if job.status != JobStatus.done or job.markdown is None:
         raise HTTPException(status_code=409, detail="job not complete")
 
-    headers = {"Content-Disposition": f'attachment; filename="{job_id}.md"'}
+    download_filename = _download_filename_from_upload(job.filename)
+    headers = {"Content-Disposition": f'attachment; filename="{download_filename}"'}
     return PlainTextResponse(
         job.markdown,
         media_type="text/markdown; charset=utf-8",

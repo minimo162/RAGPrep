@@ -73,7 +73,7 @@ def test_convert_creates_job_and_downloads_markdown(monkeypatch: pytest.MonkeyPa
     assert download.status_code == 200
     assert download.text == "page1\n\npage2"
     assert "text/markdown" in download.headers["content-type"]
-    assert f"{job_id}.md" in download.headers["content-disposition"]
+    assert "test.md" in download.headers["content-disposition"]
     assert calls["n"] == 1
 
     _ = client.get(f"/jobs/{job_id}/status")
