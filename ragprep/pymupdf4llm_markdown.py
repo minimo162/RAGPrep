@@ -25,6 +25,25 @@ class _TextBlock:
     visible_chars: int
 
 
+@dataclass(frozen=True)
+class _TextLine:
+    x0: float
+    y0: float
+    x1: float
+    y1: float
+    text: str
+    block_index: int
+    line_index: int
+
+    @property
+    def y_center(self) -> float:
+        return (self.y0 + self.y1) / 2.0
+
+    @property
+    def height(self) -> float:
+        return self.y1 - self.y0
+
+
 def _extract_text_blocks(page: Any) -> list[_TextBlock]:
     try:
         raw_blocks = page.get_text("blocks") or []
@@ -70,8 +89,9 @@ def _should_use_sorted_text_for_sidebar_page(page: Any) -> bool:
     if main.visible_chars < 20:
         return False
 
-    # Right-side blocks are potential sidebars/callouts.
-    right_blocks = [b for b in blocks if b.x0 >= (page_width * 0.50) and b.visible_chars >= 5]
+    min_right_x0 = max(page_width * 0.45, main.x1 + max(12.0, page_width * 0.02))
+
+    right_blocks = [b for b in blocks if b.x0 >= min_right_x0 and b.visible_chars >= 5]
     if not right_blocks:
         return False
 
@@ -94,7 +114,105 @@ def _should_use_sorted_text_for_sidebar_page(page: Any) -> bool:
     return True
 
 
+def _extract_sorted_text_from_dict(page: Any) -> str:
+    data = page.get_text("dict") or {}
+    raw_blocks = data.get("blocks") or []
+
+    lines: list[_TextLine] = []
+    for block_index, block in enumerate(raw_blocks):
+        if not isinstance(block, dict):
+            continue
+        if int(block.get("type", 0)) != 0:
+            continue
+        raw_lines = block.get("lines") or []
+        for line_index, line in enumerate(raw_lines):
+            if not isinstance(line, dict):
+                continue
+            bbox = line.get("bbox") or block.get("bbox")
+            if not isinstance(bbox, (list, tuple)) or len(bbox) != 4:
+                continue
+            try:
+                x0, y0, x1, y1 = (float(bbox[0]), float(bbox[1]), float(bbox[2]), float(bbox[3]))
+            except Exception:  # noqa: BLE001
+                continue
+
+            spans = line.get("spans") or []
+            parts: list[str] = []
+            for span in spans:
+                if not isinstance(span, dict):
+                    continue
+                text = span.get("text")
+                if text:
+                    parts.append(str(text))
+            line_text = _normalize_newlines("".join(parts)).strip()
+            if not line_text:
+                continue
+
+            lines.append(
+                _TextLine(
+                    x0=x0,
+                    y0=y0,
+                    x1=x1,
+                    y1=y1,
+                    text=line_text,
+                    block_index=block_index,
+                    line_index=line_index,
+                )
+            )
+
+    lines.sort(
+        key=lambda line: (
+            round(line.y_center, 3),
+            round(line.x0, 3),
+            round(line.y0, 3),
+            round(line.x1, 3),
+            line.block_index,
+            line.line_index,
+        )
+    )
+
+    rows: list[list[_TextLine]] = []
+    for line in lines:
+        if not rows:
+            rows.append([line])
+            continue
+
+        current = rows[-1]
+        row_center = sum(item.y_center for item in current) / len(current)
+        row_height = max(item.height for item in current)
+        tolerance = max(2.0, min(row_height, line.height) * 0.50)
+        if abs(line.y_center - row_center) <= tolerance:
+            current.append(line)
+            continue
+
+        rows.append([line])
+
+    output_lines: list[str] = []
+    for row in rows:
+        row_sorted = sorted(
+            row,
+            key=lambda item: (
+                round(item.x0, 3),
+                round(item.y_center, 3),
+                round(item.y0, 3),
+                round(item.x1, 3),
+                item.block_index,
+                item.line_index,
+            ),
+        )
+        output_lines.append(" ".join(item.text for item in row_sorted).strip())
+
+    return "\n".join(line for line in output_lines if line).strip()
+
+
 def _extract_sorted_page_text(page: Any) -> str:
+    try:
+        text = _extract_sorted_text_from_dict(page)
+    except Exception:  # noqa: BLE001
+        text = ""
+    if text:
+        return text
+
     try:
         text = page.get_text("text", sort=True) or ""
     except Exception:  # noqa: BLE001
@@ -204,11 +322,29 @@ def _infer_column_boundaries(page: Any) -> tuple[float, ...] | None:
     return tuple(clamped)
 
 
+def _has_boundary_crossing_blocks(page: Any, *, boundaries: tuple[float, ...]) -> bool:
+    blocks = _extract_text_blocks(page)
+    if not blocks:
+        return False
+
+    for block in blocks:
+        if block.visible_chars < 5:
+            continue
+        for boundary in boundaries:
+            if block.x0 < (boundary - 0.5) and block.x1 > (boundary + 0.5):
+                return True
+
+    return False
+
+
 def _extract_column_major_page_text(page: Any, *, boundaries: tuple[float, ...]) -> str:
     rect = getattr(page, "rect", None)
     page_width = float(getattr(rect, "width", 0.0)) if rect is not None else 0.0
     page_height = float(getattr(rect, "height", 0.0)) if rect is not None else 0.0
     if page_width <= 0.0 or page_height <= 0.0:
+        return _extract_sorted_page_text(page)
+
+    if _has_boundary_crossing_blocks(page, boundaries=boundaries):
         return _extract_sorted_page_text(page)
 
     xs = (0.0, *boundaries, page_width)
