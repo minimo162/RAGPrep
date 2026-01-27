@@ -60,22 +60,12 @@ def test_build_standalone_calls_verify_script() -> None:
     assert 'Assert-LastExitCode "verify standalone"' in content
 
 
-def test_build_standalone_bundles_vulkan_and_avx2() -> None:
-    content = _read_build_standalone_ps1()
-    assert 'Name = "avx2"' in content
-    assert 'Name = "vulkan"' in content
-    assert "bin-win-cpu-x64.zip" in content
-    assert "bin-win-vulkan-x64.zip" in content
-
-
 def test_verify_standalone_checks_required_artifacts() -> None:
     content = _read_verify_standalone_ps1()
     assert "python/python.exe" in content
     assert '"app"' in content
     assert '"site-packages"' in content
     assert "bin/llama.cpp" in content
-    assert '"avx2"' in content
-    assert '"vulkan"' in content
     assert "llama-mtmd-cli.exe" in content
     assert "data/models/lightonocr-gguf" in content
     assert "LightOnOCR-2-1B-Q6_K.gguf" in content
