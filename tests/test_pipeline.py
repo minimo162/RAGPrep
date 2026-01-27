@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 from collections.abc import Callable
 from pathlib import Path
 
@@ -125,11 +124,8 @@ def test_pdf_to_json_reports_progress(monkeypatch: pytest.MonkeyPatch) -> None:
     def on_progress(update: PdfToJsonProgress) -> None:
         updates.append(update)
 
-    payload = json.loads(pdf_to_json(b"%PDF", on_progress=on_progress))
-    assert payload["meta"]["backend"] == "lightonocr"
-    assert payload["meta"]["page_count"] == 2
-    assert payload["pages"][0]["markdown"] == "PAGE1"
-    assert payload["pages"][1]["markdown"] == "PAGE2"
+    markdown = pdf_to_json(b"%PDF", on_progress=on_progress)
+    assert markdown == "PAGE1\n\nPAGE2"
     assert [(u.phase, u.current, u.total) for u in updates] == [
         (ProgressPhase.rendering, 0, 2),
         (ProgressPhase.rendering, 1, 2),
@@ -150,9 +146,8 @@ def test_pdf_to_json_calls_on_page_per_page(monkeypatch: pytest.MonkeyPatch) -> 
     def on_page(page_index: int, markdown: str) -> None:
         pages.append((page_index, markdown))
 
-    payload = json.loads(pdf_to_json(b"%PDF", on_page=on_page))
-    assert payload["pages"][0]["markdown"] == "PAGE1"
-    assert payload["pages"][1]["markdown"] == "PAGE2"
+    markdown = pdf_to_json(b"%PDF", on_page=on_page)
+    assert markdown == "PAGE1\n\nPAGE2"
     assert pages == [(1, "PAGE1"), (2, "PAGE2")]
 
 
@@ -165,12 +160,14 @@ def test_pdf_to_json_writes_document_artifact(
 
     out_dir = tmp_path / "artifacts"
     result = pdf_to_json(b"%PDF", page_output_dir=out_dir)
-    data = json.loads(result)
-    assert data["pages"][0]["markdown"] == "only"
+    assert result == "only"
 
-    artifact = out_dir / "document.json"
-    assert artifact.exists()
-    assert artifact.read_text(encoding="utf-8").endswith("\n")
+    json_artifact = out_dir / "document.json"
+    assert not json_artifact.exists()
+
+    md_artifact = out_dir / "document.md"
+    assert md_artifact.exists()
+    assert md_artifact.read_text(encoding="utf-8") == "only\n"
 
 
 def test_pdf_to_json_invalid_pdf_propagates_value_error(

@@ -1,10 +1,9 @@
 from __future__ import annotations
 
 import argparse
-import json
 import sys
 import time
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
 from pathlib import Path
 from statistics import mean
 
@@ -31,11 +30,6 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
         type=int,
         default=1,
         help="Number of benchmark runs (default: 1)",
-    )
-    parser.add_argument(
-        "--json",
-        action="store_true",
-        help="Print machine-readable JSON (runs + averages)",
     )
     return parser.parse_args(argv)
 
@@ -112,10 +106,6 @@ def main(argv: list[str]) -> int:
         f"min={avg['convert_s_min']:.3f} max={avg['convert_s_max']:.3f}",
         file=sys.stderr,
     )
-
-    if args.json:
-        payload = {"runs": [asdict(r) for r in runs], "avg": avg}
-        print(json.dumps(payload, ensure_ascii=False, indent=2))
 
     return 0
 

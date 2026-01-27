@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import json
-
 import pytest
 from PIL import Image
 
@@ -39,7 +37,9 @@ def test_pdf_to_markdown_lightonocr_normalizes_newlines(
     assert result == "line1\nline2"
 
 
-def test_pdf_to_json_lightonocr_builds_schema(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_pdf_to_markdown_lightonocr_concatenates_pages(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     _patch_iter_pdf_images(monkeypatch, page_count=2)
 
     outputs = iter(["PAGE1", "PAGE2"])
@@ -50,18 +50,13 @@ def test_pdf_to_json_lightonocr_builds_schema(monkeypatch: pytest.MonkeyPatch) -
     monkeypatch.setattr("ragprep.ocr.lightonocr.ocr_image", _fake_ocr_image)
 
     settings = get_settings()
-    result = pipeline._pdf_to_json_lightonocr(b"%PDF", settings=settings)
-    data = json.loads(result)
-
-    assert data["meta"]["backend"] == "lightonocr"
-    assert data["meta"]["page_count"] == 2
-    assert data["pages"][0]["page"] == 1
-    assert data["pages"][0]["markdown"] == "PAGE1"
-    assert data["pages"][1]["page"] == 2
-    assert data["pages"][1]["markdown"] == "PAGE2"
+    result = pipeline._pdf_to_markdown_lightonocr(b"%PDF", settings=settings)
+    assert result == "PAGE1\n\nPAGE2"
 
 
-def test_pdf_to_json_lightonocr_calls_on_page(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_pdf_to_markdown_lightonocr_calls_on_page(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     _patch_iter_pdf_images(monkeypatch, page_count=2)
 
     outputs = iter(["PAGE1\r", " PAGE2 "])
@@ -77,11 +72,12 @@ def test_pdf_to_json_lightonocr_calls_on_page(monkeypatch: pytest.MonkeyPatch) -
         pages.append((page_index, markdown))
 
     settings = get_settings()
-    result = pipeline._pdf_to_json_lightonocr(b"%PDF", settings=settings, on_page=on_page)
-    data = json.loads(result)
-
-    assert data["pages"][0]["markdown"] == "PAGE1"
-    assert data["pages"][1]["markdown"] == "PAGE2"
+    result = pipeline._pdf_to_markdown_lightonocr(
+        b"%PDF",
+        settings=settings,
+        on_page=on_page,
+    )
+    assert result == "PAGE1\n\nPAGE2"
     assert pages == [(1, "PAGE1"), (2, "PAGE2")]
 
 
@@ -97,7 +93,7 @@ def test_pdf_to_json_lightonocr_error_includes_root_cause(
 
     settings = get_settings()
     with pytest.raises(RuntimeError) as excinfo:
-        pipeline._pdf_to_json_lightonocr(b"%PDF", settings=settings)
+        pipeline._pdf_to_markdown_lightonocr(b"%PDF", settings=settings)
     message = str(excinfo.value)
     assert "LightOnOCR failed on page 1" in message
     assert "GGUF model file not found" in message
