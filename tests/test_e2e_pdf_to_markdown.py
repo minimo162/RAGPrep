@@ -10,11 +10,9 @@ def _squash_ws(text: str) -> str:
 
 
 def test_pdf_to_markdown_e2e_contains_text(monkeypatch: pytest.MonkeyPatch) -> None:
-    from PIL import Image
+    encoded_pages = ["BASE64_PAGE_1", "BASE64_PAGE_2"]
 
-    images = [Image.new("RGB", (2, 2)), Image.new("RGB", (2, 2))]
-
-    def _fake_iter_pdf_images(
+    def _fake_iter_pdf_page_png_base64(
         _pdf_bytes: bytes,
         *,
         dpi: int | None = None,
@@ -22,16 +20,19 @@ def test_pdf_to_markdown_e2e_contains_text(monkeypatch: pytest.MonkeyPatch) -> N
         max_pages: int | None = None,
         max_bytes: int | None = None,
     ) -> tuple[int, object]:
-        return 2, iter(images)
+        return 2, iter(encoded_pages)
 
-    monkeypatch.setattr("ragprep.pdf_render.iter_pdf_images", _fake_iter_pdf_images)
+    monkeypatch.setattr(
+        "ragprep.pdf_render.iter_pdf_page_png_base64",
+        _fake_iter_pdf_page_png_base64,
+    )
 
     outputs = iter(["Hello E2E 1", "Hello E2E 2"])
 
-    def _fake_ocr_image(_image: Image.Image) -> str:
+    def _fake_ocr_image(_encoded: str) -> str:
         return next(outputs)
 
-    monkeypatch.setattr("ragprep.ocr.lightonocr.ocr_image", _fake_ocr_image)
+    monkeypatch.setattr("ragprep.ocr.lightonocr.ocr_image_base64", _fake_ocr_image)
 
     markdown = pdf_to_markdown(b"%PDF")
     squashed = _squash_ws(markdown)

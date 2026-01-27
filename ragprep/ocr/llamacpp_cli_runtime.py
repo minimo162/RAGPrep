@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import base64
+import binascii
 import shutil
 import subprocess
 import tempfile
@@ -353,6 +355,68 @@ def _extract_text(stdout: str) -> str:
 
 
 def ocr_image(*, image: Image.Image, settings: LlamaCppCliSettings, max_new_tokens: int) -> str:
+    with tempfile.NamedTemporaryFile(prefix="ragprep_llava_", suffix=".png", delete=False) as tmp:
+        image_path = Path(tmp.name)
+    try:
+        image.save(image_path, format="PNG")
+        return _ocr_with_image_path(
+            image_path=image_path,
+            settings=settings,
+            max_new_tokens=max_new_tokens,
+        )
+    finally:
+        try:
+            image_path.unlink(missing_ok=True)
+        except Exception:  # noqa: BLE001
+            pass
+
+
+def ocr_image_base64(
+    *,
+    image_base64: str,
+    settings: LlamaCppCliSettings,
+    max_new_tokens: int,
+) -> str:
+    if not image_base64:
+        raise ValueError("image_base64 is empty")
+
+    payload = image_base64.strip()
+    if payload.startswith("data:"):
+        comma_index = payload.find(",")
+        if comma_index != -1:
+            payload = payload[comma_index + 1 :].strip()
+
+    try:
+        image_bytes = base64.b64decode(payload, validate=False)
+    except (binascii.Error, ValueError) as exc:
+        raise ValueError("image_base64 is not valid base64") from exc
+
+    if not image_bytes:
+        raise ValueError("image_base64 is empty")
+
+    with tempfile.NamedTemporaryFile(prefix="ragprep_llava_", suffix=".png", delete=False) as tmp:
+        image_path = Path(tmp.name)
+        tmp.write(image_bytes)
+
+    try:
+        return _ocr_with_image_path(
+            image_path=image_path,
+            settings=settings,
+            max_new_tokens=max_new_tokens,
+        )
+    finally:
+        try:
+            image_path.unlink(missing_ok=True)
+        except Exception:  # noqa: BLE001
+            pass
+
+
+def _ocr_with_image_path(
+    *,
+    image_path: Path,
+    settings: LlamaCppCliSettings,
+    max_new_tokens: int,
+) -> str:
     model_path, mmproj_path = _validate_paths(settings)
     explicit = _normalize_path_value(settings.llava_cli_path)
     explicit_is_file = False
@@ -372,13 +436,24 @@ def ocr_image(*, image: Image.Image, settings: LlamaCppCliSettings, max_new_toke
 
     prompt = "Extract all text from this image and return it as Markdown."
 
-    with tempfile.NamedTemporaryFile(prefix="ragprep_llava_", suffix=".png", delete=False) as tmp:
-        image_path = Path(tmp.name)
-    try:
-        image.save(image_path, format="PNG")
+    argv = _build_argv(
+        llava_cli=llava_cli,
+        settings=settings,
+        model_path=model_path,
+        mmproj_path=mmproj_path,
+        image_path=image_path,
+        prompt=prompt,
+        max_new_tokens=max_new_tokens,
+    )
 
-        argv = _build_argv(
-            llava_cli=llava_cli,
+    result = _run_llava_cli(argv)
+    if result.returncode == 0:
+        return _extract_text(result.stdout or "")
+
+    primary_error = _format_cli_failure(result, cli_path=llava_cli)
+    if fallback_cli:
+        fallback_argv = _build_argv(
+            llava_cli=fallback_cli,
             settings=settings,
             model_path=model_path,
             mmproj_path=mmproj_path,
@@ -386,34 +461,13 @@ def ocr_image(*, image: Image.Image, settings: LlamaCppCliSettings, max_new_toke
             prompt=prompt,
             max_new_tokens=max_new_tokens,
         )
+        fallback_result = _run_llava_cli(fallback_argv)
+        if fallback_result.returncode == 0:
+            return _extract_text(fallback_result.stdout or "")
 
-        result = _run_llava_cli(argv)
-        if result.returncode == 0:
-            return _extract_text(result.stdout or "")
+        fallback_error = _format_cli_failure(fallback_result, cli_path=fallback_cli)
+        raise RuntimeError(
+            f"{primary_error}\n\nFallback to AVX2 also failed.\n\n{fallback_error}"
+        )
 
-        primary_error = _format_cli_failure(result, cli_path=llava_cli)
-        if fallback_cli:
-            fallback_argv = _build_argv(
-                llava_cli=fallback_cli,
-                settings=settings,
-                model_path=model_path,
-                mmproj_path=mmproj_path,
-                image_path=image_path,
-                prompt=prompt,
-                max_new_tokens=max_new_tokens,
-            )
-            fallback_result = _run_llava_cli(fallback_argv)
-            if fallback_result.returncode == 0:
-                return _extract_text(fallback_result.stdout or "")
-
-            fallback_error = _format_cli_failure(fallback_result, cli_path=fallback_cli)
-            raise RuntimeError(
-                f"{primary_error}\n\nFallback to AVX2 also failed.\n\n{fallback_error}"
-            )
-
-        raise RuntimeError(primary_error)
-    finally:
-        try:
-            image_path.unlink(missing_ok=True)
-        except Exception:  # noqa: BLE001
-            pass
+    raise RuntimeError(primary_error)

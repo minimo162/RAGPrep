@@ -10,6 +10,7 @@ from PIL import Image
 
 from .llamacpp_cli_runtime import LlamaCppCliSettings
 from .llamacpp_cli_runtime import ocr_image as ocr_image_llama_cpp_cli
+from .llamacpp_cli_runtime import ocr_image_base64 as ocr_image_base64_llama_cpp_cli
 
 ENV_MAX_NEW_TOKENS = "LIGHTONOCR_MAX_NEW_TOKENS"
 ENV_DRY_RUN = "LIGHTONOCR_DRY_RUN"
@@ -236,6 +237,46 @@ def ocr_image(image: Image.Image) -> str:
     )
     return ocr_image_llama_cpp_cli(
         image=image,
+        settings=llama_settings,
+        max_new_tokens=settings.max_new_tokens,
+    )
+
+
+def ocr_image_base64(image_base64: str) -> str:
+    """
+    Run LightOnOCR on a base64-encoded PNG image and return extracted Markdown/text.
+
+    Environment variables:
+    - LIGHTONOCR_GGUF_MODEL_PATH: required path to a local .gguf model file
+    - LIGHTONOCR_GGUF_MMPROJ_PATH: required path to a local mmproj .gguf file
+    - LIGHTONOCR_LLAVA_CLI_PATH: optional path to `llava-cli` (if not set, use PATH)
+    - LIGHTONOCR_LLAMA_N_CTX: optional int
+    - LIGHTONOCR_LLAMA_N_THREADS: optional int
+    - LIGHTONOCR_LLAMA_N_GPU_LAYERS: optional int
+    - LIGHTONOCR_TEMPERATURE: sampling temperature (default: 0.2)
+    - LIGHTONOCR_REPEAT_PENALTY: repeat penalty (default: 1.15)
+    - LIGHTONOCR_REPEAT_LAST_N: repeat penalty window (default: 128)
+    - LIGHTONOCR_MAX_NEW_TOKENS: max tokens to generate (default: 1000)
+    - LIGHTONOCR_DRY_RUN: if truthy, return a fixed string and do no inference
+    """
+
+    if _env_truthy(ENV_DRY_RUN):
+        return DRY_RUN_OUTPUT
+
+    settings = get_settings()
+    llama_settings = LlamaCppCliSettings(
+        llava_cli_path=settings.llava_cli_path,
+        model_path=settings.gguf_model_path,
+        mmproj_path=settings.gguf_mmproj_path,
+        n_ctx=settings.llama_n_ctx,
+        n_threads=settings.llama_n_threads,
+        n_gpu_layers=settings.llama_n_gpu_layers,
+        temperature=settings.temperature,
+        repeat_penalty=settings.repeat_penalty,
+        repeat_last_n=settings.repeat_last_n,
+    )
+    return ocr_image_base64_llama_cpp_cli(
+        image_base64=image_base64,
         settings=llama_settings,
         max_new_tokens=settings.max_new_tokens,
     )

@@ -68,10 +68,10 @@ def _pdf_to_markdown_lightonocr(
     on_page: PageCallback | None = None,
 ) -> str:
     from ragprep.ocr import lightonocr
-    from ragprep.pdf_render import iter_pdf_images
+    from ragprep.pdf_render import iter_pdf_page_png_base64
 
     try:
-        total_pages, images = iter_pdf_images(
+        total_pages, encoded_pages = iter_pdf_page_png_base64(
             pdf_bytes,
             dpi=settings.render_dpi,
             max_edge=settings.render_max_edge,
@@ -94,9 +94,9 @@ def _pdf_to_markdown_lightonocr(
     )
 
     parts: list[str] = []
-    for page_index, image in enumerate(images, start=1):
+    for page_index, encoded in enumerate(encoded_pages, start=1):
         try:
-            text = lightonocr.ocr_image(image)
+            text = lightonocr.ocr_image_base64(encoded)
         except Exception as exc:  # noqa: BLE001
             raise RuntimeError(f"LightOnOCR failed on page {page_index}: {exc}") from exc
         normalized = str(text).replace("\r\n", "\n").replace("\r", "\n").strip()
