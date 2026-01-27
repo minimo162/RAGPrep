@@ -30,3 +30,11 @@ def test_run_ps1_template_avoids_host_automatic_variable() -> None:
     assert "& `$pythonExe -m ragprep.desktop --host `$BindHost --port `$Port" in content
     assert '[string]`$Host = "127.0.0.1",' not in content
     assert "`$env:RAGPREP_PDF_BACKEND = \"lightonocr\"" in content
+
+
+def test_build_standalone_prefetch_has_direct_download_and_artifact_checks() -> None:
+    content = _read_build_standalone_ps1()
+    assert "falling back to direct download" in content
+    assert "resolve/main/{filename}?download=1" in content
+    assert "GGUF artifact missing after prefetch" in content
+    assert "GGUF artifact is empty after prefetch" in content

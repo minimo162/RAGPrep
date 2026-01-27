@@ -392,13 +392,15 @@ try {
             $env:PYTHONUTF8 = "1"
             $env:PYTHONPATH = (Join-Path $OutputDir "app") + ";" + (Join-Path $OutputDir "site-packages")
 
-            $prefetchGgufPy = @'
+$prefetchGgufPy = @'
 import argparse
 import os
 import shutil
 import sys
 import traceback
 from pathlib import Path
+from urllib.error import HTTPError, URLError
+from urllib.request import Request, urlopen
 
 
 def main() -> None:
@@ -421,15 +423,13 @@ def main() -> None:
     print(f"  out:    {out_dir}")
     print(f"  HF_HOME: {os.environ.get('HF_HOME')}")
 
-    try:
-        from huggingface_hub import hf_hub_download
-    except Exception as exc:
-        raise RuntimeError(
-            "huggingface_hub is required to prefetch GGUF files. "
-            "Install it (e.g. `uv add huggingface-hub` then `uv sync --dev`)."
-        ) from exc
+    def _download_via_hf_hub(filename: str) -> Path | None:
+        try:
+            from huggingface_hub import hf_hub_download
+        except Exception:
+            print("huggingface_hub not available, falling back to direct download.")
+            return None
 
-    def stage(filename: str) -> Path:
         cached_path = Path(hf_hub_download(repo_id=repo_id, filename=filename))
         dest = out_dir / filename
         try:
@@ -439,6 +439,35 @@ def main() -> None:
             pass
         shutil.copy2(cached_path, dest)
         return dest
+
+    def _download_direct(filename: str) -> Path:
+        url = f"https://huggingface.co/{repo_id}/resolve/main/{filename}?download=1"
+        dest = out_dir / filename
+        tmp = dest.with_suffix(dest.suffix + ".part")
+        request = Request(url, headers={"User-Agent": "ragprep-standalone-build"})
+        try:
+            with urlopen(request) as response, open(tmp, "wb") as handle:  # noqa: S310
+                shutil.copyfileobj(response, handle)
+        except (HTTPError, URLError) as exc:
+            raise RuntimeError(f"Direct download failed: {url}") from exc
+        size = tmp.stat().st_size if tmp.exists() else 0
+        if size <= 0:
+            raise RuntimeError(f"Direct download produced empty file: {url}")
+        tmp.replace(dest)
+        return dest
+
+    def stage(filename: str) -> Path:
+        dest = out_dir / filename
+        try:
+            if dest.is_file() and dest.stat().st_size > 0:
+                return dest
+        except OSError:
+            pass
+
+        staged = _download_via_hf_hub(filename)
+        if staged is not None:
+            return staged
+        return _download_direct(filename)
 
     model_dest = stage(model_file)
     mmproj_dest = stage(mmproj_file)
@@ -480,6 +509,16 @@ if __name__ == "__main__":
             if ($null -ne $origPythonPath2) { $env:PYTHONPATH = $origPythonPath2 } else { Remove-Item env:PYTHONPATH -ErrorAction SilentlyContinue }
             if ($null -ne $origNoUserSite2) { $env:PYTHONNOUSERSITE = $origNoUserSite2 } else { Remove-Item env:PYTHONNOUSERSITE -ErrorAction SilentlyContinue }
             if ($null -ne $origPythonUtf82) { $env:PYTHONUTF8 = $origPythonUtf82 } else { Remove-Item env:PYTHONUTF8 -ErrorAction SilentlyContinue }
+        }
+
+        foreach ($ggufPath in @($ggufModelPath, $ggufMmprojPath)) {
+            if (-not (Test-Path -LiteralPath $ggufPath -PathType Leaf)) {
+                throw "GGUF artifact missing after prefetch: $ggufPath"
+            }
+            $artifactSize = (Get-Item -LiteralPath $ggufPath).Length
+            if ($artifactSize -le 0) {
+                throw "GGUF artifact is empty after prefetch: $ggufPath"
+            }
         }
 
         Write-Host "Standalone run scripts default to these GGUF paths:" -ForegroundColor Cyan
