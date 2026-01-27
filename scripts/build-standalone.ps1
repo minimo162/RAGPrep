@@ -691,19 +691,6 @@ foreach (`$artifact in `$requiredGguf) {
     }
 }
 
-if (-not `$env:LIGHTONOCR_LLAVA_CLI_PATH -or [string]::IsNullOrWhiteSpace(`$env:LIGHTONOCR_LLAVA_CLI_PATH)) {
-    `$candidate = Join-Path `$root "bin/llama.cpp/llama-mtmd-cli.exe"
-    if (Test-Path `$candidate) {
-        `$env:LIGHTONOCR_LLAVA_CLI_PATH = `$candidate
-    }
-    else {
-        `$candidate = Join-Path `$root "bin/llama.cpp/llava-cli.exe"
-        if (Test-Path `$candidate) {
-            `$env:LIGHTONOCR_LLAVA_CLI_PATH = `$candidate
-        }
-    }
-}
-
 if (-not `$env:RAGPREP_PDF_BACKEND -or [string]::IsNullOrWhiteSpace(`$env:RAGPREP_PDF_BACKEND)) {
     `$env:RAGPREP_PDF_BACKEND = "lightonocr"
 }
@@ -757,13 +744,6 @@ if not exist "%LIGHTONOCR_GGUF_MMPROJ_PATH%" (
   echo Expected under: %GGUF_EXPECTED_DIR%
   echo Rebuild standalone: scripts\build-standalone.ps1 -Clean
   exit /b 1
-)
-if "%LIGHTONOCR_LLAVA_CLI_PATH%"=="" (
-  if exist "%ROOT%bin\llama.cpp\llama-mtmd-cli.exe" (
-    set LIGHTONOCR_LLAVA_CLI_PATH=%ROOT%bin\llama.cpp\llama-mtmd-cli.exe
-  ) else (
-    set LIGHTONOCR_LLAVA_CLI_PATH=%ROOT%bin\llama.cpp\llava-cli.exe
-  )
 )
 if "%RAGPREP_PDF_BACKEND%"=="" (
   set RAGPREP_PDF_BACKEND=lightonocr

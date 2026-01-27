@@ -117,6 +117,12 @@ function Resolve-MultimodalCli {
     }
     else {
         $bundledCandidates = @(
+            (Join-Path $StandaloneDirFull "bin\llama.cpp\vulkan\llama-mtmd-cli.exe"),
+            (Join-Path $StandaloneDirFull "bin\llama.cpp\vulkan\llava-cli.exe"),
+            (Join-Path $StandaloneDirFull "bin\llama.cpp\vulkan\llama-llava-cli.exe"),
+            (Join-Path $StandaloneDirFull "bin\llama.cpp\avx2\llama-mtmd-cli.exe"),
+            (Join-Path $StandaloneDirFull "bin\llama.cpp\avx2\llava-cli.exe"),
+            (Join-Path $StandaloneDirFull "bin\llama.cpp\avx2\llama-llava-cli.exe"),
             (Join-Path $StandaloneDirFull "bin\llama.cpp\llama-mtmd-cli.exe"),
             (Join-Path $StandaloneDirFull "bin\llama.cpp\llava-cli.exe"),
             (Join-Path $StandaloneDirFull "bin\llama.cpp\llama-llava-cli.exe")

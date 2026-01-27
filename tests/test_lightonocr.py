@@ -126,6 +126,86 @@ def test_llamacpp_resolve_cli_uses_standalone_before_path(
     assert resolved == str(cli_path)
 
 
+def test_llamacpp_resolve_cli_prefers_vulkan_variant(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from ragprep.ocr import llamacpp_cli_runtime as runtime
+
+    vulkan_cli = (
+        tmp_path
+        / "dist"
+        / "standalone"
+        / "bin"
+        / "llama.cpp"
+        / "vulkan"
+        / "llama-mtmd-cli.exe"
+    )
+    avx2_cli = (
+        tmp_path
+        / "dist"
+        / "standalone"
+        / "bin"
+        / "llama.cpp"
+        / "avx2"
+        / "llama-mtmd-cli.exe"
+    )
+    vulkan_cli.parent.mkdir(parents=True, exist_ok=True)
+    avx2_cli.parent.mkdir(parents=True, exist_ok=True)
+    vulkan_cli.write_text("x", encoding="utf-8")
+    avx2_cli.write_text("x", encoding="utf-8")
+
+    settings = runtime.LlamaCppCliSettings(
+        llava_cli_path=None,
+        model_path="model.gguf",
+        mmproj_path="mmproj.gguf",
+        n_ctx=None,
+        n_threads=None,
+        n_gpu_layers=None,
+        temperature=0.2,
+        repeat_penalty=1.15,
+        repeat_last_n=128,
+    )
+
+    monkeypatch.setattr(runtime.shutil, "which", lambda _name: None)
+
+    resolved = runtime._resolve_llava_cli(settings, repo_root=tmp_path)
+    assert resolved == str(vulkan_cli)
+
+
+def test_llamacpp_resolve_cli_supports_standalone_root_layout(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from ragprep.ocr import llamacpp_cli_runtime as runtime
+
+    standalone_root = tmp_path / "standalone"
+    app_root = standalone_root / "app"
+    vulkan_cli = (
+        standalone_root / "bin" / "llama.cpp" / "vulkan" / "llama-mtmd-cli.exe"
+    )
+    vulkan_cli.parent.mkdir(parents=True, exist_ok=True)
+    app_root.mkdir(parents=True, exist_ok=True)
+    vulkan_cli.write_text("x", encoding="utf-8")
+
+    settings = runtime.LlamaCppCliSettings(
+        llava_cli_path=None,
+        model_path="model.gguf",
+        mmproj_path="mmproj.gguf",
+        n_ctx=None,
+        n_threads=None,
+        n_gpu_layers=None,
+        temperature=0.2,
+        repeat_penalty=1.15,
+        repeat_last_n=128,
+    )
+
+    monkeypatch.setattr(runtime.shutil, "which", lambda _name: None)
+
+    resolved = runtime._resolve_llava_cli(settings, repo_root=app_root)
+    assert resolved == str(vulkan_cli)
+
+
 def test_llamacpp_resolve_cli_missing_raises_clear_error(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -210,3 +290,79 @@ def test_llamacpp_ocr_image_builds_argv_and_normalizes_paths(
     assert "-c" in argv and "2048" in argv
     assert "-t" in argv and "4" in argv
     assert "-ngl" in argv and "0" in argv
+
+
+def test_llamacpp_ocr_image_falls_back_from_vulkan_to_avx2(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from PIL import Image
+
+    from ragprep.ocr import llamacpp_cli_runtime as runtime
+
+    model_path = tmp_path / "LightOnOCR-2-1B-Q6_K.gguf"
+    mmproj_path = tmp_path / "mmproj-BF16.gguf"
+    model_path.write_text("x", encoding="utf-8")
+    mmproj_path.write_text("x", encoding="utf-8")
+
+    vulkan_cli = (
+        tmp_path
+        / "dist"
+        / "standalone"
+        / "bin"
+        / "llama.cpp"
+        / "vulkan"
+        / "llama-mtmd-cli.exe"
+    )
+    avx2_cli = (
+        tmp_path
+        / "dist"
+        / "standalone"
+        / "bin"
+        / "llama.cpp"
+        / "avx2"
+        / "llama-mtmd-cli.exe"
+    )
+    vulkan_cli.parent.mkdir(parents=True, exist_ok=True)
+    avx2_cli.parent.mkdir(parents=True, exist_ok=True)
+    vulkan_cli.write_text("x", encoding="utf-8")
+    avx2_cli.write_text("x", encoding="utf-8")
+
+    monkeypatch.setattr(runtime, "_REPO_ROOT", tmp_path)
+    monkeypatch.setattr(runtime.shutil, "which", lambda _name: None)
+
+    calls: list[str] = []
+
+    def _fake_run(
+        argv: list[str],
+        capture_output: bool,
+        text: bool,
+        check: bool,
+    ) -> SimpleNamespace:
+        cli_path = str(argv[0])
+        calls.append(cli_path)
+        if "vulkan" in cli_path.lower():
+            return SimpleNamespace(returncode=1, stdout="", stderr="vulkan unavailable")
+        return SimpleNamespace(returncode=0, stdout="Assistant: OK", stderr="")
+
+    monkeypatch.setattr(runtime.subprocess, "run", _fake_run)
+
+    settings = runtime.LlamaCppCliSettings(
+        llava_cli_path=None,
+        model_path=str(model_path),
+        mmproj_path=str(mmproj_path),
+        n_ctx=None,
+        n_threads=None,
+        n_gpu_layers=None,
+        temperature=0.2,
+        repeat_penalty=1.15,
+        repeat_last_n=128,
+    )
+
+    image = Image.new("RGB", (2, 2), color=(0, 0, 0))
+    text = runtime.ocr_image(image=image, settings=settings, max_new_tokens=64)
+
+    assert text == "OK"
+    assert len(calls) >= 2
+    assert "vulkan" in calls[0].lower()
+    assert "avx2" in calls[1].lower()
