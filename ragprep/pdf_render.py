@@ -1,35 +1,35 @@
 from __future__ import annotations
 
 from collections.abc import Iterator
-from typing import Any, Protocol
+from typing import Any
 
 from PIL import Image
 
 from ragprep.config import get_settings
 
 
-class _PdfiumBitmap(Protocol):
-    def to_pil(self) -> Image.Image: ...
-
-
-def _import_pdfium() -> Any:
+def _import_fitz() -> Any:
     try:
-        import pypdfium2 as pdfium
+        import fitz  # PyMuPDF
     except Exception as exc:  # noqa: BLE001
-        raise ImportError(
-            "pypdfium2 is required for PDF rendering. Install `pypdfium2`."
-        ) from exc
-
-    return pdfium
+        raise ImportError("PyMuPDF is required for PDF rendering. Install `pymupdf`.") from exc
+    return fitz
 
 
-def _bitmap_to_rgb_image(bitmap: _PdfiumBitmap) -> Image.Image:
-    image = bitmap.to_pil()
-    if image.mode == "RGBA":
-        return image.convert("RGB")
-    if image.mode != "RGB":
-        return image.convert("RGB")
-    return image
+def _pixmap_to_rgb_image(pixmap: Any) -> Image.Image:
+    width = int(pixmap.width)
+    height = int(pixmap.height)
+    channels = int(getattr(pixmap, "n", 0))
+    samples = pixmap.samples
+
+    if channels == 4:
+        return Image.frombytes("RGBA", (width, height), samples).convert("RGB")
+    if channels == 3:
+        return Image.frombytes("RGB", (width, height), samples)
+    if channels == 1:
+        return Image.frombytes("L", (width, height), samples).convert("RGB")
+
+    raise ValueError(f"Unsupported pixmap channel count: {channels}")
 
 
 def iter_pdf_images(
@@ -60,8 +60,8 @@ def iter_pdf_images(
         raise ValueError(f"PDF too large ({len(pdf_bytes)} bytes), max_bytes={max_bytes}")
 
     try:
-        pdfium = _import_pdfium()
-        doc = pdfium.PdfDocument(pdf_bytes)
+        fitz = _import_fitz()
+        doc = fitz.open(stream=pdf_bytes, filetype="pdf")
     except Exception as exc:  # noqa: BLE001
         raise ValueError("Invalid PDF data") from exc
 
@@ -79,9 +79,10 @@ def iter_pdf_images(
     def generate() -> Iterator[Image.Image]:
         try:
             for page_index in range(page_count):
-                page = doc[page_index]
-                bitmap = page.render(scale=scale)
-                rgb = _bitmap_to_rgb_image(bitmap)
+                page = doc.load_page(page_index)
+                matrix = fitz.Matrix(scale, scale)
+                pixmap = page.get_pixmap(matrix=matrix, alpha=False)
+                rgb = _pixmap_to_rgb_image(pixmap)
 
                 width, height = rgb.size
                 current_max_edge = max(width, height)

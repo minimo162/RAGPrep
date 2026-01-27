@@ -3,9 +3,8 @@ from __future__ import annotations
 from typing import cast
 
 import pytest
-from PIL import Image
 
-from ragprep.pdf_render import _bitmap_to_rgb_image, render_pdf_to_images
+from ragprep.pdf_render import _pixmap_to_rgb_image, render_pdf_to_images
 
 
 def _make_pdf_bytes(page_count: int) -> bytes:
@@ -18,19 +17,28 @@ def _make_pdf_bytes(page_count: int) -> bytes:
     return cast(bytes, doc.tobytes())
 
 
-def test_bitmap_to_rgb_image_converts_rgba_to_rgb() -> None:
-    class FakeBitmap:
-        def __init__(self, image: Image.Image) -> None:
-            self._image = image
+def test_pixmap_to_rgb_image_converts_rgba_to_rgb() -> None:
+    class FakePixmap:
+        def __init__(self, *, width: int, height: int, n: int, samples: bytes) -> None:
+            self.width = width
+            self.height = height
+            self.n = n
+            self.samples = samples
 
-        def to_pil(self) -> Image.Image:
-            return self._image
+    samples = bytes(
+        [
+            255,
+            0,
+            0,
+            255,
+            0,
+            255,
+            0,
+            128,
+        ]
+    )
 
-    rgba = Image.new("RGBA", (2, 1))
-    rgba.putpixel((0, 0), (255, 0, 0, 255))
-    rgba.putpixel((1, 0), (0, 255, 0, 128))
-
-    image = _bitmap_to_rgb_image(FakeBitmap(rgba))
+    image = _pixmap_to_rgb_image(FakePixmap(width=2, height=1, n=4, samples=samples))
     assert image.mode == "RGB"
     assert image.size == (2, 1)
     assert image.getpixel((0, 0)) == (255, 0, 0)
