@@ -59,3 +59,21 @@ def test_pdf_to_json_lightonocr_builds_schema(monkeypatch: pytest.MonkeyPatch) -
     assert data["pages"][0]["markdown"] == "PAGE1"
     assert data["pages"][1]["page"] == 2
     assert data["pages"][1]["markdown"] == "PAGE2"
+
+
+def test_pdf_to_json_lightonocr_error_includes_root_cause(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _patch_iter_pdf_images(monkeypatch, page_count=1)
+
+    def _raise(_img: Image.Image) -> str:
+        raise RuntimeError("GGUF model file not found: missing.gguf")
+
+    monkeypatch.setattr("ragprep.ocr.lightonocr.ocr_image", _raise)
+
+    settings = get_settings()
+    with pytest.raises(RuntimeError) as excinfo:
+        pipeline._pdf_to_json_lightonocr(b"%PDF", settings=settings)
+    message = str(excinfo.value)
+    assert "LightOnOCR failed on page 1" in message
+    assert "GGUF model file not found" in message

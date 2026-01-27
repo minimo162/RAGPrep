@@ -47,6 +47,27 @@ def test_llamacpp_validate_paths_reports_missing_model(tmp_path: Path) -> None:
         runtime._validate_paths(settings)
 
 
+def test_llamacpp_validate_paths_includes_env_and_expected_dir(tmp_path: Path) -> None:
+    from ragprep.ocr import llamacpp_cli_runtime as runtime
+
+    mmproj_path = tmp_path / "mmproj.gguf"
+    mmproj_path.write_text("x", encoding="utf-8")
+    settings = runtime.LlamaCppCliSettings(
+        llava_cli_path=None,
+        model_path=str(tmp_path / "missing.gguf"),
+        mmproj_path=str(mmproj_path),
+        n_ctx=None,
+        n_threads=None,
+        n_gpu_layers=None,
+    )
+
+    with pytest.raises(RuntimeError) as excinfo:
+        runtime._validate_paths(settings)
+    message = str(excinfo.value)
+    assert "LIGHTONOCR_GGUF_MODEL_PATH" in message
+    assert "Expected under:" in message
+
+
 def test_llamacpp_resolve_cli_prefers_explicit_path(tmp_path: Path) -> None:
     from ragprep.ocr import llamacpp_cli_runtime as runtime
 

@@ -11,6 +11,9 @@ from urllib.request import url2pathname
 from PIL import Image
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
+_ENV_GGUF_MODEL = "LIGHTONOCR_GGUF_MODEL_PATH"
+_ENV_GGUF_MMPROJ = "LIGHTONOCR_GGUF_MMPROJ_PATH"
+_BUILD_HINT = "Rebuild standalone: scripts/build-standalone.ps1 -Clean"
 
 
 @dataclass(frozen=True)
@@ -21,6 +24,43 @@ class LlamaCppCliSettings:
     n_ctx: int | None
     n_threads: int | None
     n_gpu_layers: int | None
+
+
+def _standalone_root(repo_root: Path) -> Path | None:
+    if repo_root.name != "app":
+        return None
+    parent = repo_root.parent
+    if parent.name != "standalone":
+        return None
+    return parent
+
+
+def _expected_gguf_dir(repo_root: Path) -> Path:
+    standalone_root = _standalone_root(repo_root)
+    if standalone_root is not None:
+        return standalone_root / "data" / "models" / "lightonocr-gguf"
+    return repo_root / "dist" / "standalone" / "data" / "models" / "lightonocr-gguf"
+
+
+def _format_path_error(
+    *,
+    env_name: str,
+    path_value: str,
+    expected_dir: Path,
+    issue: str,
+) -> RuntimeError:
+    issue_detail = f"{issue}: {path_value}" if path_value else issue
+    if path_value:
+        env_detail = f"Env: {env_name}={path_value!r}"
+    else:
+        env_detail = f"Set {env_name} to a valid .gguf file."
+    details = [
+        issue_detail,
+        env_detail,
+        f"Expected under: {expected_dir}",
+        _BUILD_HINT,
+    ]
+    return RuntimeError("\n".join(details))
 
 
 def _normalize_path_value(value: str | None) -> str:
@@ -49,26 +89,57 @@ def _normalize_path_value(value: str | None) -> str:
 def _validate_paths(settings: LlamaCppCliSettings) -> tuple[str, str]:
     model_path_value = _normalize_path_value(settings.model_path)
     mmproj_path_value = _normalize_path_value(settings.mmproj_path)
+    expected_dir = _expected_gguf_dir(_REPO_ROOT)
     if not model_path_value:
-        raise RuntimeError("GGUF model path is empty.")
+        raise _format_path_error(
+            env_name=_ENV_GGUF_MODEL,
+            path_value=model_path_value,
+            expected_dir=expected_dir,
+            issue="GGUF model path is empty",
+        )
     if not mmproj_path_value:
-        raise RuntimeError("GGUF mmproj path is empty.")
+        raise _format_path_error(
+            env_name=_ENV_GGUF_MMPROJ,
+            path_value=mmproj_path_value,
+            expected_dir=expected_dir,
+            issue="GGUF mmproj path is empty",
+        )
 
     model_path = Path(model_path_value)
     mmproj_path = Path(mmproj_path_value)
     try:
         model_is_file = model_path.is_file()
     except OSError as exc:
-        raise RuntimeError(f"Invalid GGUF model path: {model_path!s}") from exc
+        raise _format_path_error(
+            env_name=_ENV_GGUF_MODEL,
+            path_value=model_path_value,
+            expected_dir=expected_dir,
+            issue="Invalid GGUF model path",
+        ) from exc
     try:
         mmproj_is_file = mmproj_path.is_file()
     except OSError as exc:
-        raise RuntimeError(f"Invalid GGUF mmproj path: {mmproj_path!s}") from exc
+        raise _format_path_error(
+            env_name=_ENV_GGUF_MMPROJ,
+            path_value=mmproj_path_value,
+            expected_dir=expected_dir,
+            issue="Invalid GGUF mmproj path",
+        ) from exc
 
     if not model_is_file:
-        raise RuntimeError(f"GGUF model file not found: {model_path}")
+        raise _format_path_error(
+            env_name=_ENV_GGUF_MODEL,
+            path_value=model_path_value,
+            expected_dir=expected_dir,
+            issue="GGUF model file not found",
+        )
     if not mmproj_is_file:
-        raise RuntimeError(f"GGUF mmproj file not found: {mmproj_path}")
+        raise _format_path_error(
+            env_name=_ENV_GGUF_MMPROJ,
+            path_value=mmproj_path_value,
+            expected_dir=expected_dir,
+            issue="GGUF mmproj file not found",
+        )
     return model_path_value, mmproj_path_value
 
 

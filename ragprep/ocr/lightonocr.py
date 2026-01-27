@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
+from pathlib import Path
 from urllib.parse import urlparse
 from urllib.request import url2pathname
 
@@ -20,6 +21,23 @@ ENV_LLAMA_N_THREADS = "LIGHTONOCR_LLAMA_N_THREADS"
 ENV_LLAMA_N_GPU_LAYERS = "LIGHTONOCR_LLAMA_N_GPU_LAYERS"
 
 DRY_RUN_OUTPUT = "LIGHTONOCR_DRY_RUN=1 (no inference)"
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+
+
+def _standalone_root(repo_root: Path) -> Path | None:
+    if repo_root.name != "app":
+        return None
+    parent = repo_root.parent
+    if parent.name != "standalone":
+        return None
+    return parent
+
+
+def _expected_gguf_dir(repo_root: Path) -> Path:
+    standalone_root = _standalone_root(repo_root)
+    if standalone_root is not None:
+        return standalone_root / "data" / "models" / "lightonocr-gguf"
+    return repo_root / "dist" / "standalone" / "data" / "models" / "lightonocr-gguf"
 
 
 @dataclass(frozen=True)
@@ -102,11 +120,12 @@ def get_settings() -> LightOnOCRSettings:
         missing.append(ENV_GGUF_MMPROJ_PATH)
     if missing:
         missing_str = ", ".join(missing)
+        expected_dir = _expected_gguf_dir(_REPO_ROOT)
         raise ValueError(
             f"Set {missing_str} to local GGUF paths "
             "(model: LightOnOCR-2-1B-Q6_K.gguf, mmproj: mmproj-BF16.gguf). "
-            "If you're using the standalone build, these are typically under "
-            "dist/standalone/data/models/lightonocr-gguf/."
+            f"Expected under: {expected_dir}. "
+            "Rebuild standalone: scripts/build-standalone.ps1 -Clean."
         )
 
     assert gguf_model_path is not None

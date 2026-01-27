@@ -96,7 +96,7 @@ def _pdf_to_markdown_lightonocr(
         try:
             text = lightonocr.ocr_image(image)
         except Exception as exc:  # noqa: BLE001
-            raise RuntimeError(f"LightOnOCR failed on page {page_index}.") from exc
+            raise RuntimeError(f"LightOnOCR failed on page {page_index}: {exc}") from exc
         normalized = str(text).replace("\r\n", "\n").replace("\r", "\n").strip()
         if normalized:
             parts.append(normalized)
@@ -169,7 +169,7 @@ def _pdf_to_json_lightonocr(
         try:
             text = lightonocr.ocr_image(image)
         except Exception as exc:  # noqa: BLE001
-            raise RuntimeError(f"LightOnOCR failed on page {page_index}.") from exc
+            raise RuntimeError(f"LightOnOCR failed on page {page_index}: {exc}") from exc
         normalized = str(text).replace("\r\n", "\n").replace("\r", "\n").strip()
         pages.append({"page": page_index, "markdown": normalized})
 
