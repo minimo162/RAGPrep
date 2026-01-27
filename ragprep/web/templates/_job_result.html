@@ -5,7 +5,7 @@
       <a
         class="link"
         href="/download/{{ job.id }}.md"
-        onclick="if (window.pywebview && window.pywebview.api && window.pywebview.api.save_markdown) { window.pywebview.api.save_markdown('{{ job.id }}', this.href); return false; }"
+        onclick="if (window.pywebview && window.pywebview.api && window.pywebview.api.save_markdown) { const result = window.pywebview.api.save_markdown('{{ job.id }}', this.href); if (result && typeof result.then === 'function') { result.then((payload) => { if (payload && payload.status && payload.status !== 'ok') { console.warn('save_markdown result', payload); } }).catch((error) => { console.error('save_markdown failed', error); }); } return false; }"
         >Download .md</a
       >
     </div>

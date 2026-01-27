@@ -1,13 +1,38 @@
 from __future__ import annotations
 
 import sys
-from types import ModuleType
+from pathlib import Path
+from types import ModuleType, TracebackType
 
 import pytest
 import uvicorn
 
 from ragprep import desktop
 from ragprep.web.app import app
+
+
+class _FakeResponse:
+    def __init__(self, *, status: int, body: bytes, headers: dict[str, str] | None = None) -> None:
+        self.status = status
+        self._body = body
+        self.headers = headers or {}
+
+    def __enter__(self) -> _FakeResponse:
+        return self
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        tb: TracebackType | None,
+    ) -> bool | None:
+        _ = exc_type
+        _ = exc
+        _ = tb
+        return None
+
+    def read(self) -> bytes:
+        return self._body
 
 
 def test_health_endpoint_returns_ok() -> None:
@@ -91,4 +116,79 @@ def test_desktop_launcher_exits_when_not_ready(monkeypatch: pytest.MonkeyPatch) 
     server = StubServer.last_instance
     assert server is not None
     assert server.should_exit is True
+
+
+def test_save_markdown_writes_to_downloads(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    downloads_dir = tmp_path / "Downloads"
+    downloads_dir.mkdir(parents=True, exist_ok=True)
+
+    def _fake_urlopen(_request: object, timeout: float = 0.0) -> _FakeResponse:
+        _ = timeout
+        return _FakeResponse(
+            status=200,
+            body=b"hello",
+            headers={"Content-Disposition": 'attachment; filename="report.md"'},
+        )
+
+    dialog_called = {"value": False}
+
+    class WebviewStub:
+        SAVE_DIALOG = object()
+
+        def create_file_dialog(self, *args: object, **kwargs: object) -> None:
+            dialog_called["value"] = True
+            raise AssertionError("save dialog should not be called when downloads is available")
+
+    monkeypatch.setattr(desktop, "urlopen", _fake_urlopen)
+    monkeypatch.setattr(desktop, "_resolve_downloads_dir", lambda: downloads_dir)
+
+    api = desktop._DesktopApi(base_url="http://127.0.0.1:8000", webview=WebviewStub())
+    result = api.save_markdown("job123", "http://127.0.0.1:8000/download/job123.md")
+
+    saved_path = downloads_dir / "report.md"
+    assert result["status"] == "ok"
+    assert result["path"] == str(saved_path)
+    assert saved_path.exists()
+    assert saved_path.read_bytes() == b"hello"
+    assert dialog_called["value"] is False
+
+
+def test_save_markdown_renames_on_collision(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    downloads_dir = tmp_path / "Downloads"
+    downloads_dir.mkdir(parents=True, exist_ok=True)
+    existing_path = downloads_dir / "report.md"
+    existing_path.write_bytes(b"old")
+
+    def _fake_urlopen(_request: object, timeout: float = 0.0) -> _FakeResponse:
+        _ = timeout
+        return _FakeResponse(
+            status=200,
+            body=b"new",
+            headers={"Content-Disposition": 'attachment; filename="report.md"'},
+        )
+
+    class WebviewStub:
+        SAVE_DIALOG = object()
+
+        def create_file_dialog(self, *args: object, **kwargs: object) -> None:
+            raise AssertionError("save dialog should not be called when downloads is available")
+
+    monkeypatch.setattr(desktop, "urlopen", _fake_urlopen)
+    monkeypatch.setattr(desktop, "_resolve_downloads_dir", lambda: downloads_dir)
+
+    api = desktop._DesktopApi(base_url="http://127.0.0.1:8000", webview=WebviewStub())
+    result = api.save_markdown("job123", "http://127.0.0.1:8000/download/job123.md")
+
+    renamed_path = downloads_dir / "report (1).md"
+    assert result["status"] == "ok"
+    assert result["path"] == str(renamed_path)
+    assert existing_path.read_bytes() == b"old"
+    assert renamed_path.exists()
+    assert renamed_path.read_bytes() == b"new"
 

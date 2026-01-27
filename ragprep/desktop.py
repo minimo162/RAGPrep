@@ -72,6 +72,78 @@ def _filename_from_content_disposition(content_disposition: str) -> str | None:
     return None
 
 
+def _windows_known_folder_downloads() -> Path | None:
+    if sys.platform != "win32":
+        return None
+    try:
+        import ctypes
+        from ctypes import wintypes
+
+        class GUID(ctypes.Structure):
+            _fields_ = [
+                ("Data1", wintypes.DWORD),
+                ("Data2", wintypes.WORD),
+                ("Data3", wintypes.WORD),
+                ("Data4", ctypes.c_ubyte * 8),
+            ]
+
+        folder_id_downloads = GUID(
+            0x374DE290,
+            0x123F,
+            0x4565,
+            (ctypes.c_ubyte * 8)(0x91, 0x64, 0x39, 0xC4, 0x92, 0x5E, 0x46, 0x7B),
+        )
+        path_ptr = ctypes.c_wchar_p()
+        result = ctypes.windll.shell32.SHGetKnownFolderPath(
+            ctypes.byref(folder_id_downloads),
+            0,
+            0,
+            ctypes.byref(path_ptr),
+        )
+        if result != 0:
+            return None
+        try:
+            value = path_ptr.value
+            if not value:
+                return None
+            return Path(value)
+        finally:
+            ctypes.windll.ole32.CoTaskMemFree(path_ptr)
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def _resolve_downloads_dir() -> Path | None:
+    candidates: list[Path] = []
+    known = _windows_known_folder_downloads()
+    if known is not None:
+        candidates.append(known)
+    candidates.append(Path.home() / "Downloads")
+
+    for candidate in candidates:
+        try:
+            candidate.mkdir(parents=True, exist_ok=True)
+        except Exception:  # noqa: BLE001
+            continue
+        if candidate.is_dir():
+            return candidate
+    return None
+
+
+def _unique_download_path(directory: Path, filename: str) -> Path:
+    safe_name = Path(filename).name
+    base = directory / safe_name
+    if not base.exists():
+        return base
+    stem = base.stem
+    suffix = base.suffix
+    for index in range(1, 1000):
+        candidate = directory / f"{stem} ({index}){suffix}"
+        if not candidate.exists():
+            return candidate
+    raise RuntimeError("too many existing files in downloads directory")
+
+
 class _DesktopApi:
     def __init__(self, *, base_url: str, webview: Any) -> None:
         self._base_url = base_url.rstrip("/")
@@ -128,6 +200,20 @@ class _DesktopApi:
 
         filename = _filename_from_content_disposition(content_disposition) or f"{job_id}.md"
 
+        downloads_error: Exception | None = None
+        downloads_dir = _resolve_downloads_dir()
+        if downloads_dir is not None:
+            try:
+                target_path = _unique_download_path(downloads_dir, filename)
+                target_path.write_bytes(markdown_bytes)
+                return {
+                    "status": "ok",
+                    "path": str(target_path),
+                    "filename": target_path.name,
+                }
+            except Exception as exc:  # noqa: BLE001
+                downloads_error = exc
+
         try:
             selection = self._webview.create_file_dialog(
                 self._webview.SAVE_DIALOG,
@@ -135,6 +221,14 @@ class _DesktopApi:
                 file_types=[("Markdown (*.md)", "*.md"), ("All files (*.*)", "*.*")],
             )
         except Exception as exc:  # noqa: BLE001
+            if downloads_error is not None:
+                return {
+                    "status": "error",
+                    "message": (
+                        "downloads save failed: "
+                        f"{downloads_error}; save dialog failed: {exc}"
+                    ),
+                }
             return {"status": "error", "message": f"save dialog failed: {exc}"}
 
         if not selection:
