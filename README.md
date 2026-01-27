@@ -102,6 +102,21 @@ GGUF prefetch をスキップする場合:
 .\scripts\build-standalone.ps1 -SkipGgufPrefetch -Clean
 ```
 
+#### GGUF 同梱と検証（重要）
+- 既定の `.\scripts\build-standalone.ps1 -Clean` は GGUF を取得し、最後に `scripts/verify-standalone.ps1` で必須ファイルを検証します。
+- `-SkipGgufPrefetch` を使うと GGUF が無いままになり、検証は失敗します。配布/実行する場合は次のいずれかが必要です。
+  - `dist\standalone\data\models\lightonocr-gguf\` に以下 2 ファイルを配置する  
+    - `LightOnOCR-2-1B-Q6_K.gguf`  
+    - `mmproj-BF16.gguf`
+  - 実行前に環境変数で実在パスを上書きする  
+    - `LIGHTONOCR_GGUF_MODEL_PATH`  
+    - `LIGHTONOCR_GGUF_MMPROJ_PATH`
+- 配布前の確認コマンド（手動検証）:
+```powershell
+.\scripts\verify-standalone.ps1 -OutputDir dist/standalone
+```
+- `run.ps1` / `run.cmd` は起動前に GGUF の存在を検証し、欠落時は理由と想定配置を表示して停止します。
+
 ### パッケージ（zip）
 ```powershell
 .\scripts\package-standalone.ps1 -Force
