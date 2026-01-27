@@ -106,6 +106,18 @@
           return jobElt.querySelector('pre.streaming-output[data-streaming-output="partial"]');
         }
 
+        function getJobId(jobElt) {
+          if (!(jobElt instanceof HTMLElement)) return null;
+          return jobElt.getAttribute("data-job-id");
+        }
+
+        function findJobById(jobId) {
+          if (!jobId) return null;
+          const selector = `[data-job-id="${jobId}"]`;
+          const candidate = document.querySelector(selector);
+          return candidate instanceof HTMLElement ? candidate : null;
+        }
+
         function capture(jobElt) {
           const jobId = jobElt.getAttribute("data-job-id");
           if (!jobId) return;
@@ -122,14 +134,14 @@
           const distanceFromBottom = Math.max(0, scrollHeight - (scrollTop + clientHeight));
           const atBottom = distanceFromBottom <= tolerancePx || scrollTop >= maxScrollTop - tolerancePx;
 
-          scrollState.set(jobId, { atBottom, distanceFromBottom });
+          scrollState.set(jobId, { atBottom, scrollTop });
         }
 
-        function restore(jobElt) {
-          const jobId = jobElt.getAttribute("data-job-id");
-          if (!jobId) return;
+        function restore(jobId, fallbackElt) {
+          const jobElt = findJobById(jobId) || getJobElement(fallbackElt);
+          if (!jobElt) return;
           const pre = getStreamingOutput(jobElt);
-          const state = scrollState.get(jobId);
+          const state = jobId ? scrollState.get(jobId) : null;
           if (!(pre instanceof HTMLElement) || !state) return;
 
           const maxScrollTop = Math.max(0, pre.scrollHeight - pre.clientHeight);
@@ -137,8 +149,9 @@
             pre.scrollTop = maxScrollTop;
             return;
           }
-          const target = Math.max(0, maxScrollTop - state.distanceFromBottom);
-          pre.scrollTop = target;
+          if (typeof state.scrollTop === "number") {
+            pre.scrollTop = Math.min(state.scrollTop, maxScrollTop);
+          }
         }
 
         document.body.addEventListener("htmx:beforeSwap", (event) => {
@@ -150,8 +163,9 @@
 
         document.body.addEventListener("htmx:afterSwap", (event) => {
           const jobElt = getJobElement(event.detail && event.detail.elt);
-          if (jobElt && jobElt.matches("[data-job-id]")) {
-            restore(jobElt);
+          const jobId = getJobId(jobElt);
+          if (jobId) {
+            restore(jobId, event.detail && event.detail.elt);
           }
         });
       })();
