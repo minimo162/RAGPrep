@@ -1,10 +1,15 @@
 from __future__ import annotations
 
+import base64
 from typing import cast
 
 import pytest
 
-from ragprep.pdf_render import _pixmap_to_rgb_image, render_pdf_to_images
+from ragprep.pdf_render import (
+    _pixmap_to_rgb_image,
+    iter_pdf_page_png_base64,
+    render_pdf_to_images,
+)
 
 
 def _make_pdf_bytes(page_count: int) -> bytes:
@@ -50,6 +55,29 @@ def test_render_pdf_to_images_returns_one_image_per_page() -> None:
     images = render_pdf_to_images(pdf_bytes, dpi=72)
     assert len(images) == 2
     assert all(image.mode == "RGB" for image in images)
+
+
+def test_iter_pdf_page_png_base64_returns_png_base64_per_page() -> None:
+    pdf_bytes = _make_pdf_bytes(page_count=2)
+    total_pages, encoded_pages = iter_pdf_page_png_base64(pdf_bytes, dpi=72)
+    assert total_pages == 2
+    encoded = list(encoded_pages)
+    assert len(encoded) == 2
+    for item in encoded:
+        decoded = base64.b64decode(item)
+        assert decoded.startswith(b"\x89PNG\r\n\x1a\n")
+
+
+def test_iter_pdf_page_png_base64_rejects_too_many_pages() -> None:
+    pdf_bytes = _make_pdf_bytes(page_count=2)
+    with pytest.raises(ValueError, match="max_pages"):
+        iter_pdf_page_png_base64(pdf_bytes, max_pages=1)
+
+
+def test_iter_pdf_page_png_base64_rejects_large_pdf_bytes() -> None:
+    pdf_bytes = _make_pdf_bytes(page_count=1)
+    with pytest.raises(ValueError, match="PDF too large"):
+        iter_pdf_page_png_base64(pdf_bytes, max_bytes=1)
 
 
 def test_render_pdf_to_images_rejects_too_many_pages() -> None:

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import base64
+import io
 from collections.abc import Iterator
 from typing import Any
 
@@ -30,6 +32,12 @@ def _pixmap_to_rgb_image(pixmap: Any) -> Image.Image:
         return Image.frombytes("L", (width, height), samples).convert("RGB")
 
     raise ValueError(f"Unsupported pixmap channel count: {channels}")
+
+
+def _image_to_png_base64(image: Image.Image) -> str:
+    buffer = io.BytesIO()
+    image.save(buffer, format="PNG")
+    return base64.b64encode(buffer.getvalue()).decode("ascii")
 
 
 def iter_pdf_images(
@@ -103,6 +111,35 @@ def iter_pdf_images(
             doc.close()
 
     return page_count, generate()
+
+
+def iter_pdf_page_png_base64(
+    pdf_bytes: bytes,
+    *,
+    dpi: int | None = None,
+    max_edge: int | None = None,
+    max_pages: int | None = None,
+    max_bytes: int | None = None,
+) -> tuple[int, Iterator[str]]:
+    total_pages, images = iter_pdf_images(
+        pdf_bytes,
+        dpi=dpi,
+        max_edge=max_edge,
+        max_pages=max_pages,
+        max_bytes=max_bytes,
+    )
+
+    def generate() -> Iterator[str]:
+        for image in images:
+            try:
+                yield _image_to_png_base64(image)
+            finally:
+                try:
+                    image.close()
+                except Exception:  # noqa: BLE001
+                    pass
+
+    return total_pages, generate()
 
 
 def render_pdf_to_images(
