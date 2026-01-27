@@ -4,7 +4,7 @@ from typing import Any
 
 import pytest
 
-from ragprep.pipeline import PdfToJsonProgress, ProgressPhase
+from ragprep.pipeline import PdfToMarkdownProgress, ProgressPhase
 from ragprep.web import app as webapp
 from ragprep.web.app import JobStatus
 
@@ -12,7 +12,7 @@ from ragprep.web.app import JobStatus
 def test_run_job_appends_partial_output(monkeypatch: pytest.MonkeyPatch) -> None:
     job = webapp.jobs.create(filename="sample.pdf")
 
-    def _fake_pdf_to_json(
+    def _fake_pdf_to_markdown(
         _pdf_bytes: bytes,
         *,
         on_progress: Any = None,
@@ -21,7 +21,7 @@ def test_run_job_appends_partial_output(monkeypatch: pytest.MonkeyPatch) -> None
     ) -> str:
         if on_progress is not None:
             on_progress(
-                PdfToJsonProgress(
+                PdfToMarkdownProgress(
                     phase=ProgressPhase.rendering,
                     current=0,
                     total=2,
@@ -33,16 +33,16 @@ def test_run_job_appends_partial_output(monkeypatch: pytest.MonkeyPatch) -> None
             on_page(2, "PAGE2")
         if on_progress is not None:
             on_progress(
-                PdfToJsonProgress(
+                PdfToMarkdownProgress(
                     phase=ProgressPhase.done,
                     current=2,
                     total=2,
                     message="done",
                 )
             )
-        return '{"ok": true}'
+        return "PAGE1\n\nPAGE2"
 
-    monkeypatch.setattr(webapp, "pdf_to_json", _fake_pdf_to_json)
+    monkeypatch.setattr(webapp, "pdf_to_markdown", _fake_pdf_to_markdown)
 
     webapp._run_job(job.id, b"%PDF")
     updated = webapp.jobs.get(job.id)
@@ -50,5 +50,6 @@ def test_run_job_appends_partial_output(monkeypatch: pytest.MonkeyPatch) -> None
     assert updated is not None
     assert updated.status == JobStatus.done
     assert updated.partial_pages == 2
+    assert updated.markdown_output == "PAGE1\n\nPAGE2"
     assert "## Page 1" in updated.partial_markdown
     assert "PAGE2" in updated.partial_markdown

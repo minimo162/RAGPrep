@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import logging
 import uuid
 from dataclasses import dataclass, replace
@@ -16,7 +15,7 @@ from fastapi.templating import Jinja2Templates
 from starlette.responses import Response
 
 from ragprep.config import get_settings
-from ragprep.pipeline import PdfToJsonProgress, pdf_to_json
+from ragprep.pipeline import PdfToMarkdownProgress, pdf_to_markdown
 
 TEMPLATES_DIR = Path(__file__).resolve().parent / "templates"
 STATIC_DIR = Path(__file__).resolve().parent / "static"
@@ -45,7 +44,7 @@ class Job:
     processed_pages: int = 0
     total_pages: int = 0
     progress_message: str | None = None
-    json_output: str | None = None
+    markdown_output: str | None = None
     error: str | None = None
     partial_markdown: str = ""
     partial_pages: int = 0
@@ -133,7 +132,7 @@ def _run_job(job_id: str, pdf_bytes: bytes) -> None:
             partial_pages=0,
         )
 
-        def on_progress(update: PdfToJsonProgress) -> None:
+        def on_progress(update: PdfToMarkdownProgress) -> None:
             jobs.update(
                 job_id,
                 phase=update.phase.value,
@@ -149,7 +148,7 @@ def _run_job(job_id: str, pdf_bytes: bytes) -> None:
                 logger.debug("Failed to append partial output for job %s", job_id, exc_info=True)
 
         try:
-            json_output = pdf_to_json(
+            markdown_output = pdf_to_markdown(
                 pdf_bytes,
                 on_progress=on_progress,
                 on_page=on_page,
@@ -162,7 +161,7 @@ def _run_job(job_id: str, pdf_bytes: bytes) -> None:
             job_id,
             status=JobStatus.done,
             phase="done",
-            json_output=json_output,
+            markdown_output=markdown_output,
             error=None,
         )
 
@@ -172,7 +171,7 @@ def index(request: Request) -> Response:
     return templates.TemplateResponse(
         request,
         "index.html",
-        {"json_output": None, "error": None},
+        {"markdown_output": None, "error": None},
     )
 
 
@@ -190,7 +189,7 @@ async def convert(
         return templates.TemplateResponse(
             request,
             "_result.html",
-            {"json_output": None, "error": "Empty upload."},
+            {"markdown_output": None, "error": "Empty upload."},
             status_code=400,
         )
     if len(content) > settings.max_upload_bytes:
@@ -198,7 +197,7 @@ async def convert(
             request,
             "_result.html",
             {
-                "json_output": None,
+                "markdown_output": None,
                 "error": f"File too large (>{settings.max_upload_bytes} bytes).",
             },
             status_code=413,
@@ -207,7 +206,7 @@ async def convert(
         return templates.TemplateResponse(
             request,
             "_result.html",
-            {"json_output": None, "error": "Please upload a .pdf file."},
+            {"markdown_output": None, "error": "Please upload a .pdf file."},
             status_code=400,
         )
 
@@ -238,7 +237,7 @@ def job_result(request: Request, job_id: str) -> Response:
         return templates.TemplateResponse(
             request,
             "_result.html",
-            {"json_output": None, "error": "Result not ready yet."},
+            {"markdown_output": None, "error": "Result not ready yet."},
             status_code=409,
         )
     return templates.TemplateResponse(request, "_job_result.html", {"job": job})
@@ -257,59 +256,12 @@ def _download_filename_from_upload(upload_filename: str, *, suffix: str) -> str:
     stem = _safe_download_stem(upload_filename)
     return f"{stem}.{suffix}"
 
-
-@app.get("/download/{job_id}.json")
-def download_json(job_id: str) -> PlainTextResponse:
-    job = jobs.get(job_id)
-    if job is None:
-        raise HTTPException(status_code=404, detail="job not found")
-    if job.status != JobStatus.done or job.json_output is None:
-        raise HTTPException(status_code=409, detail="job not complete")
-
-    download_filename = _download_filename_from_upload(job.filename, suffix="json")
-    headers = {"Content-Disposition": f'attachment; filename="{download_filename}"'}
-    return PlainTextResponse(
-        job.json_output,
-        media_type="application/json; charset=utf-8",
-        headers=headers,
-    )
-
-
 def _markdown_from_job(job: Job) -> str:
-    """
-    Build a Markdown artifact for download.
-
-    Prefer the structured LightOnOCR JSON schema (pages[].markdown).
-    Fall back to partial_markdown or raw json_output for robustness.
-    """
-    if job.json_output:
-        try:
-            payload = json.loads(job.json_output)
-        except json.JSONDecodeError:
-            payload = None
-        if isinstance(payload, dict):
-            pages = payload.get("pages")
-            if isinstance(pages, list):
-                parts: list[str] = []
-                for page in pages:
-                    if not isinstance(page, dict):
-                        continue
-                    markdown = page.get("markdown")
-                    if isinstance(markdown, str):
-                        normalized = (
-                            markdown.replace("\r\n", "\n")
-                            .replace("\r", "\n")
-                            .strip()
-                        )
-                        if normalized:
-                            parts.append(normalized)
-                if parts:
-                    return "\n\n".join(parts)
-
+    if job.markdown_output:
+        return job.markdown_output.strip()
     if job.partial_markdown:
         return job.partial_markdown.strip()
-
-    return (job.json_output or "").strip()
+    return ""
 
 
 @app.get("/download/{job_id}.md")
@@ -317,7 +269,7 @@ def download_markdown(job_id: str) -> PlainTextResponse:
     job = jobs.get(job_id)
     if job is None:
         raise HTTPException(status_code=404, detail="job not found")
-    if job.status != JobStatus.done or job.json_output is None:
+    if job.status != JobStatus.done or job.markdown_output is None:
         raise HTTPException(status_code=409, detail="job not complete")
 
     markdown = _markdown_from_job(job)

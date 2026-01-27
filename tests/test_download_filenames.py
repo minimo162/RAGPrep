@@ -4,9 +4,9 @@ from ragprep.web.app import _download_filename_from_upload
 
 
 def test_download_filename_from_upload_uses_pdf_stem() -> None:
-    assert _download_filename_from_upload("test.pdf", suffix="json") == "test.json"
-    assert _download_filename_from_upload(r"C:\tmp\foo.pdf", suffix="json") == "foo.json"
-    assert _download_filename_from_upload("dir/subdir/bar.pdf", suffix="json") == "bar.json"
+    assert _download_filename_from_upload("test.pdf", suffix="md") == "test.md"
+    assert _download_filename_from_upload(r"C:\tmp\foo.pdf", suffix="md") == "foo.md"
+    assert _download_filename_from_upload("dir/subdir/bar.pdf", suffix="md") == "bar.md"
     assert _download_filename_from_upload("dir/subdir/bar.pdf", suffix="md") == "bar.md"
 
 

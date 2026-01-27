@@ -1,8 +1,8 @@
 {% if error %}
   <div class="error">{{ error }}</div>
-{% elif json_output %}
+{% elif markdown_output %}
   <h2>Result</h2>
-  <pre class="json-output">{{ json_output }}</pre>
+  <pre class="json-output">{{ markdown_output }}</pre>
 {% else %}
-  <p class="muted">Converted JSON will appear here.</p>
+  <p class="muted">Converted Markdown will appear here.</p>
 {% endif %}

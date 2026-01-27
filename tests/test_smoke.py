@@ -38,41 +38,31 @@ def _make_pdf_bytes(page_count: int) -> bytes:
     return cast(bytes, doc.tobytes())
 
 
-def test_convert_creates_job_and_downloads_json(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_convert_creates_job_and_downloads_markdown(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     client = TestClient(app)
 
     pdf_bytes = _make_pdf_bytes(page_count=2)
 
     calls: dict[str, int] = {"n": 0}
-    import json
+    expected_markdown = "page1\n\npage2"
 
-    expected_payload = {
-        "meta": {
-            "backend": "lightonocr",
-            "page_count": 2,
-            "render_dpi": 300,
-            "render_max_edge": 1540,
-        },
-        "pages": [
-            {"page": 1, "markdown": "page1"},
-            {"page": 2, "markdown": "page2"},
-        ],
-    }
-    expected_json = json.dumps(expected_payload, ensure_ascii=False)
-
-    def fake_to_json(
+    def fake_to_markdown(
         _bytes: bytes,
         *,
         on_progress: object | None = None,
         on_page: Callable[[int, str], None] | None = None,
+        _page_output_dir: object | None = None,
     ) -> str:
+        _ = on_progress
         calls["n"] += 1
         if on_page is not None:
             on_page(1, "page1")
             on_page(2, "page2")
-        return expected_json
+        return expected_markdown
 
-    monkeypatch.setattr(web_app, "pdf_to_json", fake_to_json)
+    monkeypatch.setattr(web_app, "pdf_to_markdown", fake_to_markdown)
 
     files = {"file": ("test.pdf", pdf_bytes, "application/pdf")}
     response = client.post("/convert", files=files)
@@ -91,16 +81,10 @@ def test_convert_creates_job_and_downloads_json(monkeypatch: pytest.MonkeyPatch)
 
     assert "page1" in result.text
     assert "page2" in result.text
-    assert f"/download/{job_id}.json" in result.text
+    assert f"/download/{job_id}.json" not in result.text
     assert f"/download/{job_id}.md" in result.text
-    assert "save_json" in result.text
+    assert "save_json" not in result.text
     assert "save_markdown" in result.text
-
-    download = client.get(f"/download/{job_id}.json")
-    assert download.status_code == 200
-    assert download.text == expected_json
-    assert "application/json" in download.headers["content-type"]
-    assert "test.json" in download.headers["content-disposition"]
 
     download_md = client.get(f"/download/{job_id}.md")
     assert download_md.status_code == 200
@@ -109,10 +93,12 @@ def test_convert_creates_job_and_downloads_json(monkeypatch: pytest.MonkeyPatch)
     assert "page1" in download_md.text
     assert "page2" in download_md.text
     assert "page1\n\npage2" in download_md.text
+    assert download_md.text == expected_markdown + "\n"
     assert calls["n"] == 1
 
     _ = client.get(f"/jobs/{job_id}/status")
-    _ = client.get(f"/download/{job_id}.json")
+    json_download = client.get(f"/download/{job_id}.json")
+    assert json_download.status_code == 404
     assert calls["n"] == 1
 
 
@@ -132,7 +118,7 @@ def test_bad_pdf_job_reports_error() -> None:
         pytest.fail("expected invalid pdf error")
 
     download = client.get(f"/download/{job_id}.json")
-    assert download.status_code == 409
+    assert download.status_code == 404
 
 
 def test_convert_rejects_large_upload(monkeypatch: pytest.MonkeyPatch) -> None:
