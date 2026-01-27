@@ -1,6 +1,6 @@
 # RAGPrep
 
-PyMuPDF Layout（`pymupdf-layout`）+ PyMuPDF4LLM（`pymupdf4llm`）を使って、PDF を **全ページ一括**で JSON に変換するツールです。
+PyMuPDF Layout（`pymupdf-layout`）+ PyMuPDF4LLM（`pymupdf4llm`）を使って、PDF を **ページ単位**で処理し、部分出力をストリーミング表示できる JSON 変換ツールです。
 JSON 出力ではページの header/footer を除外します。
 
 ## 前提・制約
@@ -19,6 +19,34 @@ RAGPrep は「できるだけ自然な読み順」を目標に、ページ内レ
 - テキストボックスが **カラム境界を跨ぐ** / **重なりが強い自由配置** は、完全な読み順再現が定義できない場合があります。
   - 重複や欠落を避けるため、該当ページは whole-page sort にフォールバックすることがあります（column-major が崩れる場合あり）。
 - PDF内部のテキストブロック分割のされ方（フォント/描画方法）により、行結合や順序が変わることがあります。
+
+## PDFレンダリング（PyMuPDF）
+- PDFのレンダリングには PyMuPDF（`pymupdf`）を使用します。
+- 画像前処理は以下を前提とします。
+  - PDFは PNG または JPEG にレンダリングする
+  - 最長辺が 1540px になるようにリサイズする
+  - アスペクト比は維持してテキストの幾何を保つ
+  - 1ページ = 1画像で扱う（vLLM 側でのバッチ処理に対応）
+
+## LightOnOCR推奨パラメータ（llama.cpp CLI）
+LightOnOCR を llama.cpp CLI で使う場合は、以下のパラメータを推奨します。
+
+| Parameter | Value | Description |
+|-----------|-------|-------------|
+| `--temp` | 0.2 | Official recommended temperature |
+| `--repeat-penalty` | 1.15 | Prevents repetition (1.1-1.2 optimal) |
+| `--repeat-last-n` | 128 | Tokens to consider for penalty |
+| `-n` | 1000 | Max output tokens (avoid >1500) |
+| `-ngl` | 99 | GPU layers (use all for best speed) |
+
+### Parameter Notes
+- **repeat-penalty**: 1.2 を超えると OCR 品質が落ちる場合があります
+- **-n (max tokens)**: 長い文書の末尾での繰り返しを防ぐため、~1000 を推奨します
+- **Image preprocessing**: PDF を最長辺 1540px の PNG としてレンダリングします
+
+## ページ単位ストリーミング出力
+- PDFは1ページずつ処理し、部分出力をストリーミング表示します。
+- ストリーミング出力のテキストは、テキスト選択でコピーできます。
 
 ## セットアップ
 ```bash
