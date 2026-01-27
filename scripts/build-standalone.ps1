@@ -624,6 +624,25 @@ if (-not `$env:LIGHTONOCR_GGUF_MMPROJ_PATH -or [string]::IsNullOrWhiteSpace(`$en
     `$env:LIGHTONOCR_GGUF_MMPROJ_PATH = Join-Path `$root "data/models/lightonocr-gguf/$ggufMmprojFileTrimmed"
 }
 
+`$ggufExpectedDir = Join-Path `$root "data/models/lightonocr-gguf"
+`$requiredGguf = @(
+    @{ Name = "LIGHTONOCR_GGUF_MODEL_PATH"; Path = `$env:LIGHTONOCR_GGUF_MODEL_PATH },
+    @{ Name = "LIGHTONOCR_GGUF_MMPROJ_PATH"; Path = `$env:LIGHTONOCR_GGUF_MMPROJ_PATH }
+)
+foreach (`$artifact in `$requiredGguf) {
+    `$artifactPath = `$artifact.Path
+    if (-not (Test-Path -LiteralPath `$artifactPath -PathType Leaf)) {
+        `$name = `$artifact.Name
+        `$message = @(
+            "[ERROR] Missing GGUF artifact: `$artifactPath",
+            "Set `$name to a valid .gguf file.",
+            "Expected under: `$ggufExpectedDir",
+            "Rebuild standalone: scripts/build-standalone.ps1 -Clean"
+        ) -join [Environment]::NewLine
+        throw `$message
+    }
+}
+
 if (-not `$env:LIGHTONOCR_LLAVA_CLI_PATH -or [string]::IsNullOrWhiteSpace(`$env:LIGHTONOCR_LLAVA_CLI_PATH)) {
     `$candidate = Join-Path `$root "bin/llama.cpp/llama-mtmd-cli.exe"
     if (Test-Path `$candidate) {
@@ -675,6 +694,21 @@ if "%LIGHTONOCR_GGUF_MODEL_PATH%"=="" (
 )
 if "%LIGHTONOCR_GGUF_MMPROJ_PATH%"=="" (
   set LIGHTONOCR_GGUF_MMPROJ_PATH=%ROOT%data\models\lightonocr-gguf\$ggufMmprojFileTrimmed
+)
+set "GGUF_EXPECTED_DIR=%ROOT%data\models\lightonocr-gguf"
+if not exist "%LIGHTONOCR_GGUF_MODEL_PATH%" (
+  echo [ERROR] Missing GGUF model: %LIGHTONOCR_GGUF_MODEL_PATH%
+  echo Set LIGHTONOCR_GGUF_MODEL_PATH to a valid .gguf file.
+  echo Expected under: %GGUF_EXPECTED_DIR%
+  echo Rebuild standalone: scripts\build-standalone.ps1 -Clean
+  exit /b 1
+)
+if not exist "%LIGHTONOCR_GGUF_MMPROJ_PATH%" (
+  echo [ERROR] Missing GGUF mmproj: %LIGHTONOCR_GGUF_MMPROJ_PATH%
+  echo Set LIGHTONOCR_GGUF_MMPROJ_PATH to a valid .gguf file.
+  echo Expected under: %GGUF_EXPECTED_DIR%
+  echo Rebuild standalone: scripts\build-standalone.ps1 -Clean
+  exit /b 1
 )
 if "%LIGHTONOCR_LLAVA_CLI_PATH%"=="" (
   if exist "%ROOT%bin\llama.cpp\llama-mtmd-cli.exe" (

@@ -38,3 +38,10 @@ def test_build_standalone_prefetch_has_direct_download_and_artifact_checks() -> 
     assert "resolve/main/{filename}?download=1" in content
     assert "GGUF artifact missing after prefetch" in content
     assert "GGUF artifact is empty after prefetch" in content
+
+
+def test_run_scripts_have_gguf_preflight_checks() -> None:
+    content = _read_build_standalone_ps1()
+    assert "Missing GGUF artifact" in content
+    assert "Missing GGUF model" in content
+    assert "Missing GGUF mmproj" in content
