@@ -9,6 +9,12 @@ def _read_build_standalone_ps1() -> str:
     return script_path.read_text(encoding="utf-8", errors="replace")
 
 
+def _read_verify_standalone_ps1() -> str:
+    repo_root = Path(__file__).resolve().parents[1]
+    script_path = repo_root / "scripts" / "verify-standalone.ps1"
+    return script_path.read_text(encoding="utf-8", errors="replace")
+
+
 def test_run_cmd_template_does_not_mkdir_empty_hf_home() -> None:
     content = _read_build_standalone_ps1()
     assert 'if not exist "%ROOT%data\\hf" mkdir "%ROOT%data\\hf"' in content
@@ -45,3 +51,22 @@ def test_run_scripts_have_gguf_preflight_checks() -> None:
     assert "Missing GGUF artifact" in content
     assert "Missing GGUF model" in content
     assert "Missing GGUF mmproj" in content
+
+
+def test_build_standalone_calls_verify_script() -> None:
+    content = _read_build_standalone_ps1()
+    assert 'verify standalone output' in content
+    assert 'scripts/verify-standalone.ps1' in content
+    assert 'Assert-LastExitCode "verify standalone"' in content
+
+
+def test_verify_standalone_checks_required_artifacts() -> None:
+    content = _read_verify_standalone_ps1()
+    assert "python/python.exe" in content
+    assert '"app"' in content
+    assert '"site-packages"' in content
+    assert "bin/llama.cpp" in content
+    assert "llama-mtmd-cli.exe" in content
+    assert "data/models/lightonocr-gguf" in content
+    assert "LightOnOCR-2-1B-Q6_K.gguf" in content
+    assert "mmproj-BF16.gguf" in content

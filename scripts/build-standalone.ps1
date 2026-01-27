@@ -734,6 +734,17 @@ exit /b 0
 "@
     Set-Content -Path (Join-Path $OutputDir "run.cmd") -Value $runCmd -Encoding ASCII
 
+    $currentStep = "verify standalone output"
+    $verifyScript = Join-Path $repoRoot "scripts/verify-standalone.ps1"
+    if (-not (Test-Path -LiteralPath $verifyScript -PathType Leaf)) {
+        throw "Missing verify script: $verifyScript"
+    }
+    & $verifyScript `
+        -OutputDir $OutputDir `
+        -GgufModelFile $ggufModelFileTrimmed `
+        -GgufMmprojFile $ggufMmprojFileTrimmed
+    Assert-LastExitCode "verify standalone"
+
     Write-Host "Done." -ForegroundColor Green
     Write-Host "Output: $OutputDir"
     Write-Host "Run:    $OutputDir/run.ps1"
