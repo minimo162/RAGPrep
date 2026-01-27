@@ -91,6 +91,71 @@
       }
     </style>
     <script src="/static/htmx.min.js"></script>
+    <script>
+      (function () {
+        const scrollState = new Map();
+        const tolerancePx = 8;
+
+        function getJobElement(elt) {
+          if (!(elt instanceof HTMLElement)) return null;
+          return elt.closest("[data-job-id]");
+        }
+
+        function getStreamingOutput(jobElt) {
+          if (!(jobElt instanceof HTMLElement)) return null;
+          return jobElt.querySelector('pre.streaming-output[data-streaming-output="partial"]');
+        }
+
+        function capture(jobElt) {
+          const jobId = jobElt.getAttribute("data-job-id");
+          if (!jobId) return;
+          const pre = getStreamingOutput(jobElt);
+          if (!(pre instanceof HTMLElement)) {
+            scrollState.delete(jobId);
+            return;
+          }
+
+          const scrollTop = pre.scrollTop;
+          const scrollHeight = pre.scrollHeight;
+          const clientHeight = pre.clientHeight;
+          const maxScrollTop = Math.max(0, scrollHeight - clientHeight);
+          const distanceFromBottom = Math.max(0, scrollHeight - (scrollTop + clientHeight));
+          const atBottom = distanceFromBottom <= tolerancePx || scrollTop >= maxScrollTop - tolerancePx;
+
+          scrollState.set(jobId, { atBottom, distanceFromBottom });
+        }
+
+        function restore(jobElt) {
+          const jobId = jobElt.getAttribute("data-job-id");
+          if (!jobId) return;
+          const pre = getStreamingOutput(jobElt);
+          const state = scrollState.get(jobId);
+          if (!(pre instanceof HTMLElement) || !state) return;
+
+          const maxScrollTop = Math.max(0, pre.scrollHeight - pre.clientHeight);
+          if (state.atBottom) {
+            pre.scrollTop = maxScrollTop;
+            return;
+          }
+          const target = Math.max(0, maxScrollTop - state.distanceFromBottom);
+          pre.scrollTop = target;
+        }
+
+        document.body.addEventListener("htmx:beforeSwap", (event) => {
+          const jobElt = getJobElement(event.detail && event.detail.elt);
+          if (jobElt && jobElt.matches("[data-job-id]")) {
+            capture(jobElt);
+          }
+        });
+
+        document.body.addEventListener("htmx:afterSwap", (event) => {
+          const jobElt = getJobElement(event.detail && event.detail.elt);
+          if (jobElt && jobElt.matches("[data-job-id]")) {
+            restore(jobElt);
+          }
+        });
+      })();
+    </script>
   </head>
   <body>
     <main class="container">
