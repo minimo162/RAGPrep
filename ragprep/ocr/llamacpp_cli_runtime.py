@@ -35,6 +35,7 @@ class LlamaCppCliSettings:
     n_threads: int | None
     n_gpu_layers: int | None
     temperature: float
+    top_p: float
     repeat_penalty: float
     repeat_last_n: int
 
@@ -318,6 +319,8 @@ def _build_argv(
         str(max_new_tokens),
         "--temp",
         str(settings.temperature),
+        "--top-p",
+        str(settings.top_p),
         "--repeat-penalty",
         str(settings.repeat_penalty),
         "--repeat-last-n",

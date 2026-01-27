@@ -34,6 +34,7 @@ LightOnOCR を llama.cpp CLI で使う場合は、以下のパラメータを推
 | Parameter | Value | Description |
 |-----------|-------|-------------|
 | `--temp` | 0.2 | Official recommended temperature |
+| `--top-p` | 0.9 | Sampling top_p |
 | `--repeat-penalty` | 1.15 | Prevents repetition (1.1-1.2 optimal) |
 | `--repeat-last-n` | 128 | Tokens to consider for penalty |
 | `-n` | 1000 | Max output tokens (avoid >1500) |

@@ -21,6 +21,7 @@ ENV_LLAMA_N_CTX = "LIGHTONOCR_LLAMA_N_CTX"
 ENV_LLAMA_N_THREADS = "LIGHTONOCR_LLAMA_N_THREADS"
 ENV_LLAMA_N_GPU_LAYERS = "LIGHTONOCR_LLAMA_N_GPU_LAYERS"
 ENV_TEMPERATURE = "LIGHTONOCR_TEMPERATURE"
+ENV_TOP_P = "LIGHTONOCR_TOP_P"
 ENV_REPEAT_PENALTY = "LIGHTONOCR_REPEAT_PENALTY"
 ENV_REPEAT_LAST_N = "LIGHTONOCR_REPEAT_LAST_N"
 
@@ -28,6 +29,7 @@ DRY_RUN_OUTPUT = "LIGHTONOCR_DRY_RUN=1 (no inference)"
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _DEFAULT_MAX_NEW_TOKENS = 1000
 _DEFAULT_TEMPERATURE = 0.2
+_DEFAULT_TOP_P = 0.9
 _DEFAULT_REPEAT_PENALTY = 1.15
 _DEFAULT_REPEAT_LAST_N = 128
 _DEFAULT_N_GPU_LAYERS = 99
@@ -59,6 +61,7 @@ class LightOnOCRSettings:
     llama_n_threads: int | None
     llama_n_gpu_layers: int | None
     temperature: float
+    top_p: float
     repeat_penalty: float
     repeat_last_n: int
 
@@ -178,6 +181,7 @@ def get_settings() -> LightOnOCRSettings:
         llama_n_gpu_layers = _DEFAULT_N_GPU_LAYERS
 
     temperature = _parse_float_env(ENV_TEMPERATURE, default=_DEFAULT_TEMPERATURE)
+    top_p = _parse_float_env(ENV_TOP_P, default=_DEFAULT_TOP_P)
     repeat_penalty = _parse_float_env(ENV_REPEAT_PENALTY, default=_DEFAULT_REPEAT_PENALTY)
     repeat_last_n = _parse_int_env(ENV_REPEAT_LAST_N, default=_DEFAULT_REPEAT_LAST_N)
 
@@ -190,6 +194,7 @@ def get_settings() -> LightOnOCRSettings:
         llama_n_threads=llama_n_threads,
         llama_n_gpu_layers=llama_n_gpu_layers,
         temperature=temperature,
+        top_p=top_p,
         repeat_penalty=repeat_penalty,
         repeat_last_n=repeat_last_n,
     )
@@ -214,6 +219,7 @@ def ocr_image(image: Image.Image) -> str:
     - LIGHTONOCR_LLAMA_N_THREADS: optional int
     - LIGHTONOCR_LLAMA_N_GPU_LAYERS: optional int
     - LIGHTONOCR_TEMPERATURE: sampling temperature (default: 0.2)
+    - LIGHTONOCR_TOP_P: sampling top_p (default: 0.9)
     - LIGHTONOCR_REPEAT_PENALTY: repeat penalty (default: 1.15)
     - LIGHTONOCR_REPEAT_LAST_N: repeat penalty window (default: 128)
     - LIGHTONOCR_MAX_NEW_TOKENS: max tokens to generate (default: 1000)
@@ -232,6 +238,7 @@ def ocr_image(image: Image.Image) -> str:
         n_threads=settings.llama_n_threads,
         n_gpu_layers=settings.llama_n_gpu_layers,
         temperature=settings.temperature,
+        top_p=settings.top_p,
         repeat_penalty=settings.repeat_penalty,
         repeat_last_n=settings.repeat_last_n,
     )
@@ -254,6 +261,7 @@ def ocr_image_base64(image_base64: str) -> str:
     - LIGHTONOCR_LLAMA_N_THREADS: optional int
     - LIGHTONOCR_LLAMA_N_GPU_LAYERS: optional int
     - LIGHTONOCR_TEMPERATURE: sampling temperature (default: 0.2)
+    - LIGHTONOCR_TOP_P: sampling top_p (default: 0.9)
     - LIGHTONOCR_REPEAT_PENALTY: repeat penalty (default: 1.15)
     - LIGHTONOCR_REPEAT_LAST_N: repeat penalty window (default: 128)
     - LIGHTONOCR_MAX_NEW_TOKENS: max tokens to generate (default: 1000)
@@ -272,6 +280,7 @@ def ocr_image_base64(image_base64: str) -> str:
         n_threads=settings.llama_n_threads,
         n_gpu_layers=settings.llama_n_gpu_layers,
         temperature=settings.temperature,
+        top_p=settings.top_p,
         repeat_penalty=settings.repeat_penalty,
         repeat_last_n=settings.repeat_last_n,
     )

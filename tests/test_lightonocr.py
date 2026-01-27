@@ -42,6 +42,7 @@ def test_llamacpp_validate_paths_reports_missing_model(tmp_path: Path) -> None:
         n_threads=None,
         n_gpu_layers=None,
         temperature=0.2,
+        top_p=0.9,
         repeat_penalty=1.15,
         repeat_last_n=128,
     )
@@ -63,6 +64,7 @@ def test_llamacpp_validate_paths_includes_env_and_expected_dir(tmp_path: Path) -
         n_threads=None,
         n_gpu_layers=None,
         temperature=0.2,
+        top_p=0.9,
         repeat_penalty=1.15,
         repeat_last_n=128,
     )
@@ -87,6 +89,7 @@ def test_llamacpp_resolve_cli_prefers_explicit_path(tmp_path: Path) -> None:
         n_threads=None,
         n_gpu_layers=None,
         temperature=0.2,
+        top_p=0.9,
         repeat_penalty=1.15,
         repeat_last_n=128,
     )
@@ -113,6 +116,7 @@ def test_llamacpp_resolve_cli_uses_standalone_before_path(
         n_threads=None,
         n_gpu_layers=None,
         temperature=0.2,
+        top_p=0.9,
         repeat_penalty=1.15,
         repeat_last_n=128,
     )
@@ -163,6 +167,7 @@ def test_llamacpp_resolve_cli_prefers_vulkan_variant(
         n_threads=None,
         n_gpu_layers=None,
         temperature=0.2,
+        top_p=0.9,
         repeat_penalty=1.15,
         repeat_last_n=128,
     )
@@ -196,6 +201,7 @@ def test_llamacpp_resolve_cli_supports_standalone_root_layout(
         n_threads=None,
         n_gpu_layers=None,
         temperature=0.2,
+        top_p=0.9,
         repeat_penalty=1.15,
         repeat_last_n=128,
     )
@@ -220,6 +226,7 @@ def test_llamacpp_resolve_cli_missing_raises_clear_error(
         n_threads=None,
         n_gpu_layers=None,
         temperature=0.2,
+        top_p=0.9,
         repeat_penalty=1.15,
         repeat_last_n=128,
     )
@@ -267,6 +274,7 @@ def test_llamacpp_ocr_image_builds_argv_and_normalizes_paths(
         n_threads=4,
         n_gpu_layers=0,
         temperature=0.2,
+        top_p=0.9,
         repeat_penalty=1.15,
         repeat_last_n=128,
     )
@@ -279,12 +287,14 @@ def test_llamacpp_ocr_image_builds_argv_and_normalizes_paths(
     model_value = argv[argv.index("-m") + 1]
     mmproj_value = argv[argv.index("--mmproj") + 1]
     temp_value = argv[argv.index("--temp") + 1]
+    top_p_value = argv[argv.index("--top-p") + 1]
     repeat_penalty_value = argv[argv.index("--repeat-penalty") + 1]
     repeat_last_n_value = argv[argv.index("--repeat-last-n") + 1]
 
     assert Path(model_value) == model_path
     assert Path(mmproj_value) == mmproj_path
     assert temp_value == "0.2"
+    assert top_p_value == "0.9"
     assert repeat_penalty_value == "1.15"
     assert repeat_last_n_value == "128"
     assert "-c" in argv and "2048" in argv
@@ -355,6 +365,7 @@ def test_llamacpp_ocr_image_falls_back_from_vulkan_to_avx2(
         n_threads=None,
         n_gpu_layers=None,
         temperature=0.2,
+        top_p=0.9,
         repeat_penalty=1.15,
         repeat_last_n=128,
     )
