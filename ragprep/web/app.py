@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import logging
 import uuid
 from dataclasses import dataclass, replace
@@ -243,13 +244,18 @@ def job_result(request: Request, job_id: str) -> Response:
     return templates.TemplateResponse(request, "_job_result.html", {"job": job})
 
 
-def _download_filename_from_upload(upload_filename: str) -> str:
+def _safe_download_stem(upload_filename: str) -> str:
     name = Path(upload_filename).name
     name = name.replace("\r", "").replace("\n", "")
     stem = Path(name).stem.replace('"', "")
     if not stem or stem in {".", ".."}:
         stem = "download"
-    return f"{stem}.json"
+    return stem
+
+
+def _download_filename_from_upload(upload_filename: str, *, suffix: str) -> str:
+    stem = _safe_download_stem(upload_filename)
+    return f"{stem}.{suffix}"
 
 
 @app.get("/download/{job_id}.json")
@@ -260,11 +266,69 @@ def download_json(job_id: str) -> PlainTextResponse:
     if job.status != JobStatus.done or job.json_output is None:
         raise HTTPException(status_code=409, detail="job not complete")
 
-    download_filename = _download_filename_from_upload(job.filename)
+    download_filename = _download_filename_from_upload(job.filename, suffix="json")
     headers = {"Content-Disposition": f'attachment; filename="{download_filename}"'}
     return PlainTextResponse(
         job.json_output,
         media_type="application/json; charset=utf-8",
+        headers=headers,
+    )
+
+
+def _markdown_from_job(job: Job) -> str:
+    """
+    Build a Markdown artifact for download.
+
+    Prefer the structured LightOnOCR JSON schema (pages[].markdown).
+    Fall back to partial_markdown or raw json_output for robustness.
+    """
+    if job.json_output:
+        try:
+            payload = json.loads(job.json_output)
+        except json.JSONDecodeError:
+            payload = None
+        if isinstance(payload, dict):
+            pages = payload.get("pages")
+            if isinstance(pages, list):
+                parts: list[str] = []
+                for page in pages:
+                    if not isinstance(page, dict):
+                        continue
+                    markdown = page.get("markdown")
+                    if isinstance(markdown, str):
+                        normalized = (
+                            markdown.replace("\r\n", "\n")
+                            .replace("\r", "\n")
+                            .strip()
+                        )
+                        if normalized:
+                            parts.append(normalized)
+                if parts:
+                    return "\n\n".join(parts)
+
+    if job.partial_markdown:
+        return job.partial_markdown.strip()
+
+    return (job.json_output or "").strip()
+
+
+@app.get("/download/{job_id}.md")
+def download_markdown(job_id: str) -> PlainTextResponse:
+    job = jobs.get(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="job not found")
+    if job.status != JobStatus.done or job.json_output is None:
+        raise HTTPException(status_code=409, detail="job not complete")
+
+    markdown = _markdown_from_job(job)
+    if markdown:
+        markdown = markdown + "\n"
+
+    download_filename = _download_filename_from_upload(job.filename, suffix="md")
+    headers = {"Content-Disposition": f'attachment; filename="{download_filename}"'}
+    return PlainTextResponse(
+        markdown,
+        media_type="text/markdown; charset=utf-8",
         headers=headers,
     )
 

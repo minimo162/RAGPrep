@@ -4,14 +4,15 @@ from ragprep.web.app import _download_filename_from_upload
 
 
 def test_download_filename_from_upload_uses_pdf_stem() -> None:
-    assert _download_filename_from_upload("test.pdf") == "test.json"
-    assert _download_filename_from_upload(r"C:\tmp\foo.pdf") == "foo.json"
-    assert _download_filename_from_upload("dir/subdir/bar.pdf") == "bar.json"
+    assert _download_filename_from_upload("test.pdf", suffix="json") == "test.json"
+    assert _download_filename_from_upload(r"C:\tmp\foo.pdf", suffix="json") == "foo.json"
+    assert _download_filename_from_upload("dir/subdir/bar.pdf", suffix="json") == "bar.json"
+    assert _download_filename_from_upload("dir/subdir/bar.pdf", suffix="md") == "bar.md"
 
 
 def test_download_filename_from_upload_strips_controls_and_quotes() -> None:
-    result = _download_filename_from_upload('evil.pdf"\r\nX: y')
-    assert result == "evil.json"
+    result = _download_filename_from_upload('evil.pdf"\r\nX: y', suffix="md")
+    assert result == "evil.md"
     assert "\r" not in result
     assert "\n" not in result
     assert '"' not in result

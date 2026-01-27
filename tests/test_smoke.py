@@ -1,4 +1,5 @@
 import re
+from collections.abc import Callable
 from typing import cast
 
 import pytest
@@ -43,18 +44,33 @@ def test_convert_creates_job_and_downloads_json(monkeypatch: pytest.MonkeyPatch)
     pdf_bytes = _make_pdf_bytes(page_count=2)
 
     calls: dict[str, int] = {"n": 0}
+    import json
+
+    expected_payload = {
+        "meta": {
+            "backend": "lightonocr",
+            "page_count": 2,
+            "render_dpi": 300,
+            "render_max_edge": 1540,
+        },
+        "pages": [
+            {"page": 1, "markdown": "page1"},
+            {"page": 2, "markdown": "page2"},
+        ],
+    }
+    expected_json = json.dumps(expected_payload, ensure_ascii=False)
 
     def fake_to_json(
         _bytes: bytes,
         *,
         on_progress: object | None = None,
-        on_page: object | None = None,
+        on_page: Callable[[int, str], None] | None = None,
     ) -> str:
         calls["n"] += 1
-        if callable(on_page):
+        if on_page is not None:
             on_page(1, "page1")
             on_page(2, "page2")
-        return '{"page1": true, "page2": true}'
+        return expected_json
 
     monkeypatch.setattr(web_app, "pdf_to_json", fake_to_json)
 
@@ -76,13 +92,23 @@ def test_convert_creates_job_and_downloads_json(monkeypatch: pytest.MonkeyPatch)
     assert "page1" in result.text
     assert "page2" in result.text
     assert f"/download/{job_id}.json" in result.text
+    assert f"/download/{job_id}.md" in result.text
     assert "save_json" in result.text
+    assert "save_markdown" in result.text
 
     download = client.get(f"/download/{job_id}.json")
     assert download.status_code == 200
-    assert download.text == '{"page1": true, "page2": true}'
+    assert download.text == expected_json
     assert "application/json" in download.headers["content-type"]
     assert "test.json" in download.headers["content-disposition"]
+
+    download_md = client.get(f"/download/{job_id}.md")
+    assert download_md.status_code == 200
+    assert "text/markdown" in download_md.headers["content-type"]
+    assert "test.md" in download_md.headers["content-disposition"]
+    assert "page1" in download_md.text
+    assert "page2" in download_md.text
+    assert "page1\n\npage2" in download_md.text
     assert calls["n"] == 1
 
     _ = client.get(f"/jobs/{job_id}/status")
