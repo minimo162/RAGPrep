@@ -533,64 +533,112 @@ if __name__ == "__main__":
     # NOTE: We pin URL + SHA256 to avoid supply-chain drift.
     $currentStep = "bundle llama.cpp"
     $llamaCppTag = "b7815"
-    $llamaCppAsset = "llama-$llamaCppTag-bin-win-cpu-x64.zip"
-    $llamaCppSha256 = "7d0fea9f0879cff4a3b6ad16051d28d394566abe7870a20e7f8c14abf9973b57"
-    $llamaCppUrl = "https://github.com/ggerganov/llama.cpp/releases/download/$llamaCppTag/$llamaCppAsset"
-
-    $llamaCppArchivePath = Join-Path $cacheDir $llamaCppAsset
-    if (-not (Test-Path $llamaCppArchivePath)) {
-        Write-Host "Downloading llama.cpp $llamaCppTag ($llamaCppAsset)..." -ForegroundColor Cyan
-        Invoke-WebRequest -Uri $llamaCppUrl -OutFile $llamaCppArchivePath
-    }
-    else {
-        Write-Host "Using cached llama.cpp bundle ($llamaCppAsset)" -ForegroundColor Cyan
-    }
-
-    $llamaCppHash = (Get-FileHash -Algorithm SHA256 -Path $llamaCppArchivePath).Hash.ToLowerInvariant()
-    if ($llamaCppHash -ne $llamaCppSha256) {
-        throw "llama.cpp bundle checksum mismatch. expected=$llamaCppSha256 got=$llamaCppHash file=$llamaCppArchivePath"
-    }
-
-    $llamaCppExtractDir = Join-Path $extractDir ("llama.cpp-" + $llamaCppTag)
-    if (Test-Path $llamaCppExtractDir) {
-        Remove-Item -LiteralPath $llamaCppExtractDir -Recurse -Force -ErrorAction SilentlyContinue
-    }
-    New-Item -ItemType Directory -Force -Path $llamaCppExtractDir | Out-Null
-
-    Write-Host "Extracting llama.cpp bundle..." -ForegroundColor Cyan
-    Expand-Archive -LiteralPath $llamaCppArchivePath -DestinationPath $llamaCppExtractDir -Force
-
     $llamaCppBinDir = Join-Path $OutputDir "bin/llama.cpp"
     New-Item -ItemType Directory -Force -Path $llamaCppBinDir | Out-Null
-
-    $mtmdCliExe = Join-Path $llamaCppExtractDir "llama-mtmd-cli.exe"
-    if (-not (Test-Path -LiteralPath $mtmdCliExe -PathType Leaf)) {
-        $available = (Get-ChildItem -Path $llamaCppExtractDir -File -Filter "*.exe" | Select-Object -ExpandProperty Name) -join ", "
-        throw "Could not locate llama-mtmd-cli.exe in the llama.cpp bundle. Available: $available"
-    }
-
-    $llavaCliCandidates = @(
-        (Join-Path $llamaCppExtractDir "llava-cli.exe"),
-        (Join-Path $llamaCppExtractDir "llama-llava-cli.exe")
+    $llamaCppBaseUrl = "https://github.com/ggml-org/llama.cpp/releases/download/$llamaCppTag"
+    $llamaCppVariants = @(
+        @{
+            Name = "avx2"
+            Asset = "llama-$llamaCppTag-bin-win-cpu-x64.zip"
+            Sha256 = "7d0fea9f0879cff4a3b6ad16051d28d394566abe7870a20e7f8c14abf9973b57"
+        },
+        @{
+            Name = "vulkan"
+            Asset = "llama-$llamaCppTag-bin-win-vulkan-x64.zip"
+            Sha256 = "1012aa05900ae8a5685a0c7dbb98a5a9d8b6a9e70cd8119990bc61bdc4e9e475"
+        }
     )
-    $llavaCliExe = $llavaCliCandidates | Where-Object { Test-Path $_ } | Select-Object -First 1
 
-    # Bundle the preferred multimodal CLI (llama-mtmd-cli.exe).
-    Copy-Item -Force $mtmdCliExe (Join-Path $llamaCppBinDir "llama-mtmd-cli.exe")
+    $bundledVariants = @()
 
-    # Bundle llava-cli.exe for backward compatibility (if present in the release).
-    # Normalize to llava-cli.exe for runtime discovery.
-    if ($llavaCliExe) {
-        Copy-Item -Force $llavaCliExe (Join-Path $llamaCppBinDir "llava-cli.exe")
+    foreach ($variant in $llamaCppVariants) {
+        $variantName = $variant.Name
+        $variantAsset = $variant.Asset
+        $variantSha256 = $variant.Sha256
+        $variantUrl = "$llamaCppBaseUrl/$variantAsset"
+        $variantArchivePath = Join-Path $cacheDir $variantAsset
+
+        if (-not (Test-Path -LiteralPath $variantArchivePath -PathType Leaf)) {
+            Write-Host "Downloading llama.cpp $llamaCppTag ($variantName / $variantAsset)..." -ForegroundColor Cyan
+            Invoke-WebRequest -Uri $variantUrl -OutFile $variantArchivePath
+        }
+        else {
+            Write-Host "Using cached llama.cpp bundle ($variantName / $variantAsset)" -ForegroundColor Cyan
+        }
+
+        $variantHash = (Get-FileHash -Algorithm SHA256 -Path $variantArchivePath).Hash.ToLowerInvariant()
+        if ($variantHash -ne $variantSha256) {
+            throw "llama.cpp bundle checksum mismatch ($variantName). expected=$variantSha256 got=$variantHash file=$variantArchivePath"
+        }
+
+        $variantExtractDir = Join-Path $extractDir ("llama.cpp-" + $llamaCppTag + "-" + $variantName)
+        if (Test-Path -LiteralPath $variantExtractDir -PathType Container) {
+            Remove-Item -LiteralPath $variantExtractDir -Recurse -Force -ErrorAction SilentlyContinue
+        }
+        New-Item -ItemType Directory -Force -Path $variantExtractDir | Out-Null
+
+        Write-Host "Extracting llama.cpp bundle ($variantName)..." -ForegroundColor Cyan
+        Expand-Archive -LiteralPath $variantArchivePath -DestinationPath $variantExtractDir -Force
+
+        $mtmdCliExe = Join-Path $variantExtractDir "llama-mtmd-cli.exe"
+        if (-not (Test-Path -LiteralPath $mtmdCliExe -PathType Leaf)) {
+            $available = (Get-ChildItem -Path $variantExtractDir -File -Filter "*.exe" | Select-Object -ExpandProperty Name) -join ", "
+            throw "Could not locate llama-mtmd-cli.exe in the llama.cpp bundle ($variantName). Available: $available"
+        }
+
+        $llavaCliCandidates = @(
+            (Join-Path $variantExtractDir "llava-cli.exe"),
+            (Join-Path $variantExtractDir "llama-llava-cli.exe")
+        )
+        $llavaCliExe = $llavaCliCandidates | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
+
+        $variantBinDir = Join-Path $llamaCppBinDir $variantName
+        New-Item -ItemType Directory -Force -Path $variantBinDir | Out-Null
+
+        # Bundle the preferred multimodal CLI (llama-mtmd-cli.exe).
+        Copy-Item -Force -LiteralPath $mtmdCliExe -Destination (Join-Path $variantBinDir "llama-mtmd-cli.exe")
+
+        # Bundle llava-cli.exe for backward compatibility (if present in the release).
+        # Normalize to llava-cli.exe for runtime discovery.
+        if ($llavaCliExe) {
+            Copy-Item -Force -LiteralPath $llavaCliExe -Destination (Join-Path $variantBinDir "llava-cli.exe")
+        }
+        Get-ChildItem -Path $variantExtractDir -File -Filter "*.dll" | ForEach-Object {
+            Copy-Item -Force -LiteralPath $_.FullName -Destination $variantBinDir
+        }
+
+        $bundledVariants += [pscustomobject]@{
+            Name = $variantName
+            BinDir = $variantBinDir
+            MtmdCli = Join-Path $variantBinDir "llama-mtmd-cli.exe"
+            LlavaCli = if ($llavaCliExe) { Join-Path $variantBinDir "llava-cli.exe" } else { "" }
+        }
     }
-    Get-ChildItem -Path $llamaCppExtractDir -File -Filter "*.dll" | ForEach-Object {
-        Copy-Item -Force $_.FullName $llamaCppBinDir
+
+    # Keep a root-level AVX2 copy for backward compatibility with existing run scripts.
+    $avx2BinDir = Join-Path $llamaCppBinDir "avx2"
+    if (Test-Path -LiteralPath $avx2BinDir -PathType Container) {
+        $rootMtmdCli = Join-Path $llamaCppBinDir "llama-mtmd-cli.exe"
+        Copy-Item -Force -LiteralPath (Join-Path $avx2BinDir "llama-mtmd-cli.exe") -Destination $rootMtmdCli
+
+        $avx2LlavaCli = Join-Path $avx2BinDir "llava-cli.exe"
+        if (Test-Path -LiteralPath $avx2LlavaCli -PathType Leaf) {
+            Copy-Item -Force -LiteralPath $avx2LlavaCli -Destination (Join-Path $llamaCppBinDir "llava-cli.exe")
+        }
+        Get-ChildItem -Path $avx2BinDir -File -Filter "*.dll" | ForEach-Object {
+            Copy-Item -Force -LiteralPath $_.FullName -Destination $llamaCppBinDir
+        }
     }
 
     Write-Host "Bundled llama.cpp binaries:" -ForegroundColor Cyan
-    Write-Host "  mtmd-cli:  $(Join-Path $llamaCppBinDir "llama-mtmd-cli.exe")" -ForegroundColor DarkGray
-    if ($llavaCliExe) {
-        Write-Host "  llava-cli: $(Join-Path $llamaCppBinDir "llava-cli.exe")" -ForegroundColor DarkGray
+    foreach ($entry in $bundledVariants) {
+        Write-Host "  $($entry.Name): $(Join-Path $entry.BinDir "llama-mtmd-cli.exe")" -ForegroundColor DarkGray
+        if ($entry.LlavaCli) {
+            Write-Host "    llava-cli: $($entry.LlavaCli)" -ForegroundColor DarkGray
+        }
+    }
+    if (Test-Path -LiteralPath (Join-Path $llamaCppBinDir "llama-mtmd-cli.exe") -PathType Leaf) {
+        Write-Host "  root (compat): $(Join-Path $llamaCppBinDir "llama-mtmd-cli.exe")" -ForegroundColor DarkGray
     }
 
     $currentStep = "write run scripts"
