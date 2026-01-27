@@ -46,6 +46,8 @@ class Job:
     progress_message: str | None = None
     json_output: str | None = None
     error: str | None = None
+    partial_markdown: str = ""
+    partial_pages: int = 0
 
 
 class JobStore:
@@ -69,6 +71,29 @@ class JobStore:
             if existing is None:
                 raise KeyError(job_id)
             updated = replace(existing, **changes)
+            self._jobs[job_id] = updated
+            return updated
+
+    def append_partial(self, job_id: str, *, page_index: int, markdown: str) -> Job:
+        entry_text = markdown.strip()
+        page_block = f"## Page {page_index}\n\n{entry_text}".strip()
+
+        with self._lock:
+            existing = self._jobs.get(job_id)
+            if existing is None:
+                raise KeyError(job_id)
+
+            partial_markdown = existing.partial_markdown.strip()
+            if partial_markdown:
+                partial_markdown = f"{partial_markdown}\n\n{page_block}".strip()
+            else:
+                partial_markdown = page_block
+
+            updated = replace(
+                existing,
+                partial_markdown=partial_markdown,
+                partial_pages=max(existing.partial_pages, int(page_index)),
+            )
             self._jobs[job_id] = updated
             return updated
 
@@ -103,6 +128,8 @@ def _run_job(job_id: str, pdf_bytes: bytes) -> None:
             processed_pages=0,
             total_pages=0,
             progress_message=None,
+            partial_markdown="",
+            partial_pages=0,
         )
 
         def on_progress(update: PdfToJsonProgress) -> None:
@@ -114,8 +141,18 @@ def _run_job(job_id: str, pdf_bytes: bytes) -> None:
                 progress_message=update.message,
             )
 
+        def on_page(page_index: int, markdown: str) -> None:
+            try:
+                jobs.append_partial(job_id, page_index=page_index, markdown=markdown)
+            except Exception:  # noqa: BLE001
+                logger.debug("Failed to append partial output for job %s", job_id, exc_info=True)
+
         try:
-            json_output = pdf_to_json(pdf_bytes, on_progress=on_progress)
+            json_output = pdf_to_json(
+                pdf_bytes,
+                on_progress=on_progress,
+                on_page=on_page,
+            )
         except Exception as exc:  # noqa: BLE001
             logger.exception("Job %s failed", job_id)
             jobs.update(job_id, status=JobStatus.error, phase="error", error=str(exc))

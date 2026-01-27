@@ -3,7 +3,7 @@
     class="job"
     data-job-id="{{ job.id }}"
     hx-get="/jobs/{{ job.id }}/status"
-    hx-trigger="load, every 1s"
+    hx-trigger="load, every 0.5s"
     hx-swap="outerHTML"
   >
     <p class="muted">Job {{ job.id }} - {{ job.status.value }}</p>
@@ -17,6 +17,12 @@
     {% endif %}
     {% if job.progress_message %}
       <p class="muted">{{ job.progress_message }}</p>
+    {% endif %}
+    {% if job.partial_markdown %}
+      <div class="partial-output">
+        <p class="muted">Partial output ({{ job.partial_pages }} pages)</p>
+        <pre class="json-output streaming-output">{{ job.partial_markdown }}</pre>
+      </div>
     {% endif %}
   </div>
 {% elif job.status == "done" %}

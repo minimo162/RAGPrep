@@ -44,8 +44,16 @@ def test_convert_creates_job_and_downloads_json(monkeypatch: pytest.MonkeyPatch)
 
     calls: dict[str, int] = {"n": 0}
 
-    def fake_to_json(_bytes: bytes, *, on_progress: object | None = None) -> str:
+    def fake_to_json(
+        _bytes: bytes,
+        *,
+        on_progress: object | None = None,
+        on_page: object | None = None,
+    ) -> str:
         calls["n"] += 1
+        if callable(on_page):
+            on_page(1, "page1")
+            on_page(2, "page2")
         return '{"page1": true, "page2": true}'
 
     monkeypatch.setattr(web_app, "pdf_to_json", fake_to_json)
