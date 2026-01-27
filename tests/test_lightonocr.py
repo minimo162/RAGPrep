@@ -41,6 +41,9 @@ def test_llamacpp_validate_paths_reports_missing_model(tmp_path: Path) -> None:
         n_ctx=None,
         n_threads=None,
         n_gpu_layers=None,
+        temperature=0.2,
+        repeat_penalty=1.15,
+        repeat_last_n=128,
     )
 
     with pytest.raises(RuntimeError, match="GGUF model file not found"):
@@ -59,6 +62,9 @@ def test_llamacpp_validate_paths_includes_env_and_expected_dir(tmp_path: Path) -
         n_ctx=None,
         n_threads=None,
         n_gpu_layers=None,
+        temperature=0.2,
+        repeat_penalty=1.15,
+        repeat_last_n=128,
     )
 
     with pytest.raises(RuntimeError) as excinfo:
@@ -74,12 +80,15 @@ def test_llamacpp_resolve_cli_prefers_explicit_path(tmp_path: Path) -> None:
     cli_path = tmp_path / "llama-mtmd-cli.exe"
     cli_path.write_text("x", encoding="utf-8")
     settings = runtime.LlamaCppCliSettings(
-        llava_cli_path=f" \"{cli_path}\" ",
+        llava_cli_path=f' "{cli_path}" ',
         model_path="model.gguf",
         mmproj_path="mmproj.gguf",
         n_ctx=None,
         n_threads=None,
         n_gpu_layers=None,
+        temperature=0.2,
+        repeat_penalty=1.15,
+        repeat_last_n=128,
     )
 
     resolved = runtime._resolve_llava_cli(settings, repo_root=tmp_path)
@@ -92,14 +101,7 @@ def test_llamacpp_resolve_cli_uses_standalone_before_path(
 ) -> None:
     from ragprep.ocr import llamacpp_cli_runtime as runtime
 
-    cli_path = (
-        tmp_path
-        / "dist"
-        / "standalone"
-        / "bin"
-        / "llama.cpp"
-        / "llama-mtmd-cli.exe"
-    )
+    cli_path = tmp_path / "dist" / "standalone" / "bin" / "llama.cpp" / "llama-mtmd-cli.exe"
     cli_path.parent.mkdir(parents=True, exist_ok=True)
     cli_path.write_text("x", encoding="utf-8")
 
@@ -110,6 +112,9 @@ def test_llamacpp_resolve_cli_uses_standalone_before_path(
         n_ctx=None,
         n_threads=None,
         n_gpu_layers=None,
+        temperature=0.2,
+        repeat_penalty=1.15,
+        repeat_last_n=128,
     )
 
     def _forbidden_which(_name: str) -> str | None:
@@ -134,6 +139,9 @@ def test_llamacpp_resolve_cli_missing_raises_clear_error(
         n_ctx=None,
         n_threads=None,
         n_gpu_layers=None,
+        temperature=0.2,
+        repeat_penalty=1.15,
+        repeat_last_n=128,
     )
 
     monkeypatch.setattr(runtime.shutil, "which", lambda _name: None)
@@ -174,10 +182,13 @@ def test_llamacpp_ocr_image_builds_argv_and_normalizes_paths(
     settings = runtime.LlamaCppCliSettings(
         llava_cli_path=f" <{cli_path}> ",
         model_path=model_path.resolve().as_uri(),
-        mmproj_path=f" \"{mmproj_path}\" ",
+        mmproj_path=f' "{mmproj_path}" ',
         n_ctx=2048,
         n_threads=4,
         n_gpu_layers=0,
+        temperature=0.2,
+        repeat_penalty=1.15,
+        repeat_last_n=128,
     )
 
     image = Image.new("RGB", (2, 2), color=(0, 0, 0))
@@ -187,9 +198,15 @@ def test_llamacpp_ocr_image_builds_argv_and_normalizes_paths(
     argv = captured["argv"]
     model_value = argv[argv.index("-m") + 1]
     mmproj_value = argv[argv.index("--mmproj") + 1]
+    temp_value = argv[argv.index("--temp") + 1]
+    repeat_penalty_value = argv[argv.index("--repeat-penalty") + 1]
+    repeat_last_n_value = argv[argv.index("--repeat-last-n") + 1]
 
     assert Path(model_value) == model_path
     assert Path(mmproj_value) == mmproj_path
+    assert temp_value == "0.2"
+    assert repeat_penalty_value == "1.15"
+    assert repeat_last_n_value == "128"
     assert "-c" in argv and "2048" in argv
     assert "-t" in argv and "4" in argv
     assert "-ngl" in argv and "0" in argv

@@ -19,9 +19,17 @@ ENV_LLAVA_CLI_PATH = "LIGHTONOCR_LLAVA_CLI_PATH"
 ENV_LLAMA_N_CTX = "LIGHTONOCR_LLAMA_N_CTX"
 ENV_LLAMA_N_THREADS = "LIGHTONOCR_LLAMA_N_THREADS"
 ENV_LLAMA_N_GPU_LAYERS = "LIGHTONOCR_LLAMA_N_GPU_LAYERS"
+ENV_TEMPERATURE = "LIGHTONOCR_TEMPERATURE"
+ENV_REPEAT_PENALTY = "LIGHTONOCR_REPEAT_PENALTY"
+ENV_REPEAT_LAST_N = "LIGHTONOCR_REPEAT_LAST_N"
 
 DRY_RUN_OUTPUT = "LIGHTONOCR_DRY_RUN=1 (no inference)"
 _REPO_ROOT = Path(__file__).resolve().parents[2]
+_DEFAULT_MAX_NEW_TOKENS = 1000
+_DEFAULT_TEMPERATURE = 0.2
+_DEFAULT_REPEAT_PENALTY = 1.15
+_DEFAULT_REPEAT_LAST_N = 128
+_DEFAULT_N_GPU_LAYERS = 99
 
 
 def _standalone_root(repo_root: Path) -> Path | None:
@@ -49,6 +57,9 @@ class LightOnOCRSettings:
     llama_n_ctx: int | None
     llama_n_threads: int | None
     llama_n_gpu_layers: int | None
+    temperature: float
+    repeat_penalty: float
+    repeat_last_n: int
 
 
 def _parse_optional_int_env(name: str) -> int | None:
@@ -62,6 +73,32 @@ def _parse_optional_int_env(name: str) -> int | None:
         return int(value)
     except ValueError as exc:
         raise ValueError(f"{name} must be an int, got: {value!r}") from exc
+
+
+def _parse_int_env(name: str, *, default: int) -> int:
+    value = os.getenv(name)
+    if value is None:
+        return default
+    raw = value.strip()
+    if not raw:
+        return default
+    try:
+        return int(raw)
+    except ValueError as exc:
+        raise ValueError(f"{name} must be an int, got: {raw!r}") from exc
+
+
+def _parse_float_env(name: str, *, default: float) -> float:
+    value = os.getenv(name)
+    if value is None:
+        return default
+    raw = value.strip()
+    if not raw:
+        return default
+    try:
+        return float(raw)
+    except ValueError as exc:
+        raise ValueError(f"{name} must be a float, got: {raw!r}") from exc
 
 
 def _normalize_env_path(value: str) -> str:
@@ -88,7 +125,9 @@ def _normalize_env_path(value: str) -> str:
 
 
 def get_settings() -> LightOnOCRSettings:
-    max_new_tokens_str = os.getenv(ENV_MAX_NEW_TOKENS, "1024").strip() or "1024"
+    max_new_tokens_str = os.getenv(ENV_MAX_NEW_TOKENS, str(_DEFAULT_MAX_NEW_TOKENS)).strip() or str(
+        _DEFAULT_MAX_NEW_TOKENS
+    )
     try:
         max_new_tokens = int(max_new_tokens_str)
     except ValueError as exc:
@@ -134,6 +173,12 @@ def get_settings() -> LightOnOCRSettings:
     llama_n_ctx = _parse_optional_int_env(ENV_LLAMA_N_CTX)
     llama_n_threads = _parse_optional_int_env(ENV_LLAMA_N_THREADS)
     llama_n_gpu_layers = _parse_optional_int_env(ENV_LLAMA_N_GPU_LAYERS)
+    if llama_n_gpu_layers is None:
+        llama_n_gpu_layers = _DEFAULT_N_GPU_LAYERS
+
+    temperature = _parse_float_env(ENV_TEMPERATURE, default=_DEFAULT_TEMPERATURE)
+    repeat_penalty = _parse_float_env(ENV_REPEAT_PENALTY, default=_DEFAULT_REPEAT_PENALTY)
+    repeat_last_n = _parse_int_env(ENV_REPEAT_LAST_N, default=_DEFAULT_REPEAT_LAST_N)
 
     return LightOnOCRSettings(
         llava_cli_path=llava_cli_path,
@@ -143,6 +188,9 @@ def get_settings() -> LightOnOCRSettings:
         llama_n_ctx=llama_n_ctx,
         llama_n_threads=llama_n_threads,
         llama_n_gpu_layers=llama_n_gpu_layers,
+        temperature=temperature,
+        repeat_penalty=repeat_penalty,
+        repeat_last_n=repeat_last_n,
     )
 
 
@@ -164,7 +212,10 @@ def ocr_image(image: Image.Image) -> str:
     - LIGHTONOCR_LLAMA_N_CTX: optional int
     - LIGHTONOCR_LLAMA_N_THREADS: optional int
     - LIGHTONOCR_LLAMA_N_GPU_LAYERS: optional int
-    - LIGHTONOCR_MAX_NEW_TOKENS: max tokens to generate (default: 1024)
+    - LIGHTONOCR_TEMPERATURE: sampling temperature (default: 0.2)
+    - LIGHTONOCR_REPEAT_PENALTY: repeat penalty (default: 1.15)
+    - LIGHTONOCR_REPEAT_LAST_N: repeat penalty window (default: 128)
+    - LIGHTONOCR_MAX_NEW_TOKENS: max tokens to generate (default: 1000)
     - LIGHTONOCR_DRY_RUN: if truthy, return a fixed string and do no inference
     """
 
@@ -179,6 +230,9 @@ def ocr_image(image: Image.Image) -> str:
         n_ctx=settings.llama_n_ctx,
         n_threads=settings.llama_n_threads,
         n_gpu_layers=settings.llama_n_gpu_layers,
+        temperature=settings.temperature,
+        repeat_penalty=settings.repeat_penalty,
+        repeat_last_n=settings.repeat_last_n,
     )
     return ocr_image_llama_cpp_cli(
         image=image,

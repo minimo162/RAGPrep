@@ -24,6 +24,9 @@ class LlamaCppCliSettings:
     n_ctx: int | None
     n_threads: int | None
     n_gpu_layers: int | None
+    temperature: float
+    repeat_penalty: float
+    repeat_last_n: int
 
 
 def _standalone_root(repo_root: Path) -> Path | None:
@@ -222,6 +225,12 @@ def _build_argv(
         prompt,
         "-n",
         str(max_new_tokens),
+        "--temp",
+        str(settings.temperature),
+        "--repeat-penalty",
+        str(settings.repeat_penalty),
+        "--repeat-last-n",
+        str(settings.repeat_last_n),
     ]
 
     if settings.n_ctx is not None:
@@ -260,9 +269,7 @@ def ocr_image(*, image: Image.Image, settings: LlamaCppCliSettings, max_new_toke
 
     prompt = "Extract all text from this image and return it as Markdown."
 
-    with tempfile.NamedTemporaryFile(
-        prefix="ragprep_llava_", suffix=".png", delete=False
-    ) as tmp:
+    with tempfile.NamedTemporaryFile(prefix="ragprep_llava_", suffix=".png", delete=False) as tmp:
         image_path = Path(tmp.name)
     try:
         image.save(image_path, format="PNG")
