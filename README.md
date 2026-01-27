@@ -47,6 +47,9 @@ LightOnOCR を llama.cpp CLI で使う場合は、以下のパラメータを推
 ## ページ単位ストリーミング出力
 - PDFは1ページずつ処理し、部分出力をストリーミング表示します。
 - ストリーミング出力のテキストは、テキスト選択でコピーできます。
+- スクロール挙動:
+  - 表示の一番下にいる場合は、新しい出力に自動で追従します。
+  - 途中までスクロールしている場合は、スクロール位置を維持します（勝手に下へ飛びません）。
 
 ## セットアップ
 ```bash
@@ -62,8 +65,11 @@ uv run python -m ragprep.desktop
 
 起動すると GUI が自動で開きます。GUI を閉じるとアプリも終了します。
 
-変換が完了したら、結果画面の `Download .json` をクリックして JSON を保存します。
-- **ファイル名**: 元のPDFファイル名の拡張子を `.json` に変更（例: `foo.pdf` → `foo.json`）
+変換が完了したら、結果画面の `Download .json` または `Download .md` をクリックして保存します。
+- **ファイル名**:
+  - `.json`: 元のPDFファイル名の拡張子を `.json` に変更（例: `foo.pdf` → `foo.json`）
+  - `.md`: 元のPDFファイル名の拡張子を `.md` に変更（例: `foo.pdf` → `foo.md`）
+- **Markdown の内容**: ページごとの `markdown` を順に結合し、ページ間は空行で区切ります。
 - **GUI**: 保存ダイアログが開き、任意の場所に保存
 - **Web**: ブラウザのダウンロードとして保存
 
@@ -144,6 +150,24 @@ GGUF prefetch をスキップする場合:
 .\scripts\verify-standalone.ps1 -OutputDir dist/standalone
 ```
 - `run.ps1` / `run.cmd` は起動前に GGUF の存在を検証し、欠落時は理由と想定配置を表示して停止します。
+
+#### llama.cpp 同梱（Vulkan + AVX2）
+- `scripts/build-standalone.ps1` は llama.cpp の **Vulkan 版**と **AVX2（CPU）版**の両方を取得し、同梱します。
+- 同梱構造（抜粋）:
+```text
+dist\standalone\bin\llama.cpp\
+  vulkan\llama-mtmd-cli.exe
+  avx2\llama-mtmd-cli.exe
+  llama-mtmd-cli.exe  # 互換用（avx2 のコピー）
+```
+- 実行時の自動選択:
+  - まず Vulkan 版を優先して使用します。
+  - Vulkan 版の起動に失敗した場合は、AVX2 版に自動でフォールバックします。
+- 明示的に固定したい場合は `LIGHTONOCR_LLAVA_CLI_PATH` を指定してください（未指定時は自動選択）。
+  - 例（PowerShell）:
+```powershell
+$env:LIGHTONOCR_LLAVA_CLI_PATH = "dist\\standalone\\bin\\llama.cpp\\avx2\\llama-mtmd-cli.exe"
+```
 
 ### パッケージ（zip）
 ```powershell
