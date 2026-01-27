@@ -20,9 +20,7 @@ def _make_images(count: int) -> list[Image.Image]:
     return [Image.new("RGB", (2, 2)) for _ in range(count)]
 
 
-def _patch_iter_pdf_images(
-    monkeypatch: pytest.MonkeyPatch, page_count: int
-) -> list[Image.Image]:
+def _patch_iter_pdf_images(monkeypatch: pytest.MonkeyPatch, page_count: int) -> list[Image.Image]:
     images = _make_images(page_count)
 
     def _fake_iter_pdf_images(
@@ -75,6 +73,9 @@ def test_pdf_to_markdown_reports_progress(monkeypatch: pytest.MonkeyPatch) -> No
     assert pdf_to_markdown(b"%PDF", on_progress=on_progress) == "ok\n\nok\n\nok"
     assert [(u.phase, u.current, u.total) for u in updates] == [
         (ProgressPhase.rendering, 0, 3),
+        (ProgressPhase.rendering, 1, 3),
+        (ProgressPhase.rendering, 2, 3),
+        (ProgressPhase.rendering, 3, 3),
         (ProgressPhase.done, 3, 3),
     ]
 
@@ -131,8 +132,28 @@ def test_pdf_to_json_reports_progress(monkeypatch: pytest.MonkeyPatch) -> None:
     assert payload["pages"][1]["markdown"] == "PAGE2"
     assert [(u.phase, u.current, u.total) for u in updates] == [
         (ProgressPhase.rendering, 0, 2),
+        (ProgressPhase.rendering, 1, 2),
+        (ProgressPhase.rendering, 2, 2),
         (ProgressPhase.done, 2, 2),
     ]
+
+
+def test_pdf_to_json_calls_on_page_per_page(monkeypatch: pytest.MonkeyPatch) -> None:
+    _patch_iter_pdf_images(monkeypatch, page_count=2)
+    monkeypatch.setattr(
+        "ragprep.ocr.lightonocr.ocr_image",
+        _sequence_texts(["PAGE1\r\n", " PAGE2 "]),
+    )
+
+    pages: list[tuple[int, str]] = []
+
+    def on_page(page_index: int, markdown: str) -> None:
+        pages.append((page_index, markdown))
+
+    payload = json.loads(pdf_to_json(b"%PDF", on_page=on_page))
+    assert payload["pages"][0]["markdown"] == "PAGE1"
+    assert payload["pages"][1]["markdown"] == "PAGE2"
+    assert pages == [(1, "PAGE1"), (2, "PAGE2")]
 
 
 def test_pdf_to_json_writes_document_artifact(

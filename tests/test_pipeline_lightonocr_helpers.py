@@ -61,6 +61,30 @@ def test_pdf_to_json_lightonocr_builds_schema(monkeypatch: pytest.MonkeyPatch) -
     assert data["pages"][1]["markdown"] == "PAGE2"
 
 
+def test_pdf_to_json_lightonocr_calls_on_page(monkeypatch: pytest.MonkeyPatch) -> None:
+    _patch_iter_pdf_images(monkeypatch, page_count=2)
+
+    outputs = iter(["PAGE1\r", " PAGE2 "])
+
+    def _fake_ocr_image(_img: Image.Image) -> str:
+        return next(outputs)
+
+    monkeypatch.setattr("ragprep.ocr.lightonocr.ocr_image", _fake_ocr_image)
+
+    pages: list[tuple[int, str]] = []
+
+    def on_page(page_index: int, markdown: str) -> None:
+        pages.append((page_index, markdown))
+
+    settings = get_settings()
+    result = pipeline._pdf_to_json_lightonocr(b"%PDF", settings=settings, on_page=on_page)
+    data = json.loads(result)
+
+    assert data["pages"][0]["markdown"] == "PAGE1"
+    assert data["pages"][1]["markdown"] == "PAGE2"
+    assert pages == [(1, "PAGE1"), (2, "PAGE2")]
+
+
 def test_pdf_to_json_lightonocr_error_includes_root_cause(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

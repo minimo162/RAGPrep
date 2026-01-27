@@ -33,6 +33,7 @@ class PdfToJsonProgress:
 
 
 JsonProgressCallback = Callable[[PdfToJsonProgress], None]
+PageCallback = Callable[[int, str], None]
 
 
 def _notify_progress(on_progress: ProgressCallback | None, update: PdfToMarkdownProgress) -> None:
@@ -100,6 +101,15 @@ def _pdf_to_markdown_lightonocr(
         normalized = str(text).replace("\r\n", "\n").replace("\r", "\n").strip()
         if normalized:
             parts.append(normalized)
+        _notify_progress(
+            on_progress,
+            PdfToMarkdownProgress(
+                phase=ProgressPhase.rendering,
+                current=page_index,
+                total=int(total_pages),
+                message="converting",
+            ),
+        )
 
     markdown = "\n\n".join(parts).strip()
 
@@ -120,6 +130,7 @@ def _pdf_to_json_lightonocr(
     *,
     settings: Settings,
     on_progress: JsonProgressCallback | None = None,
+    on_page: PageCallback | None = None,
 ) -> str:
     """
     LightOnOCR JSON schema (minimal):
@@ -171,7 +182,18 @@ def _pdf_to_json_lightonocr(
         except Exception as exc:  # noqa: BLE001
             raise RuntimeError(f"LightOnOCR failed on page {page_index}: {exc}") from exc
         normalized = str(text).replace("\r\n", "\n").replace("\r", "\n").strip()
+        if on_page is not None:
+            on_page(page_index, normalized)
         pages.append({"page": page_index, "markdown": normalized})
+        _notify_json_progress(
+            on_progress,
+            PdfToJsonProgress(
+                phase=ProgressPhase.rendering,
+                current=page_index,
+                total=int(total_pages),
+                message="converting",
+            ),
+        )
 
     payload = {
         "meta": {
@@ -237,6 +259,7 @@ def pdf_to_json(
     pdf_bytes: bytes,
     *,
     on_progress: JsonProgressCallback | None = None,
+    on_page: PageCallback | None = None,
     page_output_dir: Path | None = None,
 ) -> str:
     """
@@ -244,6 +267,10 @@ def pdf_to_json(
 
     This function is intentionally pure and synchronous; it converts the entire document
     in a single pass via LightOnOCR (GGUF).
+
+    Args:
+        on_page: Optional callback invoked after each page is processed.
+            The callback receives (page_index, markdown).
     """
 
     if not pdf_bytes:
@@ -262,10 +289,10 @@ def pdf_to_json(
         pdf_bytes,
         settings=settings,
         on_progress=on_progress,
+        on_page=on_page,
     )
 
     if page_output_dir is not None:
         _write_text_artifact(page_output_dir / "document.json", json_output)
 
     return json_output
-
