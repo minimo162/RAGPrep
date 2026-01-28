@@ -529,7 +529,7 @@ if __name__ == "__main__":
         Write-Host "Skipping GGUF prefetch (-SkipGgufPrefetch)." -ForegroundColor Yellow
     }
 
-    # Bundle llama.cpp (vision CLI) for standalone
+    # Bundle llama.cpp (llama-server) for standalone
     # NOTE: We pin URL + SHA256 to avoid supply-chain drift.
     $currentStep = "bundle llama.cpp"
     $llamaCppTag = "b7815"
@@ -580,11 +580,14 @@ if __name__ == "__main__":
         Write-Host "Extracting llama.cpp bundle ($variantName)..." -ForegroundColor Cyan
         Expand-Archive -LiteralPath $variantArchivePath -DestinationPath $variantExtractDir -Force
 
-        $mtmdCliExe = Join-Path $variantExtractDir "llama-mtmd-cli.exe"
-        if (-not (Test-Path -LiteralPath $mtmdCliExe -PathType Leaf)) {
+        $serverExe = Join-Path $variantExtractDir "llama-server.exe"
+        if (-not (Test-Path -LiteralPath $serverExe -PathType Leaf)) {
             $available = (Get-ChildItem -Path $variantExtractDir -File -Filter "*.exe" | Select-Object -ExpandProperty Name) -join ", "
-            throw "Could not locate llama-mtmd-cli.exe in the llama.cpp bundle ($variantName). Available: $available"
+            throw "Could not locate llama-server.exe in the llama.cpp bundle ($variantName). Available: $available"
         }
+
+        $mtmdCliExe = Join-Path $variantExtractDir "llama-mtmd-cli.exe"
+        $hasMtmdCli = Test-Path -LiteralPath $mtmdCliExe -PathType Leaf
 
         $llavaCliCandidates = @(
             (Join-Path $variantExtractDir "llava-cli.exe"),
@@ -595,8 +598,13 @@ if __name__ == "__main__":
         $variantBinDir = Join-Path $llamaCppBinDir $variantName
         New-Item -ItemType Directory -Force -Path $variantBinDir | Out-Null
 
-        # Bundle the preferred multimodal CLI (llama-mtmd-cli.exe).
-        Copy-Item -Force -LiteralPath $mtmdCliExe -Destination (Join-Path $variantBinDir "llama-mtmd-cli.exe")
+        # Bundle llama-server.exe (primary).
+        Copy-Item -Force -LiteralPath $serverExe -Destination (Join-Path $variantBinDir "llama-server.exe")
+
+        # Bundle the multimodal CLI (llama-mtmd-cli.exe) for backward compatibility if present.
+        if ($hasMtmdCli) {
+            Copy-Item -Force -LiteralPath $mtmdCliExe -Destination (Join-Path $variantBinDir "llama-mtmd-cli.exe")
+        }
 
         # Bundle llava-cli.exe for backward compatibility (if present in the release).
         # Normalize to llava-cli.exe for runtime discovery.
@@ -610,7 +618,8 @@ if __name__ == "__main__":
         $bundledVariants += [pscustomobject]@{
             Name = $variantName
             BinDir = $variantBinDir
-            MtmdCli = Join-Path $variantBinDir "llama-mtmd-cli.exe"
+            ServerExe = Join-Path $variantBinDir "llama-server.exe"
+            MtmdCli = if ($hasMtmdCli) { Join-Path $variantBinDir "llama-mtmd-cli.exe" } else { "" }
             LlavaCli = if ($llavaCliExe) { Join-Path $variantBinDir "llava-cli.exe" } else { "" }
         }
     }
@@ -618,8 +627,13 @@ if __name__ == "__main__":
     # Keep a root-level AVX2 copy for backward compatibility with existing run scripts.
     $avx2BinDir = Join-Path $llamaCppBinDir "avx2"
     if (Test-Path -LiteralPath $avx2BinDir -PathType Container) {
+        $rootServerExe = Join-Path $llamaCppBinDir "llama-server.exe"
+        Copy-Item -Force -LiteralPath (Join-Path $avx2BinDir "llama-server.exe") -Destination $rootServerExe
+
         $rootMtmdCli = Join-Path $llamaCppBinDir "llama-mtmd-cli.exe"
-        Copy-Item -Force -LiteralPath (Join-Path $avx2BinDir "llama-mtmd-cli.exe") -Destination $rootMtmdCli
+        if (Test-Path -LiteralPath (Join-Path $avx2BinDir "llama-mtmd-cli.exe") -PathType Leaf) {
+            Copy-Item -Force -LiteralPath (Join-Path $avx2BinDir "llama-mtmd-cli.exe") -Destination $rootMtmdCli
+        }
 
         $avx2LlavaCli = Join-Path $avx2BinDir "llava-cli.exe"
         if (Test-Path -LiteralPath $avx2LlavaCli -PathType Leaf) {
@@ -632,13 +646,16 @@ if __name__ == "__main__":
 
     Write-Host "Bundled llama.cpp binaries:" -ForegroundColor Cyan
     foreach ($entry in $bundledVariants) {
-        Write-Host "  $($entry.Name): $(Join-Path $entry.BinDir "llama-mtmd-cli.exe")" -ForegroundColor DarkGray
+        Write-Host "  $($entry.Name): $(Join-Path $entry.BinDir "llama-server.exe")" -ForegroundColor DarkGray
         if ($entry.LlavaCli) {
             Write-Host "    llava-cli: $($entry.LlavaCli)" -ForegroundColor DarkGray
         }
+        if ($entry.MtmdCli) {
+            Write-Host "    llama-mtmd-cli: $($entry.MtmdCli)" -ForegroundColor DarkGray
+        }
     }
-    if (Test-Path -LiteralPath (Join-Path $llamaCppBinDir "llama-mtmd-cli.exe") -PathType Leaf) {
-        Write-Host "  root (compat): $(Join-Path $llamaCppBinDir "llama-mtmd-cli.exe")" -ForegroundColor DarkGray
+    if (Test-Path -LiteralPath (Join-Path $llamaCppBinDir "llama-server.exe") -PathType Leaf) {
+        Write-Host "  root (compat): $(Join-Path $llamaCppBinDir "llama-server.exe")" -ForegroundColor DarkGray
     }
 
     $currentStep = "write run scripts"
