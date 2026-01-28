@@ -37,6 +37,45 @@ function Assert-File {
     }
 }
 
+function New-LogDirectory {
+    param([string]$BaseDir)
+    $logDir = Join-Path $BaseDir "logs"
+    New-Item -ItemType Directory -Force -Path $logDir | Out-Null
+    return $logDir
+}
+
+function Read-LogTail {
+    param([string]$Path, [int]$Lines = 80)
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
+        return $null
+    }
+    try {
+        $content = Get-Content -LiteralPath $Path -Tail $Lines -ErrorAction SilentlyContinue
+        if ($content) {
+            return ($content -join [Environment]::NewLine)
+        }
+    }
+    catch {
+    }
+    return $null
+}
+
+function Get-PortStatus {
+    param([int]$Port)
+    try {
+        $cmd = Get-Command Get-NetTCPConnection -ErrorAction SilentlyContinue
+        if ($cmd) {
+            $connections = Get-NetTCPConnection -LocalPort $Port -ErrorAction SilentlyContinue
+            if ($connections) {
+                return "in use"
+            }
+        }
+    }
+    catch {
+    }
+    return "not listening"
+}
+
 $resolvedOutputDir = Resolve-OutputDir -Dir $OutputDir -Root $repoRoot
 
 $pythonExe = Join-Path $resolvedOutputDir "python/python.exe"
@@ -97,6 +136,10 @@ $serverExe = Resolve-LlamaServerExe `
 
 $serverProcess = $null
 $startedServer = $false
+$logDir = $null
+$stdoutLog = $null
+$stderrLog = $null
+$metaLog = $null
 try {
     if (-not (Test-LlamaServer -BaseUrl $serverUrl)) {
         $serverUri = [Uri]$serverUrl
@@ -106,19 +149,70 @@ try {
             "--host", $serverUri.Host,
             "--port", $serverUri.Port
         )
-        $serverProcess = Start-Process -FilePath $serverExe -ArgumentList $serverArgs -PassThru -WindowStyle Minimized
+        $logDir = New-LogDirectory -BaseDir $resolvedOutputDir
+        $stdoutLog = Join-Path $logDir "llama-server.stdout.log"
+        $stderrLog = Join-Path $logDir "llama-server.stderr.log"
+        $metaLog = Join-Path $logDir "llama-server.meta.log"
+        Remove-Item -LiteralPath $stdoutLog, $stderrLog, $metaLog -ErrorAction SilentlyContinue
+        @(
+            "start: $(Get-Date -Format o)"
+            "serverExe: $serverExe"
+            "serverUrl: $serverUrl"
+            "args: $($serverArgs -join ' ')"
+            "ggufModel: $ggufModelPath"
+            "ggufMmproj: $ggufMmprojPath"
+        ) | Set-Content -LiteralPath $metaLog -Encoding UTF8
+
+        $serverProcess = Start-Process `
+            -FilePath $serverExe `
+            -ArgumentList $serverArgs `
+            -PassThru `
+            -WindowStyle Minimized `
+            -RedirectStandardOutput $stdoutLog `
+            -RedirectStandardError $stderrLog
         $startedServer = $true
 
         $ready = $false
+        $exitedEarly = $false
+        $exitCode = $null
         for ($i = 0; $i -lt 30; $i++) {
             Start-Sleep -Milliseconds 500
+            if ($serverProcess -and $serverProcess.HasExited) {
+                $exitedEarly = $true
+                $exitCode = $serverProcess.ExitCode
+                break
+            }
             if (Test-LlamaServer -BaseUrl $serverUrl) {
                 $ready = $true
                 break
             }
         }
         if (-not $ready) {
-            throw "llama-server failed to start: $serverUrl"
+            $stderrTail = Read-LogTail -Path $stderrLog -Lines 80
+            $stdoutTail = if (-not $stderrTail) { Read-LogTail -Path $stdoutLog -Lines 80 } else { $null }
+            $portStatus = Get-PortStatus -Port $serverUri.Port
+            $detailLines = @(
+                "llama-server failed to start: $serverUrl",
+                "server exe: $serverExe",
+                "exit: " + ($(if ($exitedEarly) { "exited (ExitCode=$exitCode)" } else { "not exited within wait window" })),
+                "port: $($serverUri.Port) ($portStatus)",
+                "stdout log: $stdoutLog",
+                "stderr log: $stderrLog",
+                "meta log: $metaLog"
+            )
+            if ($stderrTail) {
+                $detailLines += ""
+                $detailLines += "stderr tail:"
+                $detailLines += $stderrTail
+            }
+            elseif ($stdoutTail) {
+                $detailLines += ""
+                $detailLines += "stdout tail:"
+                $detailLines += $stdoutTail
+            }
+            $detailLines += ""
+            $detailLines += "Hint: check GPU/Vulkan availability, model load time, and port conflicts."
+            throw ($detailLines -join [Environment]::NewLine)
         }
     }
     Write-Host "llama-server health check passed." -ForegroundColor Green
