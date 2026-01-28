@@ -53,6 +53,12 @@ def test_run_scripts_have_gguf_preflight_checks() -> None:
     assert "Missing GGUF mmproj" in content
 
 
+def test_run_ps1_template_escapes_llama_server_candidates_subexpression() -> None:
+    content = _read_build_standalone_ps1()
+    assert "Missing llama-server.exe under: $(`$llamaServerCandidates -join ', ')" not in content
+    assert "Missing llama-server.exe under: `$(`$llamaServerCandidates -join ', ')" in content
+
+
 def test_build_standalone_calls_verify_script() -> None:
     content = _read_build_standalone_ps1()
     assert 'verify standalone output' in content
