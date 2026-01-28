@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import logging
-
 import pytest
 
 from ragprep import config
@@ -11,7 +9,7 @@ def test_default_pdf_backend_is_lightonocr(monkeypatch: pytest.MonkeyPatch) -> N
     monkeypatch.delenv("RAGPREP_PDF_BACKEND", raising=False)
     settings = config.get_settings()
     assert settings.pdf_backend == "lightonocr"
-    assert settings.lightonocr_backend == "cli"
+    assert settings.lightonocr_backend == "llama-server"
 
 
 def test_pdf_backend_accepts_lightonocr(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -40,27 +38,8 @@ def test_lightonocr_backend_rejects_invalid(monkeypatch: pytest.MonkeyPatch) -> 
 
 def test_lightonocr_env_values_trimmed(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("RAGPREP_PDF_BACKEND", raising=False)
-    monkeypatch.setenv("LIGHTONOCR_GGUF_MODEL_PATH", "  model.gguf  ")
-    monkeypatch.setenv("LIGHTONOCR_GGUF_MMPROJ_PATH", "  mmproj.gguf ")
-    monkeypatch.setenv("LIGHTONOCR_LLAVA_CLI_PATH", "  cli.exe ")
     monkeypatch.setenv("LIGHTONOCR_MODEL", "  model ")
     monkeypatch.setenv("LIGHTONOCR_LLAMA_SERVER_URL", "  http://localhost:8080 ")
     settings = config.get_settings()
-    assert settings.lightonocr_model_path == "model.gguf"
-    assert settings.lightonocr_mmproj_path == "mmproj.gguf"
-    assert settings.lightonocr_llava_cli_path == "cli.exe"
     assert settings.lightonocr_model == "model"
     assert settings.lightonocr_llama_server_url == "http://localhost:8080"
-
-
-def test_deprecated_llava_cli_path_warns(
-    monkeypatch: pytest.MonkeyPatch,
-    caplog: pytest.LogCaptureFixture,
-) -> None:
-    monkeypatch.setenv("LIGHTONOCR_LLAVA_CLI_PATH", "cli.exe")
-    caplog.set_level(logging.WARNING, logger="ragprep.config")
-    config.get_settings()
-    assert any(
-        "LIGHTONOCR_LLAVA_CLI_PATH" in message and "deprecated" in message.lower()
-        for message in caplog.messages
-    )
