@@ -2,7 +2,9 @@
 param(
     [string]$OutputDir = "dist/standalone",
     [string]$GgufModelFile = "LightOnOCR-2-1B-Q6_K.gguf",
-    [string]$GgufMmprojFile = "mmproj-BF16.gguf"
+    [string]$GgufMmprojFile = "mmproj-BF16.gguf",
+    [string]$ServerUrl = "http://127.0.0.1:8080",
+    [switch]$AutoPort
 )
 
 Set-StrictMode -Version Latest
@@ -76,6 +78,24 @@ function Get-PortStatus {
     return "not listening"
 }
 
+function Get-FreeTcpPort {
+    param([string]$Host = "127.0.0.1")
+    $ip = [System.Net.IPAddress]::Loopback
+    try {
+        $parsed = [System.Net.IPAddress]::Parse($Host)
+        if ($parsed) {
+            $ip = $parsed
+        }
+    }
+    catch {
+    }
+    $listener = [System.Net.Sockets.TcpListener]::new($ip, 0)
+    $listener.Start()
+    $port = $listener.LocalEndpoint.Port
+    $listener.Stop()
+    return $port
+}
+
 $resolvedOutputDir = Resolve-OutputDir -Dir $OutputDir -Root $repoRoot
 
 $pythonExe = Join-Path $resolvedOutputDir "python/python.exe"
@@ -128,7 +148,7 @@ function Test-LlamaServer {
     }
 }
 
-$serverUrl = "http://127.0.0.1:8080"
+$serverUrl = $ServerUrl
 $serverExe = Resolve-LlamaServerExe `
     -RootExe $llamaServerExe `
     -Avx2Exe $llamaServerAvx2Exe `
@@ -140,14 +160,22 @@ $logDir = $null
 $stdoutLog = $null
 $stderrLog = $null
 $metaLog = $null
+$effectiveServerUrl = $serverUrl
+$effectiveServerUri = $null
 try {
     if (-not (Test-LlamaServer -BaseUrl $serverUrl)) {
         $serverUri = [Uri]$serverUrl
+        $portStatus = Get-PortStatus -Port $serverUri.Port
+        if ($AutoPort -or $portStatus -eq "in use") {
+            $freePort = Get-FreeTcpPort -Host $serverUri.Host
+            $effectiveServerUrl = "http://$($serverUri.Host):$freePort"
+        }
+        $effectiveServerUri = [Uri]$effectiveServerUrl
         $serverArgs = @(
             "-m", $ggufModelPath,
             "--mmproj", $ggufMmprojPath,
-            "--host", $serverUri.Host,
-            "--port", $serverUri.Port
+            "--host", $effectiveServerUri.Host,
+            "--port", $effectiveServerUri.Port
         )
         $logDir = New-LogDirectory -BaseDir $resolvedOutputDir
         $stdoutLog = Join-Path $logDir "llama-server.stdout.log"
@@ -158,6 +186,8 @@ try {
             "start: $(Get-Date -Format o)"
             "serverExe: $serverExe"
             "serverUrl: $serverUrl"
+            "effectiveServerUrl: $effectiveServerUrl"
+            "autoPort: $AutoPort"
             "args: $($serverArgs -join ' ')"
             "ggufModel: $ggufModelPath"
             "ggufMmproj: $ggufMmprojPath"
@@ -182,7 +212,7 @@ try {
                 $exitCode = $serverProcess.ExitCode
                 break
             }
-            if (Test-LlamaServer -BaseUrl $serverUrl) {
+            if (Test-LlamaServer -BaseUrl $effectiveServerUrl) {
                 $ready = $true
                 break
             }
@@ -190,12 +220,12 @@ try {
         if (-not $ready) {
             $stderrTail = Read-LogTail -Path $stderrLog -Lines 80
             $stdoutTail = if (-not $stderrTail) { Read-LogTail -Path $stdoutLog -Lines 80 } else { $null }
-            $portStatus = Get-PortStatus -Port $serverUri.Port
             $detailLines = @(
-                "llama-server failed to start: $serverUrl",
+                "llama-server failed to start: $effectiveServerUrl",
+                "requested url: $serverUrl",
                 "server exe: $serverExe",
                 "exit: " + ($(if ($exitedEarly) { "exited (ExitCode=$exitCode)" } else { "not exited within wait window" })),
-                "port: $($serverUri.Port) ($portStatus)",
+                "port: $($effectiveServerUri.Port) ($portStatus)",
                 "stdout log: $stdoutLog",
                 "stderr log: $stderrLog",
                 "meta log: $metaLog"
