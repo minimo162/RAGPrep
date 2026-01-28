@@ -79,6 +79,77 @@ def test_pdf_to_markdown_reports_progress(monkeypatch: pytest.MonkeyPatch) -> No
     ]
 
 
+def test_pdf_to_markdown_includes_page_index_in_error_and_keeps_partial_pages(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    encoded_pages = _patch_iter_pdf_page_png_base64(monkeypatch, page_count=3)
+
+    def _fake_ocr_image(encoded: str) -> str:
+        if encoded == encoded_pages[0]:
+            return "PAGE1"
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr("ragprep.ocr.lightonocr.ocr_image_base64", _fake_ocr_image)
+
+    pages: list[tuple[int, str]] = []
+
+    def on_page(page_index: int, markdown: str) -> None:
+        pages.append((page_index, markdown))
+
+    with pytest.raises(RuntimeError) as exc_info:
+        pdf_to_markdown(b"%PDF", on_page=on_page)
+
+    message = str(exc_info.value)
+    assert "page 2" in message
+    assert "Hint:" in message
+    assert pages == [(1, "PAGE1")]
+
+
+def test_pdf_to_markdown_falls_back_to_per_page_render_when_iterator_ends_early(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def _fake_iter_pdf_page_png_base64(
+        _pdf_bytes: bytes,
+        *,
+        dpi: int | None = None,
+        max_edge: int | None = None,
+        max_pages: int | None = None,
+        max_bytes: int | None = None,
+    ) -> tuple[int, object]:
+        return 2, iter(["BASE64_PAGE_1"])
+
+    render_calls: list[int] = []
+
+    def _fake_render_pdf_page_png_base64(
+        _pdf_bytes: bytes,
+        *,
+        page_index: int,
+        dpi: int | None = None,
+        max_edge: int | None = None,
+        max_pages: int | None = None,
+        max_bytes: int | None = None,
+    ) -> tuple[int, str]:
+        render_calls.append(int(page_index))
+        return 2, f"BASE64_PAGE_{page_index}"
+
+    def _fake_ocr_image(encoded: str) -> str:
+        page = int(encoded.rsplit("_", 1)[-1])
+        return f"PAGE{page}"
+
+    monkeypatch.setattr(
+        "ragprep.pdf_render.iter_pdf_page_png_base64",
+        _fake_iter_pdf_page_png_base64,
+    )
+    monkeypatch.setattr(
+        "ragprep.pdf_render.render_pdf_page_png_base64",
+        _fake_render_pdf_page_png_base64,
+    )
+    monkeypatch.setattr("ragprep.ocr.lightonocr.ocr_image_base64", _fake_ocr_image)
+
+    assert pdf_to_markdown(b"%PDF") == "PAGE1\n\nPAGE2"
+    assert render_calls == [2]
+
+
 def test_pdf_to_markdown_writes_document_artifact(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
