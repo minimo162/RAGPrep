@@ -15,12 +15,19 @@ def _read_verify_standalone_ps1() -> str:
     return script_path.read_text(encoding="utf-8", errors="replace")
 
 
+def _read_selfcheck_llava_cli_runtime_ps1() -> str:
+    repo_root = Path(__file__).resolve().parents[1]
+    script_path = repo_root / "scripts" / "selfcheck-llava-cli-runtime.ps1"
+    return script_path.read_text(encoding="utf-8", errors="replace")
+
+
 def test_run_cmd_template_does_not_mkdir_empty_hf_home() -> None:
     content = _read_build_standalone_ps1()
     assert 'if not exist "%ROOT%data\\hf" mkdir "%ROOT%data\\hf"' in content
     assert 'if not exist "%HF_HOME%" mkdir "%HF_HOME%"' not in content
     assert 'if "%RAGPREP_PDF_BACKEND%"=="" (' in content
     assert "set RAGPREP_PDF_BACKEND=lightonocr" in content
+    assert "set LIGHTONOCR_REQUEST_TIMEOUT_SECONDS=120" in content
     assert "^| Out-Null" not in content
     expected = (
         '"%ROOT%python\\python.exe" -m ragprep.desktop --host %BIND_HOST% '
@@ -37,6 +44,7 @@ def test_run_ps1_template_avoids_host_automatic_variable() -> None:
     assert "& `$pythonExe -m ragprep.desktop --host `$BindHost --port `$Port" in content
     assert '[string]`$Host = "127.0.0.1",' not in content
     assert "`$env:RAGPREP_PDF_BACKEND = \"lightonocr\"" in content
+    assert "`$env:LIGHTONOCR_REQUEST_TIMEOUT_SECONDS = \"120\"" in content
 
 
 def test_build_standalone_prefetch_has_direct_download_and_artifact_checks() -> None:
@@ -90,3 +98,9 @@ def test_verify_standalone_checks_required_artifacts() -> None:
     assert "data/models/lightonocr-gguf" in content
     assert "LightOnOCR-2-1B-Q6_K.gguf" in content
     assert "mmproj-BF16.gguf" in content
+
+
+def test_selfcheck_timeout_default_updated() -> None:
+    content = _read_selfcheck_llava_cli_runtime_ps1()
+    assert "LIGHTONOCR_REQUEST_TIMEOUT_SECONDS (default: 120)" in content
+    assert "LIGHTONOCR_REQUEST_TIMEOUT_SECONDS\" -DefaultValue 120" in content

@@ -35,11 +35,15 @@ LightOnOCR は OpenAI互換API経由で llama-server に送信します。
 - `LIGHTONOCR_BACKEND`（固定: `llama-server`）
 - `LIGHTONOCR_LLAMA_SERVER_URL`（デフォルト: `http://127.0.0.1:8080`）
 - `LIGHTONOCR_MODEL`（`/v1/models` の id）
-- `LIGHTONOCR_REQUEST_TIMEOUT_SECONDS`（デフォルト: `60`）
+- `LIGHTONOCR_REQUEST_TIMEOUT_SECONDS`（デフォルト: `120`）
 
 ### 任意の調整（llama-server）
 - `LIGHTONOCR_TEMPERATURE`（デフォルト: `0.2`）
 - `LIGHTONOCR_MAX_NEW_TOKENS`（デフォルト: `1000`）
+
+### トラブルシュート（タイムアウト）
+- 初回はモデル読み込みで時間がかかるため、`LIGHTONOCR_REQUEST_TIMEOUT_SECONDS` を増やしてください（standalone の run スクリプト既定は 120 秒）。
+- `llama-server` が起動しているか、`LIGHTONOCR_LLAMA_SERVER_URL` にアクセスできるか確認してください。
 
 ## ページ単位ストリーミング出力
 - PDFは1ページずつ処理し、部分出力をストリーミング表示します。
@@ -116,7 +120,7 @@ uv run python scripts/bench_pdf_to_markdown.py --pdf .\path\to\input.pdf --repea
   - `LIGHTONOCR_BACKEND`（固定: `llama-server`）
   - `LIGHTONOCR_LLAMA_SERVER_URL`（デフォルト: `http://127.0.0.1:8080`）
   - `LIGHTONOCR_MODEL`（`/v1/models` の id）
-  - `LIGHTONOCR_REQUEST_TIMEOUT_SECONDS`（デフォルト: `60`）
+  - `LIGHTONOCR_REQUEST_TIMEOUT_SECONDS`（デフォルト: `120`）
   - `LIGHTONOCR_MAX_NEW_TOKENS`（デフォルト: `1000`）
   - `LIGHTONOCR_TEMPERATURE`（デフォルト: `0.2`）
 
