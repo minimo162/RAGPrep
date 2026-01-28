@@ -20,7 +20,7 @@ $ProgressPreference = "SilentlyContinue"
 #   - LIGHTONOCR_BACKEND (must be llama-server)
 #   - LIGHTONOCR_LLAMA_SERVER_URL (default: http://127.0.0.1:8080)
 #   - LIGHTONOCR_MODEL (required)
-#   - LIGHTONOCR_REQUEST_TIMEOUT_SECONDS (default: 60)
+#   - LIGHTONOCR_REQUEST_TIMEOUT_SECONDS (default: 120)
 
 function Normalize-EnvValue {
     param([string]$Value)
@@ -125,7 +125,7 @@ if ($backend -ne "llama-server") {
 }
 
 $serverUrl = Normalize-ServerUrl -Value $env:LIGHTONOCR_LLAMA_SERVER_URL -DefaultValue "http://127.0.0.1:8080"
-$timeoutSec = Get-PositiveInt -Name "LIGHTONOCR_REQUEST_TIMEOUT_SECONDS" -DefaultValue 60
+$timeoutSec = Get-PositiveInt -Name "LIGHTONOCR_REQUEST_TIMEOUT_SECONDS" -DefaultValue 120
 $modelName = Normalize-EnvValue -Value $env:LIGHTONOCR_MODEL
 
 Write-Host "Backend:       llama-server" -ForegroundColor Green
