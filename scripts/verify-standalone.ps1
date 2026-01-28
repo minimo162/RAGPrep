@@ -4,7 +4,9 @@ param(
     [string]$GgufModelFile = "LightOnOCR-2-1B-Q6_K.gguf",
     [string]$GgufMmprojFile = "mmproj-BF16.gguf",
     [string]$ServerUrl = "http://127.0.0.1:8080",
-    [switch]$AutoPort
+    [switch]$AutoPort,
+    [ValidateSet("auto", "vulkan", "avx2", "root")]
+    [string]$LlamaVariant = "auto"
 )
 
 Set-StrictMode -Version Latest
@@ -136,6 +138,30 @@ function Resolve-LlamaServerExe {
     return $RootExe
 }
 
+function Resolve-LlamaServerCandidates {
+    param([string]$RootExe, [string]$Avx2Exe, [string]$VulkanExe, [string]$Variant)
+    if ($Variant -eq "vulkan") {
+        return @($VulkanExe)
+    }
+    if ($Variant -eq "avx2") {
+        return @($Avx2Exe)
+    }
+    if ($Variant -eq "root") {
+        return @($RootExe)
+    }
+    return @($VulkanExe, $Avx2Exe, $RootExe)
+}
+
+function Select-LlamaServerExe {
+    param([string[]]$Candidates)
+    foreach ($candidate in $Candidates) {
+        if (Test-Path -LiteralPath $candidate -PathType Leaf) {
+            return $candidate
+        }
+    }
+    return $null
+}
+
 function Test-LlamaServer {
     param([string]$BaseUrl)
     try {
@@ -149,10 +175,15 @@ function Test-LlamaServer {
 }
 
 $serverUrl = $ServerUrl
-$serverExe = Resolve-LlamaServerExe `
+$serverCandidates = Resolve-LlamaServerCandidates `
     -RootExe $llamaServerExe `
     -Avx2Exe $llamaServerAvx2Exe `
-    -VulkanExe $llamaServerVulkanExe
+    -VulkanExe $llamaServerVulkanExe `
+    -Variant $LlamaVariant
+$serverExe = Select-LlamaServerExe -Candidates $serverCandidates
+if (-not $serverExe) {
+    throw "Missing llama-server.exe for variant: $LlamaVariant"
+}
 
 $serverProcess = $null
 $startedServer = $false
@@ -162,6 +193,8 @@ $stderrLog = $null
 $metaLog = $null
 $effectiveServerUrl = $serverUrl
 $effectiveServerUri = $null
+$selectedServerExe = $null
+$selectedVariant = $LlamaVariant
 try {
     if (-not (Test-LlamaServer -BaseUrl $serverUrl)) {
         $serverUri = [Uri]$serverUrl
@@ -171,50 +204,77 @@ try {
             $effectiveServerUrl = "http://$($serverUri.Host):$freePort"
         }
         $effectiveServerUri = [Uri]$effectiveServerUrl
-        $serverArgs = @(
-            "-m", $ggufModelPath,
-            "--mmproj", $ggufMmprojPath,
-            "--host", $effectiveServerUri.Host,
-            "--port", $effectiveServerUri.Port
-        )
         $logDir = New-LogDirectory -BaseDir $resolvedOutputDir
         $stdoutLog = Join-Path $logDir "llama-server.stdout.log"
         $stderrLog = Join-Path $logDir "llama-server.stderr.log"
         $metaLog = Join-Path $logDir "llama-server.meta.log"
         Remove-Item -LiteralPath $stdoutLog, $stderrLog, $metaLog -ErrorAction SilentlyContinue
-        @(
-            "start: $(Get-Date -Format o)"
-            "serverExe: $serverExe"
-            "serverUrl: $serverUrl"
-            "effectiveServerUrl: $effectiveServerUrl"
-            "autoPort: $AutoPort"
-            "args: $($serverArgs -join ' ')"
-            "ggufModel: $ggufModelPath"
-            "ggufMmproj: $ggufMmprojPath"
-        ) | Set-Content -LiteralPath $metaLog -Encoding UTF8
-
-        $serverProcess = Start-Process `
-            -FilePath $serverExe `
-            -ArgumentList $serverArgs `
-            -PassThru `
-            -WindowStyle Minimized `
-            -RedirectStandardOutput $stdoutLog `
-            -RedirectStandardError $stderrLog
-        $startedServer = $true
 
         $ready = $false
         $exitedEarly = $false
         $exitCode = $null
-        for ($i = 0; $i -lt 30; $i++) {
-            Start-Sleep -Milliseconds 500
-            if ($serverProcess -and $serverProcess.HasExited) {
-                $exitedEarly = $true
-                $exitCode = $serverProcess.ExitCode
+        foreach ($candidate in $serverCandidates) {
+            if (-not (Test-Path -LiteralPath $candidate -PathType Leaf)) {
+                continue
+            }
+            $selectedServerExe = $candidate
+            $selectedVariant = if ($candidate -eq $llamaServerVulkanExe) {
+                "vulkan"
+            }
+            elseif ($candidate -eq $llamaServerAvx2Exe) {
+                "avx2"
+            }
+            else {
+                "root"
+            }
+            $serverArgs = @(
+                "-m", $ggufModelPath,
+                "--mmproj", $ggufMmprojPath,
+                "--host", $effectiveServerUri.Host,
+                "--port", $effectiveServerUri.Port
+            )
+            @(
+                "start: $(Get-Date -Format o)"
+                "serverExe: $selectedServerExe"
+                "requestedVariant: $LlamaVariant"
+                "selectedVariant: $selectedVariant"
+                "serverUrl: $serverUrl"
+                "effectiveServerUrl: $effectiveServerUrl"
+                "autoPort: $AutoPort"
+                "args: $($serverArgs -join ' ')"
+                "ggufModel: $ggufModelPath"
+                "ggufMmproj: $ggufMmprojPath"
+            ) | Set-Content -LiteralPath $metaLog -Encoding UTF8
+
+            $serverProcess = Start-Process `
+                -FilePath $selectedServerExe `
+                -ArgumentList $serverArgs `
+                -PassThru `
+                -WindowStyle Minimized `
+                -RedirectStandardOutput $stdoutLog `
+                -RedirectStandardError $stderrLog
+            $startedServer = $true
+
+            $ready = $false
+            $exitedEarly = $false
+            $exitCode = $null
+            for ($i = 0; $i -lt 30; $i++) {
+                Start-Sleep -Milliseconds 500
+                if ($serverProcess -and $serverProcess.HasExited) {
+                    $exitedEarly = $true
+                    $exitCode = $serverProcess.ExitCode
+                    break
+                }
+                if (Test-LlamaServer -BaseUrl $effectiveServerUrl) {
+                    $ready = $true
+                    break
+                }
+            }
+            if ($ready) {
                 break
             }
-            if (Test-LlamaServer -BaseUrl $effectiveServerUrl) {
-                $ready = $true
-                break
+            if ($serverProcess -and -not $serverProcess.HasExited) {
+                Stop-Process -Id $serverProcess.Id -Force -ErrorAction SilentlyContinue
             }
         }
         if (-not $ready) {
@@ -223,7 +283,8 @@ try {
             $detailLines = @(
                 "llama-server failed to start: $effectiveServerUrl",
                 "requested url: $serverUrl",
-                "server exe: $serverExe",
+                "requested variant: $LlamaVariant",
+                "selected exe: $selectedServerExe",
                 "exit: " + ($(if ($exitedEarly) { "exited (ExitCode=$exitCode)" } else { "not exited within wait window" })),
                 "port: $($effectiveServerUri.Port) ($portStatus)",
                 "stdout log: $stdoutLog",
