@@ -8,7 +8,8 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 $ProgressPreference = "SilentlyContinue"
 
-# Self-check for the llama.cpp multimodal CLI based OCR runtime prerequisites. No network access required.
+# Self-check for the LightOnOCR runtime (llama-server preferred).
+# This script now checks server reachability and model availability.
 #
 # Run:
 #   powershell -ExecutionPolicy Bypass -File scripts/selfcheck-llava-cli-runtime.ps1
@@ -18,12 +19,13 @@ $ProgressPreference = "SilentlyContinue"
 #
 # Notes:
 # - Respects the app env vars:
-#   - LIGHTONOCR_GGUF_MODEL_PATH
-#   - LIGHTONOCR_GGUF_MMPROJ_PATH
-#   - LIGHTONOCR_LLAVA_CLI_PATH (can point to llama-mtmd-cli.exe / llava-cli.exe / llama-llava-cli.exe)
-# - If the GGUF env vars are unset, and a standalone dir is available, this script falls back to:
-#   - <standalone>/data/models/lightonocr-gguf/LightOnOCR-2-1B-Q6_K.gguf
-#   - <standalone>/data/models/lightonocr-gguf/mmproj-BF16.gguf
+#   - LIGHTONOCR_BACKEND: cli | llama-server (default: llama-server for this script)
+#   - LIGHTONOCR_LLAMA_SERVER_URL (default: http://127.0.0.1:8080)
+#   - LIGHTONOCR_MODEL (required for llama-server)
+#   - LIGHTONOCR_REQUEST_TIMEOUT_SECONDS
+#   - LIGHTONOCR_LLAVA_CLI_PATH (deprecated, cli only)
+#   - LIGHTONOCR_GGUF_MODEL_PATH / LIGHTONOCR_GGUF_MMPROJ_PATH (cli only)
+# - CLI selfcheck is kept for compatibility but deprecated.
 
 function Assert-True {
     param(
@@ -102,6 +104,82 @@ function Resolve-PathFromRepo {
         $p = Join-Path $RepoRoot $p
     }
     return [System.IO.Path]::GetFullPath($p)
+}
+
+function Get-PositiveInt {
+    param(
+        [Parameter(Mandatory = $true)][string]$Name,
+        [Parameter(Mandatory = $true)][int]$DefaultValue
+    )
+
+    $raw = Normalize-EnvPath -Value (Get-Item "Env:$Name" -ErrorAction SilentlyContinue).Value
+    if ([string]::IsNullOrWhiteSpace($raw)) {
+        return $DefaultValue
+    }
+
+    $parsed = 0
+    if (-not [int]::TryParse($raw, [ref]$parsed)) {
+        throw "$Name must be an int, got: $raw"
+    }
+    if ($parsed -le 0) {
+        throw "$Name must be > 0, got: $raw"
+    }
+
+    return $parsed
+}
+
+function Normalize-ServerUrl {
+    param(
+        [AllowEmptyString()][string]$Value = "",
+        [Parameter(Mandatory = $true)][string]$DefaultValue
+    )
+
+    $raw = Strip-Wrappers -Value $Value
+    if ([string]::IsNullOrWhiteSpace($raw)) {
+        $raw = $DefaultValue
+    }
+
+    $raw = $raw.Trim()
+    if ($raw.EndsWith("/")) {
+        $raw = $raw.TrimEnd("/")
+    }
+    return $raw
+}
+
+function Get-ModelsFromServer {
+    param(
+        [Parameter(Mandatory = $true)][string]$ModelsUrl,
+        [Parameter(Mandatory = $true)][int]$TimeoutSec
+    )
+
+    try {
+        $response = Invoke-RestMethod -Uri $ModelsUrl -Method Get -TimeoutSec $TimeoutSec
+    }
+    catch {
+        throw "Failed to reach llama-server at $ModelsUrl. $_"
+    }
+
+    if ($null -eq $response) {
+        throw "Empty response from llama-server."
+    }
+
+    $data = $response.data
+    if (-not $data) {
+        throw "No models returned from llama-server."
+    }
+
+    $models = @()
+    foreach ($item in @($data)) {
+        if ($item -and $item.id) {
+            $models += $item.id.ToString()
+        }
+    }
+
+    if (-not $models) {
+        throw "No model ids returned from llama-server."
+    }
+
+    return $models
 }
 
 function Resolve-MultimodalCli {
@@ -236,6 +314,59 @@ $StandaloneDir = [System.IO.Path]::GetFullPath($StandaloneDir)
 
 Write-Host "Repo:          $repoRoot" -ForegroundColor Cyan
 Write-Host "StandaloneDir: $StandaloneDir" -ForegroundColor Cyan
+
+$backendRaw = Normalize-EnvPath -Value $env:LIGHTONOCR_BACKEND
+$backend = $backendRaw.ToLower().Replace("_", "-")
+if ([string]::IsNullOrWhiteSpace($backend)) {
+    $backend = "llama-server"
+    Write-Warning "LIGHTONOCR_BACKEND is not set. Assuming llama-server for this selfcheck."
+}
+
+if ($backend -eq "llama-server") {
+    if (-not [string]::IsNullOrWhiteSpace($env:LIGHTONOCR_LLAVA_CLI_PATH)) {
+        Write-Warning "LIGHTONOCR_LLAVA_CLI_PATH is deprecated and ignored for llama-server backend."
+    }
+
+    $serverUrl = Normalize-ServerUrl -Value $env:LIGHTONOCR_LLAMA_SERVER_URL -DefaultValue "http://127.0.0.1:8080"
+    $timeoutSec = Get-PositiveInt -Name "LIGHTONOCR_REQUEST_TIMEOUT_SECONDS" -DefaultValue 60
+    $modelName = Normalize-EnvPath -Value $env:LIGHTONOCR_MODEL
+
+    Write-Host "Backend:       llama-server" -ForegroundColor Green
+    Write-Host "Server URL:    $serverUrl" -ForegroundColor Green
+
+    $modelsUrl = $serverUrl
+    if ($serverUrl.ToLower().EndsWith("/v1")) {
+        $modelsUrl = "$serverUrl/models"
+    }
+    else {
+        $modelsUrl = "$serverUrl/v1/models"
+    }
+
+    Write-Host "Checking:      $modelsUrl" -ForegroundColor Cyan
+    $models = Get-ModelsFromServer -ModelsUrl $modelsUrl -TimeoutSec $timeoutSec
+
+    if ([string]::IsNullOrWhiteSpace($modelName)) {
+        Write-Host "Available models:" -ForegroundColor Yellow
+        $models | ForEach-Object { Write-Host "  - $_" }
+        throw "Missing LIGHTONOCR_MODEL (required for llama-server)."
+    }
+
+    if ($models -notcontains $modelName) {
+        Write-Host "Available models:" -ForegroundColor Yellow
+        $models | ForEach-Object { Write-Host "  - $_" }
+        throw "Model not found on llama-server: $modelName"
+    }
+
+    Write-Host "Model:         $modelName" -ForegroundColor Green
+    Write-Host "OK: llama-server reachable and model is available." -ForegroundColor Green
+    exit 0
+}
+
+if ($backend -ne "cli") {
+    throw "Unsupported LIGHTONOCR_BACKEND: $backend"
+}
+
+Write-Warning "LIGHTONOCR_BACKEND=cli is deprecated. Running legacy CLI selfcheck."
 
 $envModelRaw = Normalize-EnvPath -Value $env:LIGHTONOCR_GGUF_MODEL_PATH
 $envMmprojRaw = Normalize-EnvPath -Value $env:LIGHTONOCR_GGUF_MMPROJ_PATH

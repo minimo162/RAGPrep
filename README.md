@@ -28,8 +28,24 @@ RAGPrep は「できるだけ自然な読み順」を目標に、ページ内レ
   - アスペクト比は維持してテキストの幾何を保つ
   - 1ページ = 1画像で扱う（vLLM 側でのバッチ処理に対応）
 
-## LightOnOCR推奨パラメータ（llama.cpp CLI）
-LightOnOCR を llama.cpp CLI で使う場合は、以下のパラメータを推奨します。
+## LightOnOCR（llama-server）
+LightOnOCR は OpenAI互換API経由で llama-server に送信します。
+
+### 必須の環境変数
+- `LIGHTONOCR_BACKEND=llama-server`
+- `LIGHTONOCR_LLAMA_SERVER_URL`（デフォルト: `http://127.0.0.1:8080`）
+- `LIGHTONOCR_MODEL`（`/v1/models` の id）
+- `LIGHTONOCR_REQUEST_TIMEOUT_SECONDS`（デフォルト: `60`）
+
+### 任意の調整（llama-server）
+- `LIGHTONOCR_TEMPERATURE`（デフォルト: `0.2`）
+- `LIGHTONOCR_TOP_P`（デフォルト: `0.9`）
+- `LIGHTONOCR_REPEAT_PENALTY`（デフォルト: `1.15`）
+- `LIGHTONOCR_REPEAT_LAST_N`（デフォルト: `128`）
+- `LIGHTONOCR_MAX_NEW_TOKENS`（デフォルト: `1000`）
+
+### Legacy（llama.cpp CLI / 非推奨）
+llama.cpp CLI は互換期間のみサポートします。`LIGHTONOCR_LLAVA_CLI_PATH` は非推奨です。
 
 | Parameter | Value | Description |
 |-----------|-------|-------------|
@@ -40,7 +56,7 @@ LightOnOCR を llama.cpp CLI で使う場合は、以下のパラメータを推
 | `-n` | 1000 | Max output tokens (avoid >1500) |
 | `-ngl` | 99 | GPU layers (use all for best speed) |
 
-### Parameter Notes
+#### CLI Parameter Notes
 - **repeat-penalty**: 1.2 を超えると OCR 品質が落ちる場合があります
 - **-n (max tokens)**: 長い文書の末尾での繰り返しを防ぐため、~1000 を推奨します
 - **Image preprocessing**: PDF を最長辺 1540px の PNG としてレンダリングします
@@ -116,6 +132,15 @@ uv run python scripts/bench_pdf_to_markdown.py --pdf .\path\to\input.pdf --repea
 - `RAGPREP_MAX_UPLOAD_BYTES`（デフォルト: 10MB）
 - `RAGPREP_MAX_PAGES`（デフォルト: 50）
 - `RAGPREP_MAX_CONCURRENCY`（デフォルト: 1）
+- LightOnOCR（llama-server）
+  - `LIGHTONOCR_BACKEND`（推奨: `llama-server`）
+  - `LIGHTONOCR_LLAMA_SERVER_URL`（デフォルト: `http://127.0.0.1:8080`）
+  - `LIGHTONOCR_MODEL`（`/v1/models` の id）
+  - `LIGHTONOCR_REQUEST_TIMEOUT_SECONDS`（デフォルト: `60`）
+- Legacy（llama.cpp CLI / 非推奨）
+  - `LIGHTONOCR_LLAVA_CLI_PATH`（非推奨）
+  - `LIGHTONOCR_GGUF_MODEL_PATH`
+  - `LIGHTONOCR_GGUF_MMPROJ_PATH`
 
 ## スタンドアロン配布（Windows）
 
@@ -152,21 +177,25 @@ GGUF prefetch をスキップする場合:
 ```
 - `run.ps1` / `run.cmd` は起動前に GGUF の存在を検証し、欠落時は理由と想定配置を表示して停止します。
 
-#### llama.cpp 同梱（Vulkan + AVX2）
+#### llama.cpp 同梱（llama-server / Vulkan + AVX2）
 - `scripts/build-standalone.ps1` は llama.cpp の **Vulkan 版**と **AVX2（CPU）版**の両方を取得し、同梱します。
 - 同梱構造（抜粋）:
 ```text
 dist\standalone\bin\llama.cpp\
-  vulkan\llama-mtmd-cli.exe
-  avx2\llama-mtmd-cli.exe
-  llama-mtmd-cli.exe  # 互換用（avx2 のコピー）
+  vulkan\llama-server.exe
+  avx2\llama-server.exe
+  llama-server.exe  # 互換用（avx2 のコピー）
+  llama-mtmd-cli.exe  # 互換用（存在する場合）
+  llava-cli.exe       # 互換用（存在する場合）
 ```
 - 実行時の自動選択:
-  - まず Vulkan 版を優先して使用します。
+  - まず Vulkan 版の llama-server を優先して使用します。
   - Vulkan 版の起動に失敗した場合は、AVX2 版に自動でフォールバックします。
-- 明示的に固定したい場合は `LIGHTONOCR_LLAVA_CLI_PATH` を指定してください（未指定時は自動選択）。
+- CLI互換（非推奨）:
+  - `LIGHTONOCR_BACKEND=cli` と `LIGHTONOCR_LLAVA_CLI_PATH` を指定してください（未指定時は PATH/同梱から探索）。
   - 例（PowerShell）:
 ```powershell
+$env:LIGHTONOCR_BACKEND = "cli"
 $env:LIGHTONOCR_LLAVA_CLI_PATH = "dist\\standalone\\bin\\llama.cpp\\avx2\\llama-mtmd-cli.exe"
 ```
 

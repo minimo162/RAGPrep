@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import logging
+
 import pytest
 
 from ragprep import config
@@ -49,3 +51,16 @@ def test_lightonocr_env_values_trimmed(monkeypatch: pytest.MonkeyPatch) -> None:
     assert settings.lightonocr_llava_cli_path == "cli.exe"
     assert settings.lightonocr_model == "model"
     assert settings.lightonocr_llama_server_url == "http://localhost:8080"
+
+
+def test_deprecated_llava_cli_path_warns(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    monkeypatch.setenv("LIGHTONOCR_LLAVA_CLI_PATH", "cli.exe")
+    caplog.set_level(logging.WARNING, logger="ragprep.config")
+    config.get_settings()
+    assert any(
+        "LIGHTONOCR_LLAVA_CLI_PATH" in message and "deprecated" in message.lower()
+        for message in caplog.messages
+    )
