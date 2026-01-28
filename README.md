@@ -213,3 +213,62 @@ uv run ruff check .
 uv run mypy ragprep tests
 uv run pytest
 ```
+
+## トラブルシュート（unknown hard error / OCR / llama-server）
+
+### まず確認すること（最短ルート）
+1. llama-server が起動しているか（standalone の場合は `dist\standalone\run.ps1` / `run.cmd`）
+2. `LIGHTONOCR_LLAMA_SERVER_URL` の `/v1/models` が 200 で返るか（疎通確認）
+3. `LIGHTONOCR_MODEL` が `/v1/models` の `id` と一致しているか（モデル不一致は失敗の原因になります）
+4. タイムアウトを増やす（`LIGHTONOCR_REQUEST_TIMEOUT_SECONDS`）
+5. 入力を軽くする（`RAGPREP_RENDER_DPI` / `RAGPREP_RENDER_MAX_EDGE` / `RAGPREP_OCR_MAX_IMAGE_BYTES`）
+
+### 重要な環境変数（推奨）
+`LIGHTONOCR_*`（llama-server 側）
+- `LIGHTONOCR_BACKEND=llama-server`（デフォルト）
+- `LIGHTONOCR_LLAMA_SERVER_URL=http://127.0.0.1:8080`
+- `LIGHTONOCR_MODEL=< /v1/models の id >`（必須）
+- `LIGHTONOCR_REQUEST_TIMEOUT_SECONDS=60`（standalone では `120`〜`240` を推奨）
+- `LIGHTONOCR_REQUEST_RETRIES=1`（一時的なエラー時のみ。最大 `2`）
+- `LIGHTONOCR_RETRY_BACKOFF_BASE_SECONDS=0.2`（リトライの指数バックオフ基準秒。最大 `2.0`）
+
+`RAGPREP_*`（PDF→画像→OCR 側）
+- `RAGPREP_RENDER_DPI=400`（落ちる/重い場合は `300`→`200` と段階的に下げる）
+- `RAGPREP_RENDER_MAX_EDGE=1540`（落ちる/重い場合は `1200`→`1000`→`800` と段階的に下げる）
+- `RAGPREP_OCR_MAX_IMAGE_BYTES=6291456`（6MB。超過時は自動ダウンサンプル。`0` で無効化）
+- `RAGPREP_MAX_PAGES=50`（入力ページ数上限）
+- `RAGPREP_MAX_UPLOAD_BYTES=10485760`（入力PDFサイズ上限）
+
+### llama-server の疎通確認（/v1/models）
+PowerShell 例:
+```powershell
+$env:LIGHTONOCR_LLAMA_SERVER_URL = "http://127.0.0.1:8080"
+$models = Invoke-RestMethod "$env:LIGHTONOCR_LLAMA_SERVER_URL/v1/models"
+$models.data[0].id
+```
+`LIGHTONOCR_MODEL` は、上の `id` と一致する値を設定してください。
+
+### ログ採取（落ちたときに見る場所）
+1) RAGPrep の診断出力（直近の状態/リクエスト/エラー）
+- `%TEMP%\ragprep-diagnostics\last_activity.json`
+- `%TEMP%\ragprep-diagnostics\last_llama_request.json`
+- `%TEMP%\ragprep-diagnostics\last_error.json`
+
+2) standalone + llama-server の stdout/stderr 採取（再現ハーネス）
+- `scripts\repro-unknown-hard-error.ps1` が `llama-server` を起動し、OCR リクエストを流して落ちないか確認します。
+```powershell
+cd C:\Users\Administrator\RAGPrep
+powershell -ExecutionPolicy Bypass -File scripts\repro-unknown-hard-error.ps1 -Requests 1 -UseDefaultSizes
+```
+実行結果に表示されるログディレクトリ（`%TEMP%\RAGPrep_repro_unknown_hard_error_...`）に、
+`llama-server.stdout.log` / `llama-server.stderr.log` / `llama-server.meta.log` が出力されます。
+
+3) Windows イベントログ（プロセスクラッシュの切り分け）
+- Event Viewer（イベント ビューア）→ Windows Logs → Application（アプリケーション）
+- `llama-server.exe` や `python.exe` のクラッシュ（Application Error / Faulting module）を確認
+
+### 典型的な原因と対処
+- **タイムアウト**: `LIGHTONOCR_REQUEST_TIMEOUT_SECONDS` を上げる（standalone は 120〜240 推奨）
+- **入力が重い**: `RAGPREP_RENDER_DPI` / `RAGPREP_RENDER_MAX_EDGE` を下げる、`RAGPREP_OCR_MAX_IMAGE_BYTES` を下げる
+- **ポート競合**: `LIGHTONOCR_LLAMA_SERVER_URL` のポートを変更（standalone 起動引数も合わせる）
+- **Vulkan/AVX2 由来の不安定**: GPUドライバ更新、別ビルド（AVX2 など）での起動を試す
