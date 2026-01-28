@@ -15,6 +15,7 @@ from fastapi.templating import Jinja2Templates
 from starlette.responses import Response
 
 from ragprep.config import get_settings
+from ragprep.diagnostics import enable_faulthandler
 from ragprep.pipeline import PdfToMarkdownProgress, pdf_to_markdown
 
 TEMPLATES_DIR = Path(__file__).resolve().parent / "templates"
@@ -26,6 +27,7 @@ app = FastAPI()
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
 logger = logging.getLogger(__name__)
+enable_faulthandler()
 
 
 class JobStatus(str, Enum):

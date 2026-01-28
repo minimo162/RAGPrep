@@ -13,6 +13,7 @@ from urllib.request import Request, urlopen
 
 import uvicorn
 
+from ragprep.diagnostics import enable_faulthandler
 from ragprep.web.app import app
 
 DEFAULT_HOST: Final[str] = "127.0.0.1"
@@ -245,6 +246,8 @@ class _DesktopApi:
 
 
 def main(argv: list[str] | None = None) -> int:
+    enable_faulthandler()
+
     parser = argparse.ArgumentParser(description="RAGPrep desktop launcher (Uvicorn + pywebview)")
     parser.add_argument("--host", default=DEFAULT_HOST, help="Bind host (default: 127.0.0.1)")
     parser.add_argument("--port", type=int, default=DEFAULT_PORT, help="Bind port (default: 8000)")

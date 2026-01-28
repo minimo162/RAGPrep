@@ -1,11 +1,16 @@
 from __future__ import annotations
 
+import logging
+import os
+import uuid
 from collections.abc import Callable
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
 
 from ragprep.config import Settings, get_settings
+
+logger = logging.getLogger(__name__)
 
 
 class ProgressPhase(str, Enum):
@@ -67,9 +72,11 @@ def _pdf_to_markdown_lightonocr(
     on_progress: ProgressCallback | None = None,
     on_page: PageCallback | None = None,
 ) -> str:
+    from ragprep.diagnostics import record_last_activity, record_last_error, summarize_base64
     from ragprep.ocr import lightonocr
     from ragprep.pdf_render import iter_pdf_page_png_base64
 
+    run_id = uuid.uuid4().hex
     try:
         total_pages, encoded_pages = iter_pdf_page_png_base64(
             pdf_bytes,
@@ -81,7 +88,30 @@ def _pdf_to_markdown_lightonocr(
     except ValueError:
         raise
     except Exception as exc:  # noqa: BLE001
+        record_last_error(
+            {
+                "run_id": run_id,
+                "stage": "render",
+                "page_index": None,
+                "pdf_bytes_len": len(pdf_bytes),
+                "settings": settings.__dict__,
+                "pid": os.getpid(),
+                "error": str(exc),
+            }
+        )
         raise RuntimeError("Failed to render PDF for LightOnOCR.") from exc
+
+    record_last_activity(
+        {
+            "run_id": run_id,
+            "stage": "start",
+            "page_index": 0,
+            "total_pages": int(total_pages),
+            "pdf_bytes_len": len(pdf_bytes),
+            "settings": settings.__dict__,
+            "pid": os.getpid(),
+        }
+    )
 
     _notify_progress(
         on_progress,
@@ -94,10 +124,61 @@ def _pdf_to_markdown_lightonocr(
     )
 
     parts: list[str] = []
-    for page_index, encoded in enumerate(encoded_pages, start=1):
+    encoded_iter = iter(encoded_pages)
+    page_index = 0
+    while True:
+        try:
+            encoded = next(encoded_iter)
+        except StopIteration:
+            break
+        except Exception as exc:  # noqa: BLE001
+            failing_page = page_index + 1
+            record_last_error(
+                {
+                    "run_id": run_id,
+                    "stage": "render",
+                    "page_index": failing_page,
+                    "pdf_bytes_len": len(pdf_bytes),
+                    "settings": settings.__dict__,
+                    "pid": os.getpid(),
+                    "error": str(exc),
+                }
+            )
+            raise RuntimeError(
+                f"Failed to render PDF page {failing_page} for LightOnOCR: {exc}"
+            ) from exc
+
+        page_index += 1
+        image_meta = summarize_base64(encoded)
+        record_last_activity(
+            {
+                "run_id": run_id,
+                "stage": "ocr",
+                "page_index": page_index,
+                "total_pages": int(total_pages),
+                "pdf_bytes_len": len(pdf_bytes),
+                "pid": os.getpid(),
+                "settings": settings.__dict__,
+                **image_meta,
+            }
+        )
+
         try:
             text = lightonocr.ocr_image_base64(encoded)
         except Exception as exc:  # noqa: BLE001
+            record_last_error(
+                {
+                    "run_id": run_id,
+                    "stage": "ocr",
+                    "page_index": page_index,
+                    "total_pages": int(total_pages),
+                    "pdf_bytes_len": len(pdf_bytes),
+                    "pid": os.getpid(),
+                    "settings": settings.__dict__,
+                    **image_meta,
+                    "error": str(exc),
+                }
+            )
             raise RuntimeError(f"LightOnOCR failed on page {page_index}: {exc}") from exc
         normalized = str(text).replace("\r\n", "\n").replace("\r", "\n").strip()
         if on_page is not None:
@@ -115,6 +196,17 @@ def _pdf_to_markdown_lightonocr(
         )
 
     markdown = "\n\n".join(parts).strip()
+    record_last_activity(
+        {
+            "run_id": run_id,
+            "stage": "done",
+            "page_index": int(total_pages),
+            "total_pages": int(total_pages),
+            "pdf_bytes_len": len(pdf_bytes),
+            "settings": settings.__dict__,
+            "pid": os.getpid(),
+        }
+    )
 
     _notify_progress(
         on_progress,
