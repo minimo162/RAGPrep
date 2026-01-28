@@ -21,6 +21,7 @@ def test_run_cmd_template_does_not_mkdir_empty_hf_home() -> None:
     assert 'if not exist "%HF_HOME%" mkdir "%HF_HOME%"' not in content
     assert 'if "%RAGPREP_PDF_BACKEND%"=="" (' in content
     assert "set RAGPREP_PDF_BACKEND=lightonocr" in content
+    assert "^| Out-Null" not in content
     expected = (
         '"%ROOT%python\\python.exe" -m ragprep.desktop --host %BIND_HOST% '
         "--port %PORT%"

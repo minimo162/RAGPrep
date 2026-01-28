@@ -827,11 +827,11 @@ if "%LLAMA_SERVER_EXE%"=="" (
 powershell -NoProfile -ExecutionPolicy Bypass -Command ^
   "`$ErrorActionPreference='Stop';" ^
   "`$baseUrl=`$env:LIGHTONOCR_LLAMA_SERVER_URL;" ^
-  "function Test-Server{param(`$u) try{Invoke-RestMethod -Uri (`$u.TrimEnd('/')+'/v1/models') -TimeoutSec 3 ^| Out-Null; `$true} catch { `$false }};" ^
+  "function Test-Server{param(`$u) try{Invoke-RestMethod -Uri (`$u.TrimEnd('/')+'/v1/models') -TimeoutSec 3 | Out-Null; `$true} catch { `$false }};" ^
   "if (-not (Test-Server `$baseUrl)) {" ^
   "  `$uri=[Uri]`$baseUrl;" ^
   "  `$args=@('-m',`$env:LIGHTONOCR_GGUF_MODEL_PATH,'--mmproj',`$env:LIGHTONOCR_GGUF_MMPROJ_PATH,'--host',`$uri.Host,'--port',`$uri.Port);" ^
-  "  Start-Process -FilePath `$env:LLAMA_SERVER_EXE -ArgumentList `$args -WindowStyle Minimized ^| Out-Null;" ^
+  "  Start-Process -FilePath `$env:LLAMA_SERVER_EXE -ArgumentList `$args -WindowStyle Minimized | Out-Null;" ^
   "  `$ok=`$false; for (`$i=0; `$i -lt 30; `$i++) { Start-Sleep -Milliseconds 500; if (Test-Server `$baseUrl) { `$ok=`$true; break } }; if (-not `$ok) { throw 'llama-server failed to start' }" ^
   "}"
 if "%RAGPREP_PDF_BACKEND%"=="" (
