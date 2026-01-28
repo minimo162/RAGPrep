@@ -61,7 +61,7 @@ try {
     $PbsRelease = Get-RequiredTrimmedString -Name "PbsRelease" -Value $PbsRelease
 
     if ([string]::IsNullOrWhiteSpace($OutputDir)) {
-        $OutputDir = "dist/standalone"
+        $OutputDir = Join-Path $env:USERPROFILE "dist\\standalone"
     }
     $OutputDir = [System.IO.Path]::GetFullPath($OutputDir)
     $cacheDir = Join-Path $OutputDir "_cache"
