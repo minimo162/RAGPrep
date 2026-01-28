@@ -7,6 +7,8 @@ import httpx
 
 from .llama_server_payload import build_ocr_chat_payload, extract_ocr_text
 
+_TIMEOUT_ENV_NAME = "LIGHTONOCR_REQUEST_TIMEOUT_SECONDS"
+
 
 @dataclass(frozen=True)
 class LlamaServerClientSettings:
@@ -30,6 +32,16 @@ def _build_request_url(base_url: str) -> str:
     return f"{_normalize_base_url(base_url)}/v1/chat/completions"
 
 
+def _format_timeout_seconds(seconds: float) -> str:
+    if float(seconds).is_integer():
+        return str(int(seconds))
+    return str(seconds)
+
+
+def _build_timeout(seconds: float) -> httpx.Timeout:
+    return httpx.Timeout(connect=seconds, read=seconds, write=seconds, pool=seconds)
+
+
 def ocr_image_base64(
     *,
     image_base64: str,
@@ -47,8 +59,17 @@ def ocr_image_base64(
     )
 
     try:
-        with httpx.Client(timeout=settings.timeout_seconds, transport=transport) as client:
+        timeout = _build_timeout(settings.timeout_seconds)
+        with httpx.Client(timeout=timeout, transport=transport) as client:
             response = client.post(url, json=payload)
+    except httpx.ReadTimeout as exc:
+        timeout_seconds = _format_timeout_seconds(settings.timeout_seconds)
+        message = (
+            "llama-server request timed out "
+            f"({url}; timeout={timeout_seconds}s). "
+            f"Increase {_TIMEOUT_ENV_NAME} or ensure llama-server is running."
+        )
+        raise RuntimeError(message) from exc
     except httpx.RequestError as exc:
         raise RuntimeError(f"llama-server request failed ({url}): {exc}") from exc
 

@@ -91,3 +91,28 @@ def test_llama_server_client_request_error_raises() -> None:
             settings=settings,
             transport=transport,
         )
+
+
+def test_llama_server_client_read_timeout_message() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise httpx.ReadTimeout("timed out", request=request)
+
+    transport = httpx.MockTransport(handler)
+    settings = LlamaServerClientSettings(
+        base_url="http://server",
+        model="vision-model",
+        timeout_seconds=10,
+    )
+
+    with pytest.raises(RuntimeError) as exc_info:
+        ocr_image_base64(
+            image_base64="aGVsbG8=",
+            prompt="Extract all text from this image and return it as Markdown.",
+            settings=settings,
+            transport=transport,
+        )
+
+    message = str(exc_info.value)
+    assert "timed out" in message
+    assert "timeout=10s" in message
+    assert "LIGHTONOCR_REQUEST_TIMEOUT_SECONDS" in message
