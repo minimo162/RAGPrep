@@ -693,7 +693,7 @@ if (-not `$env:LIGHTONOCR_REQUEST_TIMEOUT_SECONDS -or [string]::IsNullOrWhiteSpa
     Test-Path -LiteralPath `$_ -PathType Leaf
 } | Select-Object -First 1
 if (-not `$llamaServerExe) {
-    throw "Missing llama-server.exe under: $(`$llamaServerCandidates -join ', ')"
+    throw "Missing llama-server.exe under: `$(`$llamaServerCandidates -join ', ')"
 }
 
 function Test-LlamaServer {
