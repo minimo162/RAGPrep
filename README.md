@@ -148,8 +148,8 @@ GGUF prefetch 繧偵せ繧ｭ繝・・縺吶ｋ蝣ｴ蜷・
 - 譌｢螳壹・ `.\scripts\build-standalone.ps1 -Clean` 縺ｯ GGUF 繧貞叙蠕励＠縲∵怙蠕後↓ `scripts/verify-standalone.ps1` 縺ｧ蠢・医ヵ繧｡繧､繝ｫ繧呈､懆ｨｼ縺励∪縺吶・
 - `-SkipGgufPrefetch` 繧剃ｽｿ縺・→ GGUF 縺檎┌縺・∪縺ｾ縺ｫ縺ｪ繧翫∵､懆ｨｼ縺ｯ螟ｱ謨励＠縺ｾ縺吶る・蟶・螳溯｡後☆繧句ｴ蜷医・谺｡縺ｮ縺・★繧後°縺悟ｿ・ｦ√〒縺吶・
   - `dist\standalone\data\models\lightonocr-gguf\` 縺ｫ莉･荳・2 繝輔ぃ繧､繝ｫ繧帝・鄂ｮ縺吶ｋ  
-    - `LightOnOCR-2-1B-Q6_K.gguf`  
-    - `mmproj-BF16.gguf`
+    - `LightOnOCR-2-1B-IQ4_XS.gguf`  
+    - `mmproj-F32.gguf`
   - 螳溯｡悟燕縺ｫ迺ｰ蠅・､画焚縺ｧ螳溷惠繝代せ繧剃ｸ頑嶌縺阪☆繧・ 
     - `LIGHTONOCR_GGUF_MODEL_PATH`  
     - `LIGHTONOCR_GGUF_MMPROJ_PATH`

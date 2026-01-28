@@ -7,8 +7,8 @@ param(
     [string]$PipTempRoot = "",
     [string]$LlamaCppPythonExtraIndexUrl = "https://abetlen.github.io/llama-cpp-python/whl/cpu",
     [string]$GgufRepoId = "noctrex/LightOnOCR-2-1B-GGUF",
-    [string]$GgufModelFile = "LightOnOCR-2-1B-Q6_K.gguf",
-    [string]$GgufMmprojFile = "mmproj-BF16.gguf",
+    [string]$GgufModelFile = "LightOnOCR-2-1B-IQ4_XS.gguf",
+    [string]$GgufMmprojFile = "mmproj-F32.gguf",
     [switch]$SkipGgufPrefetch,
     [switch]$Clean
 )

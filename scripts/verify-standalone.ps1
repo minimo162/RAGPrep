@@ -1,8 +1,8 @@
 [CmdletBinding()]
 param(
     [string]$OutputDir = "dist/standalone",
-    [string]$GgufModelFile = "LightOnOCR-2-1B-Q6_K.gguf",
-    [string]$GgufMmprojFile = "mmproj-BF16.gguf",
+    [string]$GgufModelFile = "LightOnOCR-2-1B-IQ4_XS.gguf",
+    [string]$GgufMmprojFile = "mmproj-F32.gguf",
     [string]$ServerUrl = "http://127.0.0.1:8080",
     [switch]$AutoPort,
     [ValidateSet("auto", "vulkan", "avx2", "root")]

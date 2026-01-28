@@ -96,8 +96,8 @@ def test_verify_standalone_checks_required_artifacts() -> None:
     assert '"vulkan"' in content
     assert "llama-server.exe" in content
     assert "data/models/lightonocr-gguf" in content
-    assert "LightOnOCR-2-1B-Q6_K.gguf" in content
-    assert "mmproj-BF16.gguf" in content
+    assert "LightOnOCR-2-1B-IQ4_XS.gguf" in content
+    assert "mmproj-F32.gguf" in content
 
 
 def test_selfcheck_timeout_default_updated() -> None:
