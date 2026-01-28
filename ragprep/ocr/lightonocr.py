@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import base64
+import io
 import os
 from dataclasses import dataclass
 from pathlib import Path
@@ -8,6 +10,10 @@ from urllib.request import url2pathname
 
 from PIL import Image
 
+from ragprep import config as app_config
+
+from .llama_server_client import LlamaServerClientSettings
+from .llama_server_client import ocr_image_base64 as ocr_image_base64_llama_server
 from .llamacpp_cli_runtime import LlamaCppCliSettings
 from .llamacpp_cli_runtime import ocr_image as ocr_image_llama_cpp_cli
 from .llamacpp_cli_runtime import ocr_image_base64 as ocr_image_base64_llama_cpp_cli
@@ -24,6 +30,10 @@ ENV_TEMPERATURE = "LIGHTONOCR_TEMPERATURE"
 ENV_TOP_P = "LIGHTONOCR_TOP_P"
 ENV_REPEAT_PENALTY = "LIGHTONOCR_REPEAT_PENALTY"
 ENV_REPEAT_LAST_N = "LIGHTONOCR_REPEAT_LAST_N"
+ENV_LIGHTONOCR_BACKEND = "LIGHTONOCR_BACKEND"
+ENV_LIGHTONOCR_LLAMA_SERVER_URL = "LIGHTONOCR_LLAMA_SERVER_URL"
+ENV_LIGHTONOCR_MODEL = "LIGHTONOCR_MODEL"
+ENV_LIGHTONOCR_REQUEST_TIMEOUT_SECONDS = "LIGHTONOCR_REQUEST_TIMEOUT_SECONDS"
 
 DRY_RUN_OUTPUT = "LIGHTONOCR_DRY_RUN=1 (no inference)"
 _REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -207,6 +217,43 @@ def _env_truthy(name: str) -> bool:
     return value.strip().lower() in {"1", "true", "t", "yes", "y", "on"}
 
 
+def _image_to_png_base64(image: Image.Image) -> str:
+    buffer = io.BytesIO()
+    image.save(buffer, format="PNG")
+    return base64.b64encode(buffer.getvalue()).decode("ascii")
+
+
+def _build_llama_server_settings() -> LlamaServerClientSettings:
+    app_settings = app_config.get_settings()
+    base_url = app_settings.lightonocr_llama_server_url
+    model = app_settings.lightonocr_model
+    if not base_url:
+        raise ValueError(
+            f"{ENV_LIGHTONOCR_LLAMA_SERVER_URL} is required when "
+            f"{ENV_LIGHTONOCR_BACKEND}=llama-server"
+        )
+    if not model:
+        raise ValueError(
+            f"{ENV_LIGHTONOCR_MODEL} is required when {ENV_LIGHTONOCR_BACKEND}=llama-server"
+        )
+
+    max_new_tokens = _parse_int_env(ENV_MAX_NEW_TOKENS, default=_DEFAULT_MAX_NEW_TOKENS)
+    temperature = _parse_float_env(ENV_TEMPERATURE, default=_DEFAULT_TEMPERATURE)
+
+    return LlamaServerClientSettings(
+        base_url=base_url,
+        model=model,
+        timeout_seconds=app_settings.lightonocr_request_timeout_seconds,
+        max_tokens=max_new_tokens,
+        temperature=temperature,
+    )
+
+
+def _should_use_llama_server() -> bool:
+    backend = app_config.get_settings().lightonocr_backend
+    return backend == "llama-server"
+
+
 def ocr_image(image: Image.Image) -> str:
     """
     Run LightOnOCR on a single image and return extracted Markdown/text.
@@ -224,28 +271,41 @@ def ocr_image(image: Image.Image) -> str:
     - LIGHTONOCR_REPEAT_LAST_N: repeat penalty window (default: 128)
     - LIGHTONOCR_MAX_NEW_TOKENS: max tokens to generate (default: 1000)
     - LIGHTONOCR_DRY_RUN: if truthy, return a fixed string and do no inference
+    - LIGHTONOCR_BACKEND: cli | llama-server
+    - LIGHTONOCR_LLAMA_SERVER_URL: llama-server base URL
+    - LIGHTONOCR_MODEL: llama-server model name
+    - LIGHTONOCR_REQUEST_TIMEOUT_SECONDS: request timeout in seconds
     """
 
     if _env_truthy(ENV_DRY_RUN):
         return DRY_RUN_OUTPUT
 
-    settings = get_settings()
+    if _should_use_llama_server():
+        server_settings = _build_llama_server_settings()
+        image_base64 = _image_to_png_base64(image)
+        return ocr_image_base64_llama_server(
+            image_base64=image_base64,
+            prompt="Extract all text from this image and return it as Markdown.",
+            settings=server_settings,
+        )
+
+    cli_settings = get_settings()
     llama_settings = LlamaCppCliSettings(
-        llava_cli_path=settings.llava_cli_path,
-        model_path=settings.gguf_model_path,
-        mmproj_path=settings.gguf_mmproj_path,
-        n_ctx=settings.llama_n_ctx,
-        n_threads=settings.llama_n_threads,
-        n_gpu_layers=settings.llama_n_gpu_layers,
-        temperature=settings.temperature,
-        top_p=settings.top_p,
-        repeat_penalty=settings.repeat_penalty,
-        repeat_last_n=settings.repeat_last_n,
+        llava_cli_path=cli_settings.llava_cli_path,
+        model_path=cli_settings.gguf_model_path,
+        mmproj_path=cli_settings.gguf_mmproj_path,
+        n_ctx=cli_settings.llama_n_ctx,
+        n_threads=cli_settings.llama_n_threads,
+        n_gpu_layers=cli_settings.llama_n_gpu_layers,
+        temperature=cli_settings.temperature,
+        top_p=cli_settings.top_p,
+        repeat_penalty=cli_settings.repeat_penalty,
+        repeat_last_n=cli_settings.repeat_last_n,
     )
     return ocr_image_llama_cpp_cli(
         image=image,
         settings=llama_settings,
-        max_new_tokens=settings.max_new_tokens,
+        max_new_tokens=cli_settings.max_new_tokens,
     )
 
 
@@ -266,26 +326,38 @@ def ocr_image_base64(image_base64: str) -> str:
     - LIGHTONOCR_REPEAT_LAST_N: repeat penalty window (default: 128)
     - LIGHTONOCR_MAX_NEW_TOKENS: max tokens to generate (default: 1000)
     - LIGHTONOCR_DRY_RUN: if truthy, return a fixed string and do no inference
+    - LIGHTONOCR_BACKEND: cli | llama-server
+    - LIGHTONOCR_LLAMA_SERVER_URL: llama-server base URL
+    - LIGHTONOCR_MODEL: llama-server model name
+    - LIGHTONOCR_REQUEST_TIMEOUT_SECONDS: request timeout in seconds
     """
 
     if _env_truthy(ENV_DRY_RUN):
         return DRY_RUN_OUTPUT
 
-    settings = get_settings()
+    if _should_use_llama_server():
+        server_settings = _build_llama_server_settings()
+        return ocr_image_base64_llama_server(
+            image_base64=image_base64,
+            prompt="Extract all text from this image and return it as Markdown.",
+            settings=server_settings,
+        )
+
+    cli_settings = get_settings()
     llama_settings = LlamaCppCliSettings(
-        llava_cli_path=settings.llava_cli_path,
-        model_path=settings.gguf_model_path,
-        mmproj_path=settings.gguf_mmproj_path,
-        n_ctx=settings.llama_n_ctx,
-        n_threads=settings.llama_n_threads,
-        n_gpu_layers=settings.llama_n_gpu_layers,
-        temperature=settings.temperature,
-        top_p=settings.top_p,
-        repeat_penalty=settings.repeat_penalty,
-        repeat_last_n=settings.repeat_last_n,
+        llava_cli_path=cli_settings.llava_cli_path,
+        model_path=cli_settings.gguf_model_path,
+        mmproj_path=cli_settings.gguf_mmproj_path,
+        n_ctx=cli_settings.llama_n_ctx,
+        n_threads=cli_settings.llama_n_threads,
+        n_gpu_layers=cli_settings.llama_n_gpu_layers,
+        temperature=cli_settings.temperature,
+        top_p=cli_settings.top_p,
+        repeat_penalty=cli_settings.repeat_penalty,
+        repeat_last_n=cli_settings.repeat_last_n,
     )
     return ocr_image_base64_llama_cpp_cli(
         image_base64=image_base64,
         settings=llama_settings,
-        max_new_tokens=settings.max_new_tokens,
+        max_new_tokens=cli_settings.max_new_tokens,
     )

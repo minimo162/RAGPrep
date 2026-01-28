@@ -9,6 +9,7 @@ def test_default_pdf_backend_is_lightonocr(monkeypatch: pytest.MonkeyPatch) -> N
     monkeypatch.delenv("RAGPREP_PDF_BACKEND", raising=False)
     settings = config.get_settings()
     assert settings.pdf_backend == "lightonocr"
+    assert settings.lightonocr_backend == "cli"
 
 
 def test_pdf_backend_accepts_lightonocr(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -23,12 +24,28 @@ def test_pdf_backend_rejects_invalid(monkeypatch: pytest.MonkeyPatch) -> None:
         config.get_settings()
 
 
+def test_lightonocr_backend_accepts_llama_server(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("LIGHTONOCR_BACKEND", "llama_server")
+    settings = config.get_settings()
+    assert settings.lightonocr_backend == "llama-server"
+
+
+def test_lightonocr_backend_rejects_invalid(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("LIGHTONOCR_BACKEND", "invalid")
+    with pytest.raises(ValueError, match="LIGHTONOCR_BACKEND"):
+        config.get_settings()
+
+
 def test_lightonocr_env_values_trimmed(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("RAGPREP_PDF_BACKEND", raising=False)
     monkeypatch.setenv("LIGHTONOCR_GGUF_MODEL_PATH", "  model.gguf  ")
     monkeypatch.setenv("LIGHTONOCR_GGUF_MMPROJ_PATH", "  mmproj.gguf ")
     monkeypatch.setenv("LIGHTONOCR_LLAVA_CLI_PATH", "  cli.exe ")
+    monkeypatch.setenv("LIGHTONOCR_MODEL", "  model ")
+    monkeypatch.setenv("LIGHTONOCR_LLAMA_SERVER_URL", "  http://localhost:8080 ")
     settings = config.get_settings()
     assert settings.lightonocr_model_path == "model.gguf"
     assert settings.lightonocr_mmproj_path == "mmproj.gguf"
     assert settings.lightonocr_llava_cli_path == "cli.exe"
+    assert settings.lightonocr_model == "model"
+    assert settings.lightonocr_llama_server_url == "http://localhost:8080"
