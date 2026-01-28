@@ -1,13 +1,16 @@
 from __future__ import annotations
 
 import base64
+import io
 from typing import cast
 
 import pytest
 
 from ragprep.pdf_render import (
     _pixmap_to_rgb_image,
+    downsample_png_base64,
     iter_pdf_page_png_base64,
+    render_pdf_page_png_base64,
     render_pdf_to_images,
 )
 
@@ -66,6 +69,29 @@ def test_iter_pdf_page_png_base64_returns_png_base64_per_page() -> None:
     for item in encoded:
         decoded = base64.b64decode(item)
         assert decoded.startswith(b"\x89PNG\r\n\x1a\n")
+
+
+def test_render_pdf_page_png_base64_renders_single_page() -> None:
+    pdf_bytes = _make_pdf_bytes(page_count=2)
+    total_pages, encoded = render_pdf_page_png_base64(pdf_bytes, page_index=1, dpi=72)
+    assert total_pages == 2
+    decoded = base64.b64decode(encoded)
+    assert decoded.startswith(b"\x89PNG\r\n\x1a\n")
+
+
+def test_downsample_png_base64_resizes_when_needed() -> None:
+    from PIL import Image
+
+    image = Image.new("RGB", (200, 100), "white")
+    buffer = io.BytesIO()
+    image.save(buffer, format="PNG")
+    encoded = base64.b64encode(buffer.getvalue()).decode("ascii")
+
+    downsampled = downsample_png_base64(encoded, max_edge=50)
+    decoded = base64.b64decode(downsampled)
+    with Image.open(io.BytesIO(decoded)) as reopened:
+        reopened.load()
+        assert max(reopened.size) == 50
 
 
 def test_iter_pdf_page_png_base64_rejects_too_many_pages() -> None:

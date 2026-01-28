@@ -2,12 +2,15 @@ from __future__ import annotations
 
 import base64
 import io
+import logging
 from collections.abc import Iterator
 from typing import Any
 
 from PIL import Image
 
 from ragprep.config import get_settings
+
+logger = logging.getLogger(__name__)
 
 
 def _import_fitz() -> Any:
@@ -35,9 +38,77 @@ def _pixmap_to_rgb_image(pixmap: Any) -> Image.Image:
 
 
 def _image_to_png_base64(image: Image.Image) -> str:
-    buffer = io.BytesIO()
-    image.save(buffer, format="PNG")
-    return base64.b64encode(buffer.getvalue()).decode("ascii")
+    with io.BytesIO() as buffer:
+        image.save(buffer, format="PNG")
+        return base64.b64encode(buffer.getvalue()).decode("ascii")
+
+
+def _resize_to_max_edge(image: Image.Image, *, max_edge: int) -> Image.Image:
+    width, height = image.size
+    current_max_edge = max(width, height)
+    if current_max_edge <= max_edge:
+        return image
+
+    if width >= height:
+        new_width = max_edge
+        new_height = max(1, round(max_edge * height / width))
+    else:
+        new_height = max_edge
+        new_width = max(1, round(max_edge * width / height))
+
+    return image.resize(
+        (int(new_width), int(new_height)),
+        resample=Image.Resampling.LANCZOS,
+    )
+
+
+def downsample_png_base64(image_base64: str, *, max_edge: int) -> str:
+    """
+    Downsample a base64-encoded PNG image so its longest edge is <= max_edge.
+
+    Returns the original input if resizing is not needed or the image cannot be decoded.
+    """
+
+    if max_edge <= 0:
+        raise ValueError("max_edge must be > 0")
+
+    raw = (image_base64 or "").strip()
+    if not raw:
+        raise ValueError("image_base64 is empty")
+
+    try:
+        decoded = base64.b64decode(raw, validate=False)
+    except Exception:  # noqa: BLE001
+        logger.debug("Failed to base64-decode PNG payload for downsample", exc_info=True)
+        return raw
+
+    try:
+        with Image.open(io.BytesIO(decoded)) as img:
+            img.load()
+            if img.mode != "RGB":
+                converted = img.convert("RGB")
+                try:
+                    resized = _resize_to_max_edge(converted, max_edge=max_edge)
+                    if resized is converted:
+                        return raw
+                    try:
+                        return _image_to_png_base64(resized)
+                    finally:
+                        if resized is not converted:
+                            resized.close()
+                finally:
+                    converted.close()
+
+            resized = _resize_to_max_edge(img, max_edge=max_edge)
+            if resized is img:
+                return raw
+            try:
+                return _image_to_png_base64(resized)
+            finally:
+                resized.close()
+    except Exception:  # noqa: BLE001
+        logger.debug("Failed to downsample PNG payload", exc_info=True)
+        return raw
 
 
 def iter_pdf_images(
@@ -92,19 +163,7 @@ def iter_pdf_images(
                 pixmap = page.get_pixmap(matrix=matrix, alpha=False)
                 rgb = _pixmap_to_rgb_image(pixmap)
 
-                width, height = rgb.size
-                current_max_edge = max(width, height)
-                if current_max_edge > max_edge:
-                    if width >= height:
-                        new_width = max_edge
-                        new_height = max(1, round(max_edge * height / width))
-                    else:
-                        new_height = max_edge
-                        new_width = max(1, round(max_edge * width / height))
-                    rgb = rgb.resize(
-                        (int(new_width), int(new_height)),
-                        resample=Image.Resampling.LANCZOS,
-                    )
+                rgb = _resize_to_max_edge(rgb, max_edge=max_edge)
 
                 yield rgb
         finally:
@@ -158,3 +217,70 @@ def render_pdf_to_images(
         max_bytes=max_bytes,
     )
     return list(images)
+
+
+def render_pdf_page_png_base64(
+    pdf_bytes: bytes,
+    *,
+    page_index: int,
+    dpi: int | None = None,
+    max_edge: int | None = None,
+    max_pages: int | None = None,
+    max_bytes: int | None = None,
+) -> tuple[int, str]:
+    """
+    Render a single PDF page (1-based index) and return a base64-encoded PNG.
+
+    This is a fallback helper when streaming iteration fails mid-document.
+    """
+
+    settings = get_settings()
+    dpi = settings.render_dpi if dpi is None else dpi
+    max_edge = settings.render_max_edge if max_edge is None else max_edge
+    max_pages = settings.max_pages if max_pages is None else max_pages
+    max_bytes = settings.max_upload_bytes if max_bytes is None else max_bytes
+
+    if not pdf_bytes:
+        raise ValueError("pdf_bytes is empty")
+    if page_index <= 0:
+        raise ValueError("page_index must be >= 1")
+    if dpi <= 0:
+        raise ValueError("dpi must be > 0")
+    if max_edge <= 0:
+        raise ValueError("max_edge must be > 0")
+    if max_pages <= 0:
+        raise ValueError("max_pages must be > 0")
+    if max_bytes <= 0:
+        raise ValueError("max_bytes must be > 0")
+    if len(pdf_bytes) > max_bytes:
+        raise ValueError(f"PDF too large ({len(pdf_bytes)} bytes), max_bytes={max_bytes}")
+
+    try:
+        fitz = _import_fitz()
+        doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+    except Exception as exc:  # noqa: BLE001
+        raise ValueError("Invalid PDF data") from exc
+
+    try:
+        total_pages = int(len(doc))
+        if total_pages > max_pages:
+            raise ValueError(f"PDF has {total_pages} pages, max_pages={max_pages}")
+        if page_index > total_pages:
+            raise ValueError(f"PDF page index out of range: {page_index}/{total_pages}")
+
+        scale = dpi / 72.0
+        page = doc.load_page(page_index - 1)
+        matrix = fitz.Matrix(scale, scale)
+        pixmap = page.get_pixmap(matrix=matrix, alpha=False)
+        rgb = _pixmap_to_rgb_image(pixmap)
+        try:
+            rgb = _resize_to_max_edge(rgb, max_edge=max_edge)
+            encoded = _image_to_png_base64(rgb)
+        finally:
+            try:
+                rgb.close()
+            except Exception:  # noqa: BLE001
+                pass
+        return total_pages, encoded
+    finally:
+        doc.close()
