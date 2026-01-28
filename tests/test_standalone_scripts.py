@@ -76,7 +76,7 @@ def test_verify_standalone_checks_required_artifacts() -> None:
     assert "bin/llama.cpp" in content
     assert '"avx2"' in content
     assert '"vulkan"' in content
-    assert "llama-mtmd-cli.exe" in content
+    assert "llama-server.exe" in content
     assert "data/models/lightonocr-gguf" in content
     assert "LightOnOCR-2-1B-Q6_K.gguf" in content
     assert "mmproj-BF16.gguf" in content

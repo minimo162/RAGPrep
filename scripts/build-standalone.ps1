@@ -708,6 +708,81 @@ foreach (`$artifact in `$requiredGguf) {
     }
 }
 
+if (-not `$env:LIGHTONOCR_BACKEND -or [string]::IsNullOrWhiteSpace(`$env:LIGHTONOCR_BACKEND)) {
+    `$env:LIGHTONOCR_BACKEND = "llama-server"
+}
+
+if (`$env:LIGHTONOCR_BACKEND -eq "llama-server") {
+    if (-not `$env:LIGHTONOCR_LLAMA_SERVER_URL -or [string]::IsNullOrWhiteSpace(`$env:LIGHTONOCR_LLAMA_SERVER_URL)) {
+        `$env:LIGHTONOCR_LLAMA_SERVER_URL = "http://127.0.0.1:8080"
+    }
+    if (-not `$env:LIGHTONOCR_REQUEST_TIMEOUT_SECONDS -or [string]::IsNullOrWhiteSpace(`$env:LIGHTONOCR_REQUEST_TIMEOUT_SECONDS)) {
+        `$env:LIGHTONOCR_REQUEST_TIMEOUT_SECONDS = "60"
+    }
+
+    `$llamaServerCandidates = @(
+        (Join-Path `$root "bin/llama.cpp/vulkan/llama-server.exe"),
+        (Join-Path `$root "bin/llama.cpp/avx2/llama-server.exe"),
+        (Join-Path `$root "bin/llama.cpp/llama-server.exe")
+    )
+    `$llamaServerExe = `$llamaServerCandidates | Where-Object {
+        Test-Path -LiteralPath `$_ -PathType Leaf
+    } | Select-Object -First 1
+    if (-not `$llamaServerExe) {
+        throw "Missing llama-server.exe under: $(`$llamaServerCandidates -join ', ')"
+    }
+
+    function Test-LlamaServer {
+        param([string]`$BaseUrl)
+        try {
+            `$uri = `$BaseUrl.TrimEnd('/') + "/v1/models"
+            `$null = Invoke-RestMethod -Uri `$uri -TimeoutSec 3
+            return `$true
+        }
+        catch {
+            return `$false
+        }
+    }
+
+    if (-not (Test-LlamaServer -BaseUrl `$env:LIGHTONOCR_LLAMA_SERVER_URL)) {
+        `$serverUri = [Uri]`$env:LIGHTONOCR_LLAMA_SERVER_URL
+        `$serverHost = `$serverUri.Host
+        `$serverPort = if (`$serverUri.Port -gt 0) { `$serverUri.Port } else { 8080 }
+        `$serverArgs = @(
+            "-m", `$env:LIGHTONOCR_GGUF_MODEL_PATH,
+            "--mmproj", `$env:LIGHTONOCR_GGUF_MMPROJ_PATH,
+            "--host", `$serverHost,
+            "--port", `$serverPort
+        )
+        `$null = Start-Process -FilePath `$llamaServerExe -ArgumentList `$serverArgs -WindowStyle Minimized
+        `$started = `$false
+        for (`$i = 0; `$i -lt 30; `$i++) {
+            Start-Sleep -Milliseconds 500
+            if (Test-LlamaServer -BaseUrl `$env:LIGHTONOCR_LLAMA_SERVER_URL) {
+                `$started = `$true
+                break
+            }
+        }
+        if (-not `$started) {
+            throw "llama-server failed to start at `$env:LIGHTONOCR_LLAMA_SERVER_URL"
+        }
+    }
+
+    if (-not `$env:LIGHTONOCR_MODEL -or [string]::IsNullOrWhiteSpace(`$env:LIGHTONOCR_MODEL)) {
+        try {
+            `$models = Invoke-RestMethod -Uri (`$env:LIGHTONOCR_LLAMA_SERVER_URL.TrimEnd('/') + "/v1/models") -TimeoutSec 5
+            if (`$models -and `$models.data -and `$models.data.Count -gt 0) {
+                `$env:LIGHTONOCR_MODEL = `$models.data[0].id
+            }
+        }
+        catch {
+        }
+        if (-not `$env:LIGHTONOCR_MODEL -or [string]::IsNullOrWhiteSpace(`$env:LIGHTONOCR_MODEL)) {
+            `$env:LIGHTONOCR_MODEL = "$ggufModelFileTrimmed"
+        }
+    }
+}
+
 if (-not `$env:RAGPREP_PDF_BACKEND -or [string]::IsNullOrWhiteSpace(`$env:RAGPREP_PDF_BACKEND)) {
     `$env:RAGPREP_PDF_BACKEND = "lightonocr"
 }
@@ -761,6 +836,38 @@ if not exist "%LIGHTONOCR_GGUF_MMPROJ_PATH%" (
   echo Expected under: %GGUF_EXPECTED_DIR%
   echo Rebuild standalone: scripts\build-standalone.ps1 -Clean
   exit /b 1
+)
+if "%LIGHTONOCR_BACKEND%"=="" (
+  set LIGHTONOCR_BACKEND=llama-server
+)
+if /I "%LIGHTONOCR_BACKEND%"=="llama-server" (
+  if "%LIGHTONOCR_LLAMA_SERVER_URL%"=="" (
+    set LIGHTONOCR_LLAMA_SERVER_URL=http://127.0.0.1:8080
+  )
+  if "%LIGHTONOCR_REQUEST_TIMEOUT_SECONDS%"=="" (
+    set LIGHTONOCR_REQUEST_TIMEOUT_SECONDS=60
+  )
+  if "%LIGHTONOCR_MODEL%"=="" (
+    set LIGHTONOCR_MODEL=$ggufModelFileTrimmed
+  )
+  set "LLAMA_SERVER_EXE="
+  if exist "%ROOT%bin\llama.cpp\vulkan\llama-server.exe" set "LLAMA_SERVER_EXE=%ROOT%bin\llama.cpp\vulkan\llama-server.exe"
+  if "%LLAMA_SERVER_EXE%"=="" if exist "%ROOT%bin\llama.cpp\avx2\llama-server.exe" set "LLAMA_SERVER_EXE=%ROOT%bin\llama.cpp\avx2\llama-server.exe"
+  if "%LLAMA_SERVER_EXE%"=="" if exist "%ROOT%bin\llama.cpp\llama-server.exe" set "LLAMA_SERVER_EXE=%ROOT%bin\llama.cpp\llama-server.exe"
+  if "%LLAMA_SERVER_EXE%"=="" (
+    echo [ERROR] Missing llama-server.exe under %ROOT%bin\llama.cpp
+    exit /b 1
+  )
+  powershell -NoProfile -ExecutionPolicy Bypass -Command ^
+    "`$ErrorActionPreference='Stop';" ^
+    "`$baseUrl=`$env:LIGHTONOCR_LLAMA_SERVER_URL;" ^
+    "function Test-Server{param(`$u) try{Invoke-RestMethod -Uri (`$u.TrimEnd('/')+'/v1/models') -TimeoutSec 3 ^| Out-Null; `$true} catch { `$false }};" ^
+    "if (-not (Test-Server `$baseUrl)) {" ^
+    "  `$uri=[Uri]`$baseUrl;" ^
+    "  `$args=@('-m',`$env:LIGHTONOCR_GGUF_MODEL_PATH,'--mmproj',`$env:LIGHTONOCR_GGUF_MMPROJ_PATH,'--host',`$uri.Host,'--port',`$uri.Port);" ^
+    "  Start-Process -FilePath `$env:LLAMA_SERVER_EXE -ArgumentList `$args -WindowStyle Minimized ^| Out-Null;" ^
+    "  `$ok=`$false; for (`$i=0; `$i -lt 30; `$i++) { Start-Sleep -Milliseconds 500; if (Test-Server `$baseUrl) { `$ok=`$true; break } }; if (-not `$ok) { throw 'llama-server failed to start' }" ^
+    "}"
 )
 if "%RAGPREP_PDF_BACKEND%"=="" (
   set RAGPREP_PDF_BACKEND=lightonocr
