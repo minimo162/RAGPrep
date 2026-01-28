@@ -444,6 +444,8 @@ def main() -> None:
         url = f"https://huggingface.co/{repo_id}/resolve/main/{filename}?download=1"
         dest = out_dir / filename
         tmp = dest.with_suffix(dest.suffix + ".part")
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        tmp.parent.mkdir(parents=True, exist_ok=True)
         request = Request(url, headers={"User-Agent": "ragprep-standalone-build"})
         try:
             with urlopen(request) as response, open(tmp, "wb") as handle:  # noqa: S310

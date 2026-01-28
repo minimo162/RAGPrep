@@ -43,6 +43,9 @@ def test_build_standalone_prefetch_has_direct_download_and_artifact_checks() -> 
     content = _read_build_standalone_ps1()
     assert "falling back to direct download" in content
     assert "resolve/main/{filename}?download=1" in content
+    assert "New-Item -ItemType Directory -Force -Path $ggufOutDir" in content
+    assert "out_dir.mkdir(parents=True, exist_ok=True)" in content
+    assert "tmp.parent.mkdir(parents=True, exist_ok=True)" in content
     assert "GGUF artifact missing after prefetch" in content
     assert "GGUF artifact is empty after prefetch" in content
 
