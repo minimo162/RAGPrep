@@ -175,6 +175,11 @@ def index(request: Request) -> Response:
     )
 
 
+@app.get("/favicon.ico")
+def favicon() -> Response:
+    return Response(status_code=204)
+
+
 @app.post("/convert", response_class=HTMLResponse)
 async def convert(
     request: Request,

@@ -22,6 +22,12 @@ def test_root_renders_page() -> None:
     assert "htmx" in htmx.text
 
 
+def test_favicon_returns_no_content() -> None:
+    client = TestClient(app)
+    response = client.get("/favicon.ico")
+    assert response.status_code == 204
+
+
 def _extract_job_id(html: str) -> str:
     match = re.search(r'data-job-id="([0-9a-f]{32})"', html)
     assert match is not None, f"job id not found in html: {html}"
