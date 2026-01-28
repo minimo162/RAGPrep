@@ -721,6 +721,13 @@ function Test-LlamaServer {
     }
 }
 
+`$startupTimeoutSeconds = 120
+`$parsedTimeout = 0
+if (`$env:LIGHTONOCR_REQUEST_TIMEOUT_SECONDS -and [int]::TryParse(`$env:LIGHTONOCR_REQUEST_TIMEOUT_SECONDS, [ref]`$parsedTimeout) -and `$parsedTimeout -gt 0) {
+    `$startupTimeoutSeconds = `$parsedTimeout
+}
+`$maxAttempts = [Math]::Max(1, [int][Math]::Ceiling(`$startupTimeoutSeconds / 0.5))
+
 if (-not (Test-LlamaServer -BaseUrl `$env:LIGHTONOCR_LLAMA_SERVER_URL)) {
     `$serverUri = [Uri]`$env:LIGHTONOCR_LLAMA_SERVER_URL
     `$serverHost = `$serverUri.Host
@@ -738,7 +745,7 @@ if (-not (Test-LlamaServer -BaseUrl `$env:LIGHTONOCR_LLAMA_SERVER_URL)) {
         )
         `$process = Start-Process -FilePath `$candidate -ArgumentList `$serverArgs -PassThru -WindowStyle Minimized
         `$started = `$false
-        for (`$i = 0; `$i -lt 30; `$i++) {
+        for (`$i = 0; `$i -lt `$maxAttempts; `$i++) {
             Start-Sleep -Milliseconds 500
             if (`$process -and `$process.HasExited) {
                 break
@@ -860,11 +867,12 @@ powershell -NoProfile -ExecutionPolicy Bypass -Command ^
   "  `$uri=[Uri]`$baseUrl;" ^
   "  `$args=@('-m',`$env:LIGHTONOCR_GGUF_MODEL_PATH,'--mmproj',`$env:LIGHTONOCR_GGUF_MMPROJ_PATH,'--host',`$uri.Host,'--port',`$uri.Port);" ^
   "  `$candidates=(`$env:LLAMA_SERVER_CANDIDATES -split ';') | Where-Object { `$_.Length -gt 0 -and (Test-Path `$_) };" ^
+  "  `$startupTimeoutSeconds=120; `$parsed=0; if (`$env:LIGHTONOCR_REQUEST_TIMEOUT_SECONDS -and [int]::TryParse(`$env:LIGHTONOCR_REQUEST_TIMEOUT_SECONDS,[ref]`$parsed) -and `$parsed -gt 0) { `$startupTimeoutSeconds=`$parsed }; `$maxAttempts=[Math]::Max(1,[int][Math]::Ceiling(`$startupTimeoutSeconds/0.5));" ^
   "  if (-not `$candidates) { throw 'Missing llama-server.exe for variant' };" ^
   "  `$started=`$false;" ^
   "  foreach (`$exe in `$candidates) {" ^
   "    `$p=Start-Process -FilePath `$exe -ArgumentList `$args -PassThru -WindowStyle Minimized;" ^
-  "    `$ok=`$false; for (`$i=0; `$i -lt 30; `$i++) { Start-Sleep -Milliseconds 500; if (`$p.HasExited) { break } if (Test-Server `$baseUrl) { `$ok=`$true; break } }" ^
+  "    `$ok=`$false; for (`$i=0; `$i -lt `$maxAttempts; `$i++) { Start-Sleep -Milliseconds 500; if (`$p.HasExited) { break } if (Test-Server `$baseUrl) { `$ok=`$true; break } }" ^
   "    if (`$ok) { `$started=`$true; break }" ^
   "    if (-not `$p.HasExited) { Stop-Process -Id `$p.Id -Force -ErrorAction SilentlyContinue }" ^
   "  }" ^

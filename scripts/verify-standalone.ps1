@@ -6,13 +6,24 @@ param(
     [string]$ServerUrl = "http://127.0.0.1:8080",
     [switch]$AutoPort,
     [ValidateSet("auto", "vulkan", "avx2", "root")]
-    [string]$LlamaVariant = "auto"
+    [string]$LlamaVariant = "auto",
+    [ValidateRange(1, 3600)]
+    [int]$ServerStartupTimeoutSeconds = 120
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
 $repoRoot = Resolve-Path (Join-Path $PSScriptRoot "..")
+
+if (-not $PSBoundParameters.ContainsKey("ServerStartupTimeoutSeconds") -and $env:LIGHTONOCR_REQUEST_TIMEOUT_SECONDS) {
+    $parsedTimeout = 0
+    if ([int]::TryParse($env:LIGHTONOCR_REQUEST_TIMEOUT_SECONDS, [ref]$parsedTimeout) -and $parsedTimeout -gt 0) {
+        $ServerStartupTimeoutSeconds = $parsedTimeout
+    }
+}
+
+$waitIterations = [Math]::Max(1, [int][Math]::Ceiling($ServerStartupTimeoutSeconds / 0.5))
 
 function Resolve-OutputDir {
     param([string]$Dir, [string]$Root)
@@ -241,6 +252,8 @@ try {
                 "serverUrl: $serverUrl"
                 "effectiveServerUrl: $effectiveServerUrl"
                 "autoPort: $AutoPort"
+                "startupTimeoutSeconds: $ServerStartupTimeoutSeconds"
+                "startupIterations: $waitIterations"
                 "args: $($serverArgs -join ' ')"
                 "ggufModel: $ggufModelPath"
                 "ggufMmproj: $ggufMmprojPath"
@@ -258,7 +271,7 @@ try {
             $ready = $false
             $exitedEarly = $false
             $exitCode = $null
-            for ($i = 0; $i -lt 30; $i++) {
+            for ($i = 0; $i -lt $waitIterations; $i++) {
                 Start-Sleep -Milliseconds 500
                 if ($serverProcess -and $serverProcess.HasExited) {
                     $exitedEarly = $true
@@ -303,6 +316,7 @@ try {
             }
             $detailLines += ""
             $detailLines += "Hint: check GPU/Vulkan availability, model load time, and port conflicts."
+            $detailLines += "Hint: increase -ServerStartupTimeoutSeconds or set LIGHTONOCR_REQUEST_TIMEOUT_SECONDS."
             throw ($detailLines -join [Environment]::NewLine)
         }
     }
