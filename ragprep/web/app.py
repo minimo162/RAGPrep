@@ -159,6 +159,9 @@ def _run_job(job_id: str, pdf_bytes: bytes) -> None:
                 "Failed to reach GLM-OCR server",
                 "GLM-OCR request timed out",
                 "GLM-OCR server is not reachable",
+                "Failed to load GLM-OCR processor via Transformers",
+                "Failed to load GLM-OCR model via Transformers",
+                "Transformers backend selected, but required packages are missing",
             )
             if any(token in message for token in expected_errors):
                 logger.warning("Job %s failed: %s", job_id, message)

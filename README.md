@@ -18,6 +18,8 @@ pip install git+https://github.com/huggingface/transformers.git
 pip install torch
 ```
 
+もし Transformers のモデル読み込みでエラーになる場合は、`RAGPREP_GLM_OCR_MODE=server` に切り替えるのが確実です。
+
 ### 3) 起動
 Desktop:
 ```bash
