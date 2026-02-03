@@ -285,7 +285,7 @@ try {
     }
 
     $currentStep = "write run scripts"
-    $startGlmOcrPs1 = @"
+$startGlmOcrPs1 = @"
 [CmdletBinding()]
 param(
     [string]`$BaseUrl = "",
@@ -300,7 +300,7 @@ if (-not `$BaseUrl -or [string]::IsNullOrWhiteSpace(`$BaseUrl)) {
     `$BaseUrl = `$env:RAGPREP_GLM_OCR_BASE_URL
 }
 if (-not `$BaseUrl -or [string]::IsNullOrWhiteSpace(`$BaseUrl)) {
-    `$BaseUrl = "http://127.0.0.1:8080"
+    `$BaseUrl = "http://127.0.0.1:`$Port"
 }
 
 `$probeUrl = `$BaseUrl.TrimEnd("/") + "/v1/models"
@@ -324,16 +324,31 @@ catch {
 if (`$vllm) {
     Write-Host "Starting via: vllm serve" -ForegroundColor Cyan
     Write-Host "NOTE: This will block. Keep this window open while using RAGPrep." -ForegroundColor Yellow
-    & vllm serve `$Model --port `$Port
+    & vllm serve `$Model --host 0.0.0.0 --port `$Port
     exit `$LASTEXITCODE
 }
 
-Write-Warning "vllm not found on PATH."
-Write-Host "Install + run (example):" -ForegroundColor Yellow
-Write-Host "  pip install -U vllm --extra-index-url https://wheels.vllm.ai/nightly" -ForegroundColor Yellow
-Write-Host "  pip install git+https://github.com/huggingface/transformers.git" -ForegroundColor Yellow
-Write-Host "  vllm serve zai-org/GLM-OCR --port 8080" -ForegroundColor Yellow
-throw "Cannot start GLM-OCR automatically (vllm not installed)."
+`$docker = Get-Command docker -ErrorAction SilentlyContinue
+if (`$docker) {
+    Write-Host "Starting via: Docker (vLLM OpenAI server image)" -ForegroundColor Cyan
+    Write-Host "NOTE: vLLM does not provide native Windows wheels; Docker/WSL2 is recommended on Windows." -ForegroundColor Yellow
+    Write-Host "NOTE: This will block. Keep this window open while using RAGPrep." -ForegroundColor Yellow
+    Write-Host "If Docker fails, install Docker Desktop (WSL2 backend) and ensure GPU support if needed." -ForegroundColor Yellow
+
+    `$image = "vllm/vllm-openai:nightly"
+    `$hostPort = `$Port
+    `$containerPort = 8080
+
+    & docker run --rm -it -p "`$hostPort`:`$containerPort" `$image vllm serve `$Model --host 0.0.0.0 --port `$containerPort
+    exit `$LASTEXITCODE
+}
+
+Write-Warning "Could not auto-start GLM-OCR (vllm and docker not found)."
+Write-Host "Options:" -ForegroundColor Yellow
+Write-Host "  1) Run GLM-OCR server on another machine, then set RAGPREP_GLM_OCR_BASE_URL." -ForegroundColor Yellow
+Write-Host "  2) On Windows, use Docker Desktop (WSL2 backend) and run vLLM container." -ForegroundColor Yellow
+Write-Host "  3) On Linux/WSL2, install vLLM and run: vllm serve zai-org/GLM-OCR --port 8080" -ForegroundColor Yellow
+throw "Cannot start GLM-OCR automatically."
 "@
     Set-Content -Path (Join-Path $OutputDir "start-glm-ocr.ps1") -Value $startGlmOcrPs1 -Encoding UTF8
 
