@@ -665,34 +665,36 @@ if (-not `$env:HF_HOME -or [string]::IsNullOrWhiteSpace(`$env:HF_HOME)) {
     `$env:HF_HOME = `$hfHome
 }
 
-if (-not `$env:LIGHTONOCR_GGUF_MODEL_PATH -or [string]::IsNullOrWhiteSpace(`$env:LIGHTONOCR_GGUF_MODEL_PATH)) {
-    `$env:LIGHTONOCR_GGUF_MODEL_PATH = Join-Path `$root "data/models/lightonocr-gguf/$ggufModelFileTrimmed"
-}
-if (-not `$env:LIGHTONOCR_GGUF_MMPROJ_PATH -or [string]::IsNullOrWhiteSpace(`$env:LIGHTONOCR_GGUF_MMPROJ_PATH)) {
-    `$env:LIGHTONOCR_GGUF_MMPROJ_PATH = Join-Path `$root "data/models/lightonocr-gguf/$ggufMmprojFileTrimmed"
-}
-
-`$ggufExpectedDir = Join-Path `$root "data/models/lightonocr-gguf"
-`$requiredGguf = @(
-    @{ Name = "LIGHTONOCR_GGUF_MODEL_PATH"; Path = `$env:LIGHTONOCR_GGUF_MODEL_PATH },
-    @{ Name = "LIGHTONOCR_GGUF_MMPROJ_PATH"; Path = `$env:LIGHTONOCR_GGUF_MMPROJ_PATH }
-)
-foreach (`$artifact in `$requiredGguf) {
-    `$artifactPath = `$artifact.Path
-    if (-not (Test-Path -LiteralPath `$artifactPath -PathType Leaf)) {
-        `$name = `$artifact.Name
-        `$message = @(
-            "[ERROR] Missing GGUF artifact: `$artifactPath",
-            "Set `$name to a valid .gguf file.",
-            "Expected under: `$ggufExpectedDir",
-            "Rebuild standalone: scripts/build-standalone.ps1 -Clean"
-        ) -join [Environment]::NewLine
-        throw `$message
-    }
-}
-
 if (-not `$env:RAGPREP_PDF_BACKEND -or [string]::IsNullOrWhiteSpace(`$env:RAGPREP_PDF_BACKEND)) {
-    `$env:RAGPREP_PDF_BACKEND = "lightonocr"
+    `$env:RAGPREP_PDF_BACKEND = "glm-ocr"
+}
+
+if (`$env:RAGPREP_PDF_BACKEND -eq "lightonocr") {
+    if (-not `$env:LIGHTONOCR_GGUF_MODEL_PATH -or [string]::IsNullOrWhiteSpace(`$env:LIGHTONOCR_GGUF_MODEL_PATH)) {
+        `$env:LIGHTONOCR_GGUF_MODEL_PATH = Join-Path `$root "data/models/lightonocr-gguf/$ggufModelFileTrimmed"
+    }
+    if (-not `$env:LIGHTONOCR_GGUF_MMPROJ_PATH -or [string]::IsNullOrWhiteSpace(`$env:LIGHTONOCR_GGUF_MMPROJ_PATH)) {
+        `$env:LIGHTONOCR_GGUF_MMPROJ_PATH = Join-Path `$root "data/models/lightonocr-gguf/$ggufMmprojFileTrimmed"
+    }
+
+    `$ggufExpectedDir = Join-Path `$root "data/models/lightonocr-gguf"
+    `$requiredGguf = @(
+        @{ Name = "LIGHTONOCR_GGUF_MODEL_PATH"; Path = `$env:LIGHTONOCR_GGUF_MODEL_PATH },
+        @{ Name = "LIGHTONOCR_GGUF_MMPROJ_PATH"; Path = `$env:LIGHTONOCR_GGUF_MMPROJ_PATH }
+    )
+    foreach (`$artifact in `$requiredGguf) {
+        `$artifactPath = `$artifact.Path
+        if (-not (Test-Path -LiteralPath `$artifactPath -PathType Leaf)) {
+            `$name = `$artifact.Name
+            `$message = @(
+                "[ERROR] Missing GGUF artifact: `$artifactPath",
+                "Set `$name to a valid .gguf file.",
+                "Expected under: `$ggufExpectedDir",
+                "Rebuild standalone: scripts/build-standalone.ps1 -Clean"
+            ) -join [Environment]::NewLine
+            throw `$message
+        }
+    }
 }
 
 `$env:PYTHONNOUSERSITE = "1"
@@ -724,29 +726,31 @@ if "%HF_HOME%"=="" (
   set HF_HOME=%ROOT%data\hf
   if not exist "%ROOT%data\hf" mkdir "%ROOT%data\hf"
 )
-if "%LIGHTONOCR_GGUF_MODEL_PATH%"=="" (
-  set LIGHTONOCR_GGUF_MODEL_PATH=%ROOT%data\models\lightonocr-gguf\$ggufModelFileTrimmed
-)
-if "%LIGHTONOCR_GGUF_MMPROJ_PATH%"=="" (
-  set LIGHTONOCR_GGUF_MMPROJ_PATH=%ROOT%data\models\lightonocr-gguf\$ggufMmprojFileTrimmed
-)
-set "GGUF_EXPECTED_DIR=%ROOT%data\models\lightonocr-gguf"
-if not exist "%LIGHTONOCR_GGUF_MODEL_PATH%" (
-  echo [ERROR] Missing GGUF model: %LIGHTONOCR_GGUF_MODEL_PATH%
-  echo Set LIGHTONOCR_GGUF_MODEL_PATH to a valid .gguf file.
-  echo Expected under: %GGUF_EXPECTED_DIR%
-  echo Rebuild standalone: scripts\build-standalone.ps1 -Clean
-  exit /b 1
-)
-if not exist "%LIGHTONOCR_GGUF_MMPROJ_PATH%" (
-  echo [ERROR] Missing GGUF mmproj: %LIGHTONOCR_GGUF_MMPROJ_PATH%
-  echo Set LIGHTONOCR_GGUF_MMPROJ_PATH to a valid .gguf file.
-  echo Expected under: %GGUF_EXPECTED_DIR%
-  echo Rebuild standalone: scripts\build-standalone.ps1 -Clean
-  exit /b 1
-)
 if "%RAGPREP_PDF_BACKEND%"=="" (
-  set RAGPREP_PDF_BACKEND=lightonocr
+  set RAGPREP_PDF_BACKEND=glm-ocr
+)
+if /I "%RAGPREP_PDF_BACKEND%"=="lightonocr" (
+  if "%LIGHTONOCR_GGUF_MODEL_PATH%"=="" (
+    set LIGHTONOCR_GGUF_MODEL_PATH=%ROOT%data\models\lightonocr-gguf\$ggufModelFileTrimmed
+  )
+  if "%LIGHTONOCR_GGUF_MMPROJ_PATH%"=="" (
+    set LIGHTONOCR_GGUF_MMPROJ_PATH=%ROOT%data\models\lightonocr-gguf\$ggufMmprojFileTrimmed
+  )
+  set "GGUF_EXPECTED_DIR=%ROOT%data\models\lightonocr-gguf"
+  if not exist "%LIGHTONOCR_GGUF_MODEL_PATH%" (
+    echo [ERROR] Missing GGUF model: %LIGHTONOCR_GGUF_MODEL_PATH%
+    echo Set LIGHTONOCR_GGUF_MODEL_PATH to a valid .gguf file.
+    echo Expected under: %GGUF_EXPECTED_DIR%
+    echo Rebuild standalone: scripts\build-standalone.ps1 -Clean
+    exit /b 1
+  )
+  if not exist "%LIGHTONOCR_GGUF_MMPROJ_PATH%" (
+    echo [ERROR] Missing GGUF mmproj: %LIGHTONOCR_GGUF_MMPROJ_PATH%
+    echo Set LIGHTONOCR_GGUF_MMPROJ_PATH to a valid .gguf file.
+    echo Expected under: %GGUF_EXPECTED_DIR%
+    echo Rebuild standalone: scripts\build-standalone.ps1 -Clean
+    exit /b 1
+  )
 )
 set PYTHONNOUSERSITE=1
 set PYTHONUTF8=1
