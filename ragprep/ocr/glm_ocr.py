@@ -193,17 +193,50 @@ def _load_transformers_client(model_path: str) -> _TransformersClient:
                 "pip install git+https://github.com/huggingface/transformers.git torch"
             ) from exc
 
-        processor = AutoProcessor.from_pretrained(model_path)
+        processor_cls: Any = AutoProcessor
+        model_cls: Any = AutoModelForImageTextToText
+
+        try:
+            processor = processor_cls.from_pretrained(model_path, trust_remote_code=True)
+        except TypeError:
+            processor = processor_cls.from_pretrained(model_path)
+        except Exception as exc:  # noqa: BLE001
+            try:
+                from transformers import __version__ as transformers_version
+            except Exception:
+                transformers_version = "unknown"
+            raise RuntimeError(
+                "Failed to load GLM-OCR processor via Transformers. "
+                f"model={model_path!r}, transformers={transformers_version}. "
+                "Try upgrading Transformers, or set RAGPREP_GLM_OCR_MODE=server."
+            ) from exc
 
         model_kwargs: dict[str, object] = {"pretrained_model_name_or_path": model_path}
         # Try to honor the upstream recommended args, but fall back if unsupported.
         for key, value in (("torch_dtype", "auto"), ("device_map", "auto")):
             model_kwargs[key] = value
+        model_kwargs["trust_remote_code"] = True
 
         try:
-            model = AutoModelForImageTextToText.from_pretrained(**model_kwargs)
+            model = model_cls.from_pretrained(**model_kwargs)
         except TypeError:
-            model = AutoModelForImageTextToText.from_pretrained(model_path)
+            try:
+                model = model_cls.from_pretrained(
+                    model_path,
+                    trust_remote_code=True,
+                )
+            except TypeError:
+                model = model_cls.from_pretrained(model_path)
+        except Exception as exc:  # noqa: BLE001
+            try:
+                from transformers import __version__ as transformers_version
+            except Exception:
+                transformers_version = "unknown"
+            raise RuntimeError(
+                "Failed to load GLM-OCR model via Transformers. "
+                f"model={model_path!r}, transformers={transformers_version}. "
+                "Try upgrading Transformers, or set RAGPREP_GLM_OCR_MODE=server."
+            ) from exc
 
         # Ensure model is on some device when device_map isn't supported.
         try:
@@ -263,7 +296,7 @@ def _ocr_image_base64_via_transformers(image_base64: str, *, settings: Settings)
             }
         ]
 
-        inputs = processor.apply_chat_template(
+        inputs: Any = processor.apply_chat_template(
             messages,
             tokenize=True,
             add_generation_prompt=True,
