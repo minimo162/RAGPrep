@@ -122,6 +122,7 @@ def ocr_image_base64(image_base64: str, *, settings: Settings) -> str:
         "max_tokens": settings.glm_ocr_max_tokens,
     }
 
+    base_url = _normalize_base_url(settings.glm_ocr_base_url)
     try:
         response = _post_chat_completions(
             url=url,
@@ -130,9 +131,19 @@ def ocr_image_base64(image_base64: str, *, settings: Settings) -> str:
             timeout_seconds=settings.glm_ocr_timeout_seconds,
         )
     except httpx.TimeoutException as exc:
-        raise RuntimeError("GLM-OCR request timed out.") from exc
+        raise RuntimeError(
+            "GLM-OCR request timed out. "
+            f"base_url={base_url!r}. "
+            "Ensure the GLM-OCR server is running and reachable."
+        ) from exc
     except httpx.RequestError as exc:
-        raise RuntimeError(f"Failed to reach GLM-OCR server: {exc}") from exc
+        raise RuntimeError(
+            "Failed to reach GLM-OCR server. "
+            f"base_url={base_url!r}. "
+            f"error={exc}. "
+            "If you're running the Windows standalone build without a GLM-OCR server, "
+            "set RAGPREP_PDF_BACKEND=lightonocr."
+        ) from exc
 
     return _parse_chat_completions_response(response).content
 
