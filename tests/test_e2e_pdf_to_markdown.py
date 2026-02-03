@@ -10,6 +10,7 @@ def _squash_ws(text: str) -> str:
 
 
 def test_pdf_to_markdown_e2e_contains_text(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("RAGPREP_PDF_BACKEND", "lightonocr")
     encoded_pages = ["BASE64_PAGE_1", "BASE64_PAGE_2"]
 
     def _fake_iter_pdf_page_png_base64(
