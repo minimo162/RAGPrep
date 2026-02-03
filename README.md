@@ -28,6 +28,29 @@ RAGPrep は「できるだけ自然な読み順」を目標に、ページ内レ
   - アスペクト比は維持してテキストの幾何を保つ
   - 1ページ = 1画像で扱う（vLLM 側でのバッチ処理に対応）
 
+## GLM-OCR（デフォルト / OpenAI互換API）
+`RAGPREP_PDF_BACKEND=glm-ocr`（デフォルト）は、ローカルで起動した GLM-OCR サーバ（vLLM / SGLang）に対して
+OpenAI互換の `chat.completions` API を呼び出して OCR を行います。
+
+### vLLM（例）
+```bash
+pip install -U vllm --extra-index-url https://wheels.vllm.ai/nightly
+pip install git+https://github.com/huggingface/transformers.git
+vllm serve zai-org/GLM-OCR --allowed-local-media-path / --port 8080
+```
+
+### SGLang（例）
+```bash
+pip install git+https://github.com/sgl-project/sglang.git#subdirectory=python
+pip install git+https://github.com/huggingface/transformers.git
+python -m sglang.launch_server --model zai-org/GLM-OCR --port 8080
+```
+
+### RAGPrep 側の設定（例）
+- `RAGPREP_PDF_BACKEND=glm-ocr`
+- `RAGPREP_GLM_OCR_BASE_URL=http://127.0.0.1:8080`
+- `RAGPREP_GLM_OCR_MODEL=zai-org/GLM-OCR`
+
 ## LightOnOCR推奨パラメータ（llama.cpp CLI）
 LightOnOCR を llama.cpp CLI で使う場合は、以下のパラメータを推奨します。
 
@@ -116,6 +139,14 @@ uv run python scripts/bench_pdf_to_markdown.py --pdf .\path\to\input.pdf --repea
 - `RAGPREP_MAX_UPLOAD_BYTES`（デフォルト: 10MB）
 - `RAGPREP_MAX_PAGES`（デフォルト: 50）
 - `RAGPREP_MAX_CONCURRENCY`（デフォルト: 1）
+- `RAGPREP_PDF_BACKEND`: `glm-ocr`（デフォルト） / `lightonocr`（ローカルGGUF）
+- `RAGPREP_GLM_OCR_BASE_URL`: GLM-OCR サーバURL（デフォルト: `http://127.0.0.1:8080`）
+- `RAGPREP_GLM_OCR_MODEL`: モデル名（デフォルト: `zai-org/GLM-OCR`）
+- `RAGPREP_GLM_OCR_API_KEY`: 任意（OpenAI互換の `Authorization: Bearer ...`）
+- `RAGPREP_GLM_OCR_MAX_TOKENS`: デフォルト 8192
+- `RAGPREP_GLM_OCR_TIMEOUT_SECONDS`: デフォルト 60
+- `LIGHTONOCR_GGUF_MODEL_PATH` / `LIGHTONOCR_GGUF_MMPROJ_PATH`: `RAGPREP_PDF_BACKEND=lightonocr` のときに使用
+- `LIGHTONOCR_LLAVA_CLI_PATH`: 任意（llama.cpp CLI のパス）
 
 ## スタンドアロン配布（Windows）
 
