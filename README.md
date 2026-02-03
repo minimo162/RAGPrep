@@ -84,6 +84,7 @@ python -m sglang.launch_server --model zai-org/GLM-OCR --port 8080
 注意:
 - OCR は外部の GLM-OCR サーバに依存します（スタンドアロンにモデルは同梱しません）。
 - `dist/standalone/run.ps1` / `run.cmd` は起動時に `RAGPREP_GLM_OCR_BASE_URL/v1/models` を疎通確認し、到達できない場合はエラーで終了します。
+- `dist/standalone/start-glm-ocr.ps1`（または `start-glm-ocr.cmd`）は GLM-OCR サーバ起動の補助スクリプトです（環境に `vllm` が入っている場合に利用できます）。
 
 ### ビルド
 ```powershell
@@ -93,6 +94,7 @@ cd C:\Users\Administrator\RAGPrep
 
 ### 起動
 ```powershell
+.\dist\standalone\start-glm-ocr.ps1
 .\dist\standalone\run.ps1
 ```
 

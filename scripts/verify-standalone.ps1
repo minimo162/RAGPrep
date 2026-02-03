@@ -42,6 +42,8 @@ $appDir = Join-Path $resolvedOutputDir "app"
 $sitePackagesDir = Join-Path $resolvedOutputDir "site-packages"
 $runPs1 = Join-Path $resolvedOutputDir "run.ps1"
 $runCmd = Join-Path $resolvedOutputDir "run.cmd"
+$startGlmOcrPs1 = Join-Path $resolvedOutputDir "start-glm-ocr.ps1"
+$startGlmOcrCmd = Join-Path $resolvedOutputDir "start-glm-ocr.cmd"
 
 Assert-Directory -Path $resolvedOutputDir -Label "standalone output"
 Assert-File -Path $pythonExe -Label "python.exe"
@@ -49,6 +51,8 @@ Assert-Directory -Path $appDir -Label "app"
 Assert-Directory -Path $sitePackagesDir -Label "site-packages"
 Assert-File -Path $runPs1 -Label "run.ps1"
 Assert-File -Path $runCmd -Label "run.cmd"
+Assert-File -Path $startGlmOcrPs1 -Label "start-glm-ocr.ps1"
+Assert-File -Path $startGlmOcrCmd -Label "start-glm-ocr.cmd"
 
 Write-Host "Standalone verification passed." -ForegroundColor Green
 Write-Host "  output: $resolvedOutputDir" -ForegroundColor DarkGray

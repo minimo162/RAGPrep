@@ -29,6 +29,8 @@ def test_run_cmd_template_does_not_mkdir_empty_hf_home() -> None:
         "--port %PORT%"
     )
     assert expected in content
+    assert "start-glm-ocr.ps1" in content
+    assert "start-glm-ocr.cmd" in content
 
 
 def test_run_ps1_template_avoids_host_automatic_variable() -> None:
@@ -58,5 +60,7 @@ def test_verify_standalone_checks_required_artifacts() -> None:
     assert '"site-packages"' in content
     assert '"run.ps1"' in content
     assert '"run.cmd"' in content
+    assert '"start-glm-ocr.ps1"' in content
+    assert '"start-glm-ocr.cmd"' in content
     assert "lightonocr" not in content.lower()
     assert "gguf" not in content.lower()
