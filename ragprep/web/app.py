@@ -162,6 +162,7 @@ def _run_job(job_id: str, pdf_bytes: bytes) -> None:
                 "Failed to load GLM-OCR processor via Transformers",
                 "Failed to load GLM-OCR model via Transformers",
                 "Transformers backend selected, but required packages are missing",
+                "argument of type 'NoneType' is not iterable",
             )
             if any(token in message for token in expected_errors):
                 logger.warning("Job %s failed: %s", job_id, message)

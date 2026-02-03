@@ -197,9 +197,10 @@ def _load_transformers_client(model_path: str) -> _TransformersClient:
         model_cls: Any = AutoModelForImageTextToText
 
         try:
-            processor = processor_cls.from_pretrained(model_path, trust_remote_code=True)
-        except TypeError:
-            processor = processor_cls.from_pretrained(model_path)
+            try:
+                processor = processor_cls.from_pretrained(model_path, trust_remote_code=True)
+            except TypeError:
+                processor = processor_cls.from_pretrained(model_path)
         except Exception as exc:  # noqa: BLE001
             try:
                 from transformers import __version__ as transformers_version
@@ -218,15 +219,16 @@ def _load_transformers_client(model_path: str) -> _TransformersClient:
         model_kwargs["trust_remote_code"] = True
 
         try:
-            model = model_cls.from_pretrained(**model_kwargs)
-        except TypeError:
             try:
-                model = model_cls.from_pretrained(
-                    model_path,
-                    trust_remote_code=True,
-                )
+                model = model_cls.from_pretrained(**model_kwargs)
             except TypeError:
-                model = model_cls.from_pretrained(model_path)
+                try:
+                    model = model_cls.from_pretrained(
+                        model_path,
+                        trust_remote_code=True,
+                    )
+                except TypeError:
+                    model = model_cls.from_pretrained(model_path)
         except Exception as exc:  # noqa: BLE001
             try:
                 from transformers import __version__ as transformers_version
