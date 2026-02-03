@@ -378,6 +378,9 @@ if (-not (Test-Path `$pythonExe)) {
     throw "Missing `$pythonExe. Run scripts/build-standalone.ps1 first."
 }
 
+if (-not `$env:RAGPREP_GLM_OCR_MODE -or [string]::IsNullOrWhiteSpace(`$env:RAGPREP_GLM_OCR_MODE)) {
+    `$env:RAGPREP_GLM_OCR_MODE = "transformers"
+}
 if (-not `$env:RAGPREP_GLM_OCR_BASE_URL -or [string]::IsNullOrWhiteSpace(`$env:RAGPREP_GLM_OCR_BASE_URL)) {
     `$env:RAGPREP_GLM_OCR_BASE_URL = "http://127.0.0.1:8080"
 }
@@ -388,15 +391,17 @@ if (`$env:RAGPREP_PDF_BACKEND -ne "glm-ocr") {
     throw "RAGPREP_PDF_BACKEND must be 'glm-ocr' (got: `$env:RAGPREP_PDF_BACKEND)."
 }
 
-`$probeUrl = `$env:RAGPREP_GLM_OCR_BASE_URL.TrimEnd("/") + "/v1/models"
-try {
-    `$resp = Invoke-WebRequest -UseBasicParsing -TimeoutSec 2 -Uri `$probeUrl
-    if (`$resp.StatusCode -ne 200) {
-        throw "Unexpected status: `$(`$resp.StatusCode)"
+if (`$env:RAGPREP_GLM_OCR_MODE -eq "server") {
+    `$probeUrl = `$env:RAGPREP_GLM_OCR_BASE_URL.TrimEnd("/") + "/v1/models"
+    try {
+        `$resp = Invoke-WebRequest -UseBasicParsing -TimeoutSec 2 -Uri `$probeUrl
+        if (`$resp.StatusCode -ne 200) {
+            throw "Unexpected status: `$(`$resp.StatusCode)"
+        }
     }
-}
-catch {
-    throw "GLM-OCR server is not reachable: `$probeUrl. Run start-glm-ocr.ps1 (or start-glm-ocr.cmd) and retry."
+    catch {
+        throw "GLM-OCR server is not reachable: `$probeUrl. Run start-glm-ocr.ps1 (or start-glm-ocr.cmd) and retry."
+    }
 }
 
 `$env:PYTHONNOUSERSITE = "1"
@@ -424,6 +429,9 @@ set "PORT=8000"
 if not "%RAGPREP_PORT%"=="" set "PORT=%RAGPREP_PORT%"
 if not "%~2"=="" set "PORT=%~2"
 
+if "%RAGPREP_GLM_OCR_MODE%"=="" (
+  set RAGPREP_GLM_OCR_MODE=transformers
+)
 if "%RAGPREP_GLM_OCR_BASE_URL%"=="" (
   set RAGPREP_GLM_OCR_BASE_URL=http://127.0.0.1:8080
 )
@@ -435,11 +443,13 @@ if /I not "%RAGPREP_PDF_BACKEND%"=="glm-ocr" (
   exit /b 1
 )
 
-powershell -NoProfile -Command "try { $u=$env:RAGPREP_GLM_OCR_BASE_URL; $r=Invoke-WebRequest -UseBasicParsing -TimeoutSec 2 -Uri ($u.TrimEnd('/') + '/v1/models'); if ($r.StatusCode -eq 200) { exit 0 } exit 1 } catch { exit 1 }"
-if not "%ERRORLEVEL%"=="0" (
-  echo [ERROR] GLM-OCR server is not reachable: %RAGPREP_GLM_OCR_BASE_URL%/v1/models
-  echo Start your server (vLLM/SGLang) and retry.
-  exit /b 1
+if /I "%RAGPREP_GLM_OCR_MODE%"=="server" (
+  powershell -NoProfile -Command "try { $u=$env:RAGPREP_GLM_OCR_BASE_URL; $r=Invoke-WebRequest -UseBasicParsing -TimeoutSec 2 -Uri ($u.TrimEnd('/') + '/v1/models'); if ($r.StatusCode -eq 200) { exit 0 } exit 1 } catch { exit 1 }"
+  if not "%ERRORLEVEL%"=="0" (
+    echo [ERROR] GLM-OCR server is not reachable: %RAGPREP_GLM_OCR_BASE_URL%/v1/models
+    echo Start your server (vLLM/SGLang) and retry.
+    exit /b 1
+  )
 )
 
 set PYTHONNOUSERSITE=1

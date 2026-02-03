@@ -10,6 +10,7 @@ from ragprep.ocr import glm_ocr
 
 
 def test_glm_ocr_sends_openai_chat_completions_payload(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("RAGPREP_GLM_OCR_MODE", "server")
     monkeypatch.setenv("RAGPREP_GLM_OCR_BASE_URL", "http://localhost:8080/")
     monkeypatch.setenv("RAGPREP_GLM_OCR_MODEL", "zai-org/GLM-OCR")
     monkeypatch.setenv("RAGPREP_GLM_OCR_API_KEY", "secret")
@@ -62,6 +63,7 @@ def test_glm_ocr_sends_openai_chat_completions_payload(monkeypatch: pytest.Monke
 
 
 def test_glm_ocr_raises_on_non_200(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("RAGPREP_GLM_OCR_MODE", "server")
     settings = get_settings()
 
     def _fake_post(**_kwargs: object) -> httpx.Response:
@@ -75,6 +77,7 @@ def test_glm_ocr_raises_on_non_200(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_glm_ocr_raises_on_invalid_json(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("RAGPREP_GLM_OCR_MODE", "server")
     settings = get_settings()
 
     def _fake_post(**_kwargs: object) -> httpx.Response:
@@ -88,6 +91,7 @@ def test_glm_ocr_raises_on_invalid_json(monkeypatch: pytest.MonkeyPatch) -> None
 
 
 def test_glm_ocr_raises_on_missing_content(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("RAGPREP_GLM_OCR_MODE", "server")
     settings = get_settings()
 
     def _fake_post(**_kwargs: object) -> httpx.Response:
@@ -100,7 +104,8 @@ def test_glm_ocr_raises_on_missing_content(monkeypatch: pytest.MonkeyPatch) -> N
         glm_ocr.ocr_image_base64(image_b64, settings=settings)
 
 
-def test_glm_ocr_rejects_invalid_base64() -> None:
+def test_glm_ocr_rejects_invalid_base64(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("RAGPREP_GLM_OCR_MODE", "server")
     settings = get_settings()
     with pytest.raises(ValueError, match="not valid base64"):
         glm_ocr.ocr_image_base64("not base64 !!!", settings=settings)
