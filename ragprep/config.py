@@ -12,6 +12,7 @@ ENV_MAX_CONCURRENCY: Final[str] = "RAGPREP_MAX_CONCURRENCY"
 ENV_PDF_BACKEND: Final[str] = "RAGPREP_PDF_BACKEND"
 ENV_GLM_OCR_BASE_URL: Final[str] = "RAGPREP_GLM_OCR_BASE_URL"
 ENV_GLM_OCR_MODEL: Final[str] = "RAGPREP_GLM_OCR_MODEL"
+ENV_GLM_OCR_MODE: Final[str] = "RAGPREP_GLM_OCR_MODE"
 ENV_GLM_OCR_API_KEY: Final[str] = "RAGPREP_GLM_OCR_API_KEY"
 ENV_GLM_OCR_MAX_TOKENS: Final[str] = "RAGPREP_GLM_OCR_MAX_TOKENS"
 ENV_GLM_OCR_TIMEOUT_SECONDS: Final[str] = "RAGPREP_GLM_OCR_TIMEOUT_SECONDS"
@@ -25,6 +26,8 @@ DEFAULT_PDF_BACKEND: Final[str] = "glm-ocr"
 SUPPORTED_PDF_BACKENDS: Final[tuple[str, ...]] = ("glm-ocr",)
 DEFAULT_GLM_OCR_BASE_URL: Final[str] = "http://127.0.0.1:8080"
 DEFAULT_GLM_OCR_MODEL: Final[str] = "zai-org/GLM-OCR"
+DEFAULT_GLM_OCR_MODE: Final[str] = "transformers"
+SUPPORTED_GLM_OCR_MODES: Final[tuple[str, ...]] = ("transformers", "server")
 DEFAULT_GLM_OCR_MAX_TOKENS: Final[int] = 8192
 DEFAULT_GLM_OCR_TIMEOUT_SECONDS: Final[int] = 60
 
@@ -39,6 +42,7 @@ class Settings:
     pdf_backend: str
     glm_ocr_base_url: str
     glm_ocr_model: str
+    glm_ocr_mode: str
     glm_ocr_api_key: str | None
     glm_ocr_max_tokens: int
     glm_ocr_timeout_seconds: int
@@ -84,6 +88,18 @@ def _get_pdf_backend() -> str:
     return value
 
 
+def _get_glm_ocr_mode() -> str:
+    raw = os.getenv(ENV_GLM_OCR_MODE)
+    if raw is None or not raw.strip():
+        return DEFAULT_GLM_OCR_MODE
+    value = raw.strip().lower()
+    if value not in SUPPORTED_GLM_OCR_MODES:
+        raise ValueError(
+            f"{ENV_GLM_OCR_MODE} must be one of {', '.join(SUPPORTED_GLM_OCR_MODES)}, got: {raw!r}"
+        )
+    return value
+
+
 def get_settings() -> Settings:
     return Settings(
         max_upload_bytes=_get_positive_int(ENV_MAX_UPLOAD_BYTES, DEFAULT_MAX_UPLOAD_BYTES),
@@ -94,6 +110,7 @@ def get_settings() -> Settings:
         pdf_backend=_get_pdf_backend(),
         glm_ocr_base_url=_get_trimmed_str(ENV_GLM_OCR_BASE_URL, DEFAULT_GLM_OCR_BASE_URL),
         glm_ocr_model=_get_trimmed_str(ENV_GLM_OCR_MODEL, DEFAULT_GLM_OCR_MODEL),
+        glm_ocr_mode=_get_glm_ocr_mode(),
         glm_ocr_api_key=_get_optional_str(ENV_GLM_OCR_API_KEY),
         glm_ocr_max_tokens=_get_positive_int(ENV_GLM_OCR_MAX_TOKENS, DEFAULT_GLM_OCR_MAX_TOKENS),
         glm_ocr_timeout_seconds=_get_positive_int(

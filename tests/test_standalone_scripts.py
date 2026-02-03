@@ -18,9 +18,11 @@ def _read_verify_standalone_ps1() -> str:
 def test_run_cmd_template_does_not_mkdir_empty_hf_home() -> None:
     content = _read_build_standalone_ps1()
     assert "set RAGPREP_PDF_BACKEND=glm-ocr" in content
+    assert "set RAGPREP_GLM_OCR_MODE=transformers" in content
     assert "RAGPREP_GLM_OCR_BASE_URL" in content
     assert "Invoke-WebRequest -UseBasicParsing -TimeoutSec 2" in content
     assert "/v1/models" in content
+    assert 'if /I "%RAGPREP_GLM_OCR_MODE%"=="server"' in content
     assert "vllm/vllm-openai:nightly" in content
     assert "docker run --rm -it" in content
     assert "lightonocr" not in content.lower()
@@ -44,7 +46,9 @@ def test_run_ps1_template_avoids_host_automatic_variable() -> None:
     assert '[string]`$Host = "127.0.0.1",' not in content
     assert "Invoke-WebRequest -UseBasicParsing -TimeoutSec 2" in content
     assert "`$env:RAGPREP_PDF_BACKEND = \"glm-ocr\"" in content
+    assert "`$env:RAGPREP_GLM_OCR_MODE = \"transformers\"" in content
     assert "/v1/models" in content
+    assert 'if (`$env:RAGPREP_GLM_OCR_MODE -eq "server")' in content
     assert "lightonocr" not in content.lower()
 
 
