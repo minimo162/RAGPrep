@@ -1,18 +1,23 @@
 # RAGPrep
 
-PDF をページ単位で OCR して Markdown に変換するツールです（Web UI / Desktop UI / CLI）。
+PDF をページ単位で OCR し、Markdown に変換するツールです（Web UI / Desktop UI / CLI）。
 
-## 使い方
-
-### セットアップ
+## セットアップ
 ```bash
 cd C:\Users\Administrator\RAGPrep
 uv sync --dev
 ```
 
+## 実行
+
 ### Desktop（推奨）
 ```bash
 uv run python -m ragprep.desktop
+```
+
+バインド先を変える場合:
+```bash
+uv run python -m ragprep.desktop --host 127.0.0.1 --port 8000
 ```
 
 ### Web
@@ -34,7 +39,7 @@ uv run python scripts/pdf_to_markdown.py --pdf .\path\to\input.pdf --stdout
 ## OCR バックエンド（GLM-OCR）
 RAGPrep は `zai-org/GLM-OCR` を **OpenAI 互換 API**（`/v1/chat/completions`）経由で呼び出します。
 
-RAGPrep 側のデフォルト設定:
+RAGPrep 側のデフォルト:
 - `RAGPREP_GLM_OCR_BASE_URL=http://127.0.0.1:8080`
 - `RAGPREP_GLM_OCR_MODEL=zai-org/GLM-OCR`
 
