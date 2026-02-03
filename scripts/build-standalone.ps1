@@ -5,11 +5,6 @@ param(
     [string]$TargetTriple = "x86_64-pc-windows-msvc",
     [string]$PbsRelease = "latest",
     [string]$PipTempRoot = "",
-    [string]$LlamaCppPythonExtraIndexUrl = "https://abetlen.github.io/llama-cpp-python/whl/cpu",
-    [string]$GgufRepoId = "noctrex/LightOnOCR-2-1B-GGUF",
-    [string]$GgufModelFile = "LightOnOCR-2-1B-Q6_K.gguf",
-    [string]$GgufMmprojFile = "mmproj-BF16.gguf",
-    [switch]$SkipGgufPrefetch,
     [switch]$Clean
 )
 
@@ -79,7 +74,6 @@ try {
     Write-Host "  python:     $PythonVersion ($TargetTriple)" -ForegroundColor DarkGray
     Write-Host "  pbs:        $PbsRelease" -ForegroundColor DarkGray
     Write-Host "  clean:      $($Clean.IsPresent)" -ForegroundColor DarkGray
-    Write-Host "  gguf_fetch: $(-not $SkipGgufPrefetch.IsPresent)" -ForegroundColor DarkGray
     Write-Host "  pip_temp:   $pipTempRootResolved" -ForegroundColor DarkGray
     Write-Host "  pip_cache:  $pipCacheDir" -ForegroundColor DarkGray
 
@@ -181,51 +175,8 @@ try {
         throw "Expected python.exe missing before Move-Item: $pythonSourceExe"
     }
 
-    Write-Host "Source directory (top-level):" -ForegroundColor DarkGray
-    Get-ChildItem -Path $pythonSourceDir -Force |
-        Sort-Object Name |
-        Select-Object Mode, Length, LastWriteTime, Name |
-        Format-Table -AutoSize
-
     try {
-        $moveInfo = Move-DirectoryRobust -SourceDir $pythonSourceDir -DestinationDir $pythonDir -VerifyRelativePath "python.exe"
-        if ($moveInfo.Method -ne "Move-Item" -or $moveInfo.Attempts -gt 1) {
-            $suffix = if ($moveInfo.Method -eq "robocopy") { " (exit $($moveInfo.RobocopyExitCode))" } else { "" }
-            Write-Host "  relocation: $($moveInfo.Method) after $($moveInfo.Attempts) attempt(s)$suffix" -ForegroundColor DarkGray
-        }
-    }
-    catch {
-        $msg = $_.Exception.Message
-        $isAccessDenied = ($_.Exception -is [System.UnauthorizedAccessException]) -or ($_.Exception -is [System.IO.IOException])
-
-        Write-Warning "Failed to move extracted Python runtime."
-        Write-Warning "  source: $pythonSourceDir"
-        Write-Warning "  dest:   $pythonDir"
-        Write-Warning "  error:  $msg"
-
-        try {
-            $sourceItem = Get-Item -LiteralPath $pythonSourceDir -Force
-            Write-Warning "  source_attrs: $($sourceItem.Attributes)"
-        }
-        catch {
-            Write-Warning "  source_attrs: (failed to read)"
-        }
-        try {
-            $acl = Get-Acl -LiteralPath $pythonSourceDir
-            Write-Warning "  source_owner: $($acl.Owner)"
-        }
-        catch {
-            Write-Warning "  source_owner: (failed to read)"
-        }
-
-        if ($isAccessDenied) {
-            Write-Warning "AccessDenied remediation hints:"
-            Write-Warning "  - Close any process using '$OutputDir' (Explorer panes can lock files)."
-            Write-Warning "  - Antivirus/indexer may temporarily lock newly extracted files; retry after a short wait."
-            Write-Warning "  - Re-run with -Clean."
-        }
-
-        throw
+        Move-DirectoryRobust -SourceDir $pythonSourceDir -DestinationDir $pythonDir -VerifyRelativePath "python.exe" | Out-Null
     }
     finally {
         if (Test-Path $extractDir) {
@@ -297,21 +248,9 @@ try {
         "--no-input",
         "--progress-bar", "off",
         "--retries", "10",
-        "--timeout", "60"
+        "--timeout", "60",
+        "-r", $requirementsPath
     )
-    $needsLlamaCppWheelIndex = Select-String -LiteralPath $requirementsPath -Pattern "^llama-cpp-python" -Quiet
-    if ($needsLlamaCppWheelIndex) {
-        $llamaExtraIndexUrl = $LlamaCppPythonExtraIndexUrl.Trim()
-        if ([string]::IsNullOrWhiteSpace($llamaExtraIndexUrl)) {
-            throw "LlamaCppPythonExtraIndexUrl must be non-empty because requirements include llama-cpp-python."
-        }
-
-        $pipArgs += @(
-            "--only-binary", "llama-cpp-python",
-            "--extra-index-url", $llamaExtraIndexUrl
-        )
-    }
-    $pipArgs += @("-r", $requirementsPath)
     try {
         & $pythonExe -m pip @pipArgs
         Assert-LastExitCode "pip install"
@@ -332,7 +271,7 @@ try {
         }
     }
 
-    $currentStep = "copy app source"
+    $currentStep = "copy app sources"
     Write-Host "Copying app source..." -ForegroundColor Cyan
     if (Test-Path $appDir) {
         Remove-Item -Recurse -Force $appDir
@@ -343,302 +282,6 @@ try {
     $noticesPath = Join-Path $repoRoot "THIRD_PARTY_NOTICES.md"
     if (Test-Path $noticesPath) {
         Copy-Item -Force $noticesPath (Join-Path $OutputDir "THIRD_PARTY_NOTICES.md")
-    }
-    else {
-        Write-Warning "THIRD_PARTY_NOTICES.md not found at repo root; standalone output will not include notices."
-    }
-
-    $dataDir = Join-Path $OutputDir "data"
-    $hfHomeDir = Join-Path $dataDir "hf"
-    New-Item -ItemType Directory -Force -Path $hfHomeDir | Out-Null
-
-    $ggufModelFileTrimmed = $GgufModelFile.Trim()
-    if ([string]::IsNullOrWhiteSpace($ggufModelFileTrimmed)) {
-        throw "GgufModelFile must be non-empty (got: $GgufModelFile)"
-    }
-
-    $ggufMmprojFileTrimmed = $GgufMmprojFile.Trim()
-    if ([string]::IsNullOrWhiteSpace($ggufMmprojFileTrimmed)) {
-        throw "GgufMmprojFile must be non-empty (got: $GgufMmprojFile)"
-    }
-
-    $ggufOutDir = Join-Path $dataDir "models\\lightonocr-gguf"
-    $ggufModelPath = Join-Path $ggufOutDir $ggufModelFileTrimmed
-    $ggufMmprojPath = Join-Path $ggufOutDir $ggufMmprojFileTrimmed
-
-    if (-not $SkipGgufPrefetch) {
-        $currentStep = "prefetch gguf artifacts"
-        $ggufRepoIdTrimmed = $GgufRepoId.Trim()
-        if ([string]::IsNullOrWhiteSpace($ggufRepoIdTrimmed)) {
-            throw "GgufRepoId must be non-empty (got: $GgufRepoId)"
-        }
-
-        New-Item -ItemType Directory -Force -Path $ggufOutDir | Out-Null
-
-        Write-Host "Prefetching LightOnOCR GGUF artifacts (this can take a while)..." -ForegroundColor Cyan
-        Write-Host "  repo:   $ggufRepoIdTrimmed" -ForegroundColor DarkGray
-        Write-Host "  model:  $ggufModelFileTrimmed" -ForegroundColor DarkGray
-        Write-Host "  mmproj: $ggufMmprojFileTrimmed" -ForegroundColor DarkGray
-        Write-Host "  out:    $ggufOutDir" -ForegroundColor DarkGray
-        Write-Host "  HF_HOME: $hfHomeDir" -ForegroundColor DarkGray
-
-        $origHfHome2 = $env:HF_HOME
-        $origPythonPath2 = $env:PYTHONPATH
-        $origNoUserSite2 = $env:PYTHONNOUSERSITE
-        $origPythonUtf82 = $env:PYTHONUTF8
-        try {
-            $env:HF_HOME = $hfHomeDir
-            $env:PYTHONNOUSERSITE = "1"
-            $env:PYTHONUTF8 = "1"
-            $env:PYTHONPATH = (Join-Path $OutputDir "app") + ";" + (Join-Path $OutputDir "site-packages")
-
-$prefetchGgufPy = @'
-import argparse
-import os
-import shutil
-import sys
-import traceback
-from pathlib import Path
-from urllib.error import HTTPError, URLError
-from urllib.request import Request, urlopen
-
-
-def main() -> None:
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--repo-id", required=True)
-    ap.add_argument("--model-file", required=True)
-    ap.add_argument("--mmproj-file", required=True)
-    ap.add_argument("--out-dir", required=True)
-    args = ap.parse_args()
-
-    repo_id = args.repo_id
-    model_file = args.model_file
-    mmproj_file = args.mmproj_file
-    out_dir = Path(args.out_dir)
-    out_dir.mkdir(parents=True, exist_ok=True)
-
-    print(f"Prefetching GGUF files from: {repo_id}")
-    print(f"  model:  {model_file}")
-    print(f"  mmproj: {mmproj_file}")
-    print(f"  out:    {out_dir}")
-    print(f"  HF_HOME: {os.environ.get('HF_HOME')}")
-
-    def _download_via_hf_hub(filename: str) -> Path | None:
-        try:
-            from huggingface_hub import hf_hub_download
-        except Exception:
-            print("huggingface_hub not available, falling back to direct download.")
-            return None
-
-        cached_path = Path(hf_hub_download(repo_id=repo_id, filename=filename))
-        dest = out_dir / filename
-        try:
-            if dest.is_file() and dest.stat().st_size == cached_path.stat().st_size:
-                return dest
-        except OSError:
-            pass
-        shutil.copy2(cached_path, dest)
-        return dest
-
-    def _download_direct(filename: str) -> Path:
-        url = f"https://huggingface.co/{repo_id}/resolve/main/{filename}?download=1"
-        dest = out_dir / filename
-        tmp = dest.with_suffix(dest.suffix + ".part")
-        request = Request(url, headers={"User-Agent": "ragprep-standalone-build"})
-        try:
-            with urlopen(request) as response, open(tmp, "wb") as handle:  # noqa: S310
-                shutil.copyfileobj(response, handle)
-        except (HTTPError, URLError) as exc:
-            raise RuntimeError(f"Direct download failed: {url}") from exc
-        size = tmp.stat().st_size if tmp.exists() else 0
-        if size <= 0:
-            raise RuntimeError(f"Direct download produced empty file: {url}")
-        tmp.replace(dest)
-        return dest
-
-    def stage(filename: str) -> Path:
-        dest = out_dir / filename
-        try:
-            if dest.is_file() and dest.stat().st_size > 0:
-                return dest
-        except OSError:
-            pass
-
-        staged = _download_via_hf_hub(filename)
-        if staged is not None:
-            return staged
-        return _download_direct(filename)
-
-    model_dest = stage(model_file)
-    mmproj_dest = stage(mmproj_file)
-
-    print("Prefetch complete.")
-    print(f"  model_path:  {model_dest}")
-    print(f"  mmproj_path: {mmproj_dest}")
-
-
-if __name__ == "__main__":
-    try:
-        main()
-    except Exception:
-        print("GGUF prefetch failed.", file=sys.stderr)
-        traceback.print_exc()
-        sys.exit(1)
-'@
-
-            $prefetchGgufScriptPath = Join-Path $cacheDir ("prefetch-gguf-" + [guid]::NewGuid().ToString("N") + ".py")
-            try {
-                Set-Content -Path $prefetchGgufScriptPath -Value $prefetchGgufPy -Encoding UTF8
-
-                & $pythonExe $prefetchGgufScriptPath `
-                    --repo-id $ggufRepoIdTrimmed `
-                    --model-file $ggufModelFileTrimmed `
-                    --mmproj-file $ggufMmprojFileTrimmed `
-                    --out-dir $ggufOutDir
-                if ($LASTEXITCODE -ne 0) {
-                    Write-Warning "GGUF prefetch failed. To skip, re-run with -SkipGgufPrefetch."
-                }
-                Assert-LastExitCode "gguf prefetch"
-            }
-            finally {
-                Remove-Item -LiteralPath $prefetchGgufScriptPath -Force -ErrorAction SilentlyContinue
-            }
-        }
-        finally {
-            if ($null -ne $origHfHome2) { $env:HF_HOME = $origHfHome2 } else { Remove-Item env:HF_HOME -ErrorAction SilentlyContinue }
-            if ($null -ne $origPythonPath2) { $env:PYTHONPATH = $origPythonPath2 } else { Remove-Item env:PYTHONPATH -ErrorAction SilentlyContinue }
-            if ($null -ne $origNoUserSite2) { $env:PYTHONNOUSERSITE = $origNoUserSite2 } else { Remove-Item env:PYTHONNOUSERSITE -ErrorAction SilentlyContinue }
-            if ($null -ne $origPythonUtf82) { $env:PYTHONUTF8 = $origPythonUtf82 } else { Remove-Item env:PYTHONUTF8 -ErrorAction SilentlyContinue }
-        }
-
-        foreach ($ggufPath in @($ggufModelPath, $ggufMmprojPath)) {
-            if (-not (Test-Path -LiteralPath $ggufPath -PathType Leaf)) {
-                throw "GGUF artifact missing after prefetch: $ggufPath"
-            }
-            $artifactSize = (Get-Item -LiteralPath $ggufPath).Length
-            if ($artifactSize -le 0) {
-                throw "GGUF artifact is empty after prefetch: $ggufPath"
-            }
-        }
-
-        Write-Host "Standalone run scripts default to these GGUF paths:" -ForegroundColor Cyan
-        Write-Host "  `$env:LIGHTONOCR_GGUF_MODEL_PATH=$ggufModelPath" -ForegroundColor DarkGray
-        Write-Host "  `$env:LIGHTONOCR_GGUF_MMPROJ_PATH=$ggufMmprojPath" -ForegroundColor DarkGray
-    }
-    else {
-        Write-Host "Skipping GGUF prefetch (-SkipGgufPrefetch)." -ForegroundColor Yellow
-    }
-
-    # Bundle llama.cpp (vision CLI) for standalone
-    # NOTE: We pin URL + SHA256 to avoid supply-chain drift.
-    $currentStep = "bundle llama.cpp"
-    $llamaCppTag = "b7815"
-    $llamaCppBinDir = Join-Path $OutputDir "bin/llama.cpp"
-    New-Item -ItemType Directory -Force -Path $llamaCppBinDir | Out-Null
-    $llamaCppBaseUrl = "https://github.com/ggml-org/llama.cpp/releases/download/$llamaCppTag"
-    $llamaCppVariants = @(
-        @{
-            Name = "avx2"
-            Asset = "llama-$llamaCppTag-bin-win-cpu-x64.zip"
-            Sha256 = "7d0fea9f0879cff4a3b6ad16051d28d394566abe7870a20e7f8c14abf9973b57"
-        },
-        @{
-            Name = "vulkan"
-            Asset = "llama-$llamaCppTag-bin-win-vulkan-x64.zip"
-            Sha256 = "1012aa05900ae8a5685a0c7dbb98a5a9d8b6a9e70cd8119990bc61bdc4e9e475"
-        }
-    )
-
-    $bundledVariants = @()
-
-    foreach ($variant in $llamaCppVariants) {
-        $variantName = $variant.Name
-        $variantAsset = $variant.Asset
-        $variantSha256 = $variant.Sha256
-        $variantUrl = "$llamaCppBaseUrl/$variantAsset"
-        $variantArchivePath = Join-Path $cacheDir $variantAsset
-
-        if (-not (Test-Path -LiteralPath $variantArchivePath -PathType Leaf)) {
-            Write-Host "Downloading llama.cpp $llamaCppTag ($variantName / $variantAsset)..." -ForegroundColor Cyan
-            Invoke-WebRequest -Uri $variantUrl -OutFile $variantArchivePath
-        }
-        else {
-            Write-Host "Using cached llama.cpp bundle ($variantName / $variantAsset)" -ForegroundColor Cyan
-        }
-
-        $variantHash = (Get-FileHash -Algorithm SHA256 -Path $variantArchivePath).Hash.ToLowerInvariant()
-        if ($variantHash -ne $variantSha256) {
-            throw "llama.cpp bundle checksum mismatch ($variantName). expected=$variantSha256 got=$variantHash file=$variantArchivePath"
-        }
-
-        $variantExtractDir = Join-Path $extractDir ("llama.cpp-" + $llamaCppTag + "-" + $variantName)
-        if (Test-Path -LiteralPath $variantExtractDir -PathType Container) {
-            Remove-Item -LiteralPath $variantExtractDir -Recurse -Force -ErrorAction SilentlyContinue
-        }
-        New-Item -ItemType Directory -Force -Path $variantExtractDir | Out-Null
-
-        Write-Host "Extracting llama.cpp bundle ($variantName)..." -ForegroundColor Cyan
-        Expand-Archive -LiteralPath $variantArchivePath -DestinationPath $variantExtractDir -Force
-
-        $mtmdCliExe = Join-Path $variantExtractDir "llama-mtmd-cli.exe"
-        if (-not (Test-Path -LiteralPath $mtmdCliExe -PathType Leaf)) {
-            $available = (Get-ChildItem -Path $variantExtractDir -File -Filter "*.exe" | Select-Object -ExpandProperty Name) -join ", "
-            throw "Could not locate llama-mtmd-cli.exe in the llama.cpp bundle ($variantName). Available: $available"
-        }
-
-        $llavaCliCandidates = @(
-            (Join-Path $variantExtractDir "llava-cli.exe"),
-            (Join-Path $variantExtractDir "llama-llava-cli.exe")
-        )
-        $llavaCliExe = $llavaCliCandidates | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
-
-        $variantBinDir = Join-Path $llamaCppBinDir $variantName
-        New-Item -ItemType Directory -Force -Path $variantBinDir | Out-Null
-
-        # Bundle the preferred multimodal CLI (llama-mtmd-cli.exe).
-        Copy-Item -Force -LiteralPath $mtmdCliExe -Destination (Join-Path $variantBinDir "llama-mtmd-cli.exe")
-
-        # Bundle llava-cli.exe for backward compatibility (if present in the release).
-        # Normalize to llava-cli.exe for runtime discovery.
-        if ($llavaCliExe) {
-            Copy-Item -Force -LiteralPath $llavaCliExe -Destination (Join-Path $variantBinDir "llava-cli.exe")
-        }
-        Get-ChildItem -Path $variantExtractDir -File -Filter "*.dll" | ForEach-Object {
-            Copy-Item -Force -LiteralPath $_.FullName -Destination $variantBinDir
-        }
-
-        $bundledVariants += [pscustomobject]@{
-            Name = $variantName
-            BinDir = $variantBinDir
-            MtmdCli = Join-Path $variantBinDir "llama-mtmd-cli.exe"
-            LlavaCli = if ($llavaCliExe) { Join-Path $variantBinDir "llava-cli.exe" } else { "" }
-        }
-    }
-
-    # Keep a root-level AVX2 copy for backward compatibility with existing run scripts.
-    $avx2BinDir = Join-Path $llamaCppBinDir "avx2"
-    if (Test-Path -LiteralPath $avx2BinDir -PathType Container) {
-        $rootMtmdCli = Join-Path $llamaCppBinDir "llama-mtmd-cli.exe"
-        Copy-Item -Force -LiteralPath (Join-Path $avx2BinDir "llama-mtmd-cli.exe") -Destination $rootMtmdCli
-
-        $avx2LlavaCli = Join-Path $avx2BinDir "llava-cli.exe"
-        if (Test-Path -LiteralPath $avx2LlavaCli -PathType Leaf) {
-            Copy-Item -Force -LiteralPath $avx2LlavaCli -Destination (Join-Path $llamaCppBinDir "llava-cli.exe")
-        }
-        Get-ChildItem -Path $avx2BinDir -File -Filter "*.dll" | ForEach-Object {
-            Copy-Item -Force -LiteralPath $_.FullName -Destination $llamaCppBinDir
-        }
-    }
-
-    Write-Host "Bundled llama.cpp binaries:" -ForegroundColor Cyan
-    foreach ($entry in $bundledVariants) {
-        Write-Host "  $($entry.Name): $(Join-Path $entry.BinDir "llama-mtmd-cli.exe")" -ForegroundColor DarkGray
-        if ($entry.LlavaCli) {
-            Write-Host "    llava-cli: $($entry.LlavaCli)" -ForegroundColor DarkGray
-        }
-    }
-    if (Test-Path -LiteralPath (Join-Path $llamaCppBinDir "llama-mtmd-cli.exe") -PathType Leaf) {
-        Write-Host "  root (compat): $(Join-Path $llamaCppBinDir "llama-mtmd-cli.exe")" -ForegroundColor DarkGray
     }
 
     $currentStep = "write run scripts"
@@ -659,65 +302,25 @@ if (-not (Test-Path `$pythonExe)) {
     throw "Missing `$pythonExe. Run scripts/build-standalone.ps1 first."
 }
 
-if (-not `$env:HF_HOME -or [string]::IsNullOrWhiteSpace(`$env:HF_HOME)) {
-    `$hfHome = Join-Path `$root "data/hf"
-    New-Item -ItemType Directory -Force -Path `$hfHome | Out-Null
-    `$env:HF_HOME = `$hfHome
+if (-not `$env:RAGPREP_GLM_OCR_BASE_URL -or [string]::IsNullOrWhiteSpace(`$env:RAGPREP_GLM_OCR_BASE_URL)) {
+    `$env:RAGPREP_GLM_OCR_BASE_URL = "http://127.0.0.1:8080"
 }
-
 if (-not `$env:RAGPREP_PDF_BACKEND -or [string]::IsNullOrWhiteSpace(`$env:RAGPREP_PDF_BACKEND)) {
-    `$glmBaseUrl = `$env:RAGPREP_GLM_OCR_BASE_URL
-    if (-not `$glmBaseUrl -or [string]::IsNullOrWhiteSpace(`$glmBaseUrl)) {
-        `$glmBaseUrl = "http://127.0.0.1:8080"
-        `$env:RAGPREP_GLM_OCR_BASE_URL = `$glmBaseUrl
-    }
-
-    `$probeUrl = `$glmBaseUrl.TrimEnd("/") + "/v1/models"
-    `$glmReachable = `$false
-    try {
-        `$resp = Invoke-WebRequest -UseBasicParsing -TimeoutSec 2 -Uri `$probeUrl
-        if (`$resp.StatusCode -eq 200) {
-            `$glmReachable = `$true
-        }
-    }
-    catch {
-        `$glmReachable = `$false
-    }
-
-    if (`$glmReachable) {
-        `$env:RAGPREP_PDF_BACKEND = "glm-ocr"
-    }
-    else {
-        `$env:RAGPREP_PDF_BACKEND = "lightonocr"
-    }
+    `$env:RAGPREP_PDF_BACKEND = "glm-ocr"
+}
+if (`$env:RAGPREP_PDF_BACKEND -ne "glm-ocr") {
+    throw "RAGPREP_PDF_BACKEND must be 'glm-ocr' (got: `$env:RAGPREP_PDF_BACKEND)."
 }
 
-if (`$env:RAGPREP_PDF_BACKEND -eq "lightonocr") {
-    if (-not `$env:LIGHTONOCR_GGUF_MODEL_PATH -or [string]::IsNullOrWhiteSpace(`$env:LIGHTONOCR_GGUF_MODEL_PATH)) {
-        `$env:LIGHTONOCR_GGUF_MODEL_PATH = Join-Path `$root "data/models/lightonocr-gguf/$ggufModelFileTrimmed"
+`$probeUrl = `$env:RAGPREP_GLM_OCR_BASE_URL.TrimEnd("/") + "/v1/models"
+try {
+    `$resp = Invoke-WebRequest -UseBasicParsing -TimeoutSec 2 -Uri `$probeUrl
+    if (`$resp.StatusCode -ne 200) {
+        throw "Unexpected status: `$(`$resp.StatusCode)"
     }
-    if (-not `$env:LIGHTONOCR_GGUF_MMPROJ_PATH -or [string]::IsNullOrWhiteSpace(`$env:LIGHTONOCR_GGUF_MMPROJ_PATH)) {
-        `$env:LIGHTONOCR_GGUF_MMPROJ_PATH = Join-Path `$root "data/models/lightonocr-gguf/$ggufMmprojFileTrimmed"
-    }
-
-    `$ggufExpectedDir = Join-Path `$root "data/models/lightonocr-gguf"
-    `$requiredGguf = @(
-        @{ Name = "LIGHTONOCR_GGUF_MODEL_PATH"; Path = `$env:LIGHTONOCR_GGUF_MODEL_PATH },
-        @{ Name = "LIGHTONOCR_GGUF_MMPROJ_PATH"; Path = `$env:LIGHTONOCR_GGUF_MMPROJ_PATH }
-    )
-    foreach (`$artifact in `$requiredGguf) {
-        `$artifactPath = `$artifact.Path
-        if (-not (Test-Path -LiteralPath `$artifactPath -PathType Leaf)) {
-            `$name = `$artifact.Name
-            `$message = @(
-                "[ERROR] Missing GGUF artifact: `$artifactPath",
-                "Set `$name to a valid .gguf file.",
-                "Expected under: `$ggufExpectedDir",
-                "Rebuild standalone: scripts/build-standalone.ps1 -Clean"
-            ) -join [Environment]::NewLine
-            throw `$message
-        }
-    }
+}
+catch {
+    throw "GLM-OCR server is not reachable: `$probeUrl. Start your server (vLLM/SGLang) and retry."
 }
 
 `$env:PYTHONNOUSERSITE = "1"
@@ -745,44 +348,24 @@ set "PORT=8000"
 if not "%RAGPREP_PORT%"=="" set "PORT=%RAGPREP_PORT%"
 if not "%~2"=="" set "PORT=%~2"
 
-if "%HF_HOME%"=="" (
-  set HF_HOME=%ROOT%data\hf
-  if not exist "%ROOT%data\hf" mkdir "%ROOT%data\hf"
+if "%RAGPREP_GLM_OCR_BASE_URL%"=="" (
+  set RAGPREP_GLM_OCR_BASE_URL=http://127.0.0.1:8080
 )
 if "%RAGPREP_PDF_BACKEND%"=="" (
-  if "%RAGPREP_GLM_OCR_BASE_URL%"=="" (
-    set RAGPREP_GLM_OCR_BASE_URL=http://127.0.0.1:8080
-  )
-  powershell -NoProfile -Command "try { $u=$env:RAGPREP_GLM_OCR_BASE_URL; $r=Invoke-WebRequest -UseBasicParsing -TimeoutSec 2 -Uri ($u.TrimEnd('/') + '/v1/models'); if ($r.StatusCode -eq 200) { exit 0 } exit 1 } catch { exit 1 }"
-  if "%ERRORLEVEL%"=="0" (
-    set RAGPREP_PDF_BACKEND=glm-ocr
-  ) else (
-    set RAGPREP_PDF_BACKEND=lightonocr
-  )
+  set RAGPREP_PDF_BACKEND=glm-ocr
 )
-if /I "%RAGPREP_PDF_BACKEND%"=="lightonocr" (
-  if "%LIGHTONOCR_GGUF_MODEL_PATH%"=="" (
-    set LIGHTONOCR_GGUF_MODEL_PATH=%ROOT%data\models\lightonocr-gguf\$ggufModelFileTrimmed
-  )
-  if "%LIGHTONOCR_GGUF_MMPROJ_PATH%"=="" (
-    set LIGHTONOCR_GGUF_MMPROJ_PATH=%ROOT%data\models\lightonocr-gguf\$ggufMmprojFileTrimmed
-  )
-  set "GGUF_EXPECTED_DIR=%ROOT%data\models\lightonocr-gguf"
-  if not exist "%LIGHTONOCR_GGUF_MODEL_PATH%" (
-    echo [ERROR] Missing GGUF model: %LIGHTONOCR_GGUF_MODEL_PATH%
-    echo Set LIGHTONOCR_GGUF_MODEL_PATH to a valid .gguf file.
-    echo Expected under: %GGUF_EXPECTED_DIR%
-    echo Rebuild standalone: scripts\build-standalone.ps1 -Clean
-    exit /b 1
-  )
-  if not exist "%LIGHTONOCR_GGUF_MMPROJ_PATH%" (
-    echo [ERROR] Missing GGUF mmproj: %LIGHTONOCR_GGUF_MMPROJ_PATH%
-    echo Set LIGHTONOCR_GGUF_MMPROJ_PATH to a valid .gguf file.
-    echo Expected under: %GGUF_EXPECTED_DIR%
-    echo Rebuild standalone: scripts\build-standalone.ps1 -Clean
-    exit /b 1
-  )
+if /I not "%RAGPREP_PDF_BACKEND%"=="glm-ocr" (
+  echo [ERROR] RAGPREP_PDF_BACKEND must be glm-ocr (got: %RAGPREP_PDF_BACKEND%)
+  exit /b 1
 )
+
+powershell -NoProfile -Command "try { $u=$env:RAGPREP_GLM_OCR_BASE_URL; $r=Invoke-WebRequest -UseBasicParsing -TimeoutSec 2 -Uri ($u.TrimEnd('/') + '/v1/models'); if ($r.StatusCode -eq 200) { exit 0 } exit 1 } catch { exit 1 }"
+if not "%ERRORLEVEL%"=="0" (
+  echo [ERROR] GLM-OCR server is not reachable: %RAGPREP_GLM_OCR_BASE_URL%/v1/models
+  echo Start your server (vLLM/SGLang) and retry.
+  exit /b 1
+)
+
 set PYTHONNOUSERSITE=1
 set PYTHONUTF8=1
 set PYTHONPATH=%ROOT%app;%ROOT%site-packages
@@ -802,10 +385,7 @@ exit /b 0
     if (-not (Test-Path -LiteralPath $verifyScript -PathType Leaf)) {
         throw "Missing verify script: $verifyScript"
     }
-    & $verifyScript `
-        -OutputDir $OutputDir `
-        -GgufModelFile $ggufModelFileTrimmed `
-        -GgufMmprojFile $ggufMmprojFileTrimmed
+    & $verifyScript -OutputDir $OutputDir
     Assert-LastExitCode "verify standalone"
 
     Write-Host "Done." -ForegroundColor Green

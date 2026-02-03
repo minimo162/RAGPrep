@@ -7,7 +7,7 @@ from pathlib import Path
 
 def _parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="PDF -> Markdown (LightOnOCR)",
+        description="PDF -> Markdown",
     )
     parser.add_argument("--pdf", type=Path, required=True, help="Path to a local PDF file")
     parser.add_argument(

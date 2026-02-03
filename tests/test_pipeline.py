@@ -36,24 +36,20 @@ def _patch_iter_pdf_page_png_base64(
     return encoded_pages
 
 
-def _sequence_texts(texts: list[str]) -> Callable[[str], str]:
+def _sequence_texts(texts: list[str]) -> Callable[..., str]:
     iterator = iter(texts)
 
-    def _fake_ocr_image(_encoded: str) -> str:
+    def _fake_ocr_image(_encoded: str, *, settings: object) -> str:
+        _ = settings
         return next(iterator)
 
     return _fake_ocr_image
 
 
-def _force_backend(monkeypatch: pytest.MonkeyPatch, backend: str) -> None:
-    monkeypatch.setenv("RAGPREP_PDF_BACKEND", backend)
-
-
 def test_pdf_to_markdown_normalizes_newlines(monkeypatch: pytest.MonkeyPatch) -> None:
-    _force_backend(monkeypatch, "lightonocr")
     _patch_iter_pdf_page_png_base64(monkeypatch, page_count=2)
     monkeypatch.setattr(
-        "ragprep.ocr.lightonocr.ocr_image_base64",
+        "ragprep.ocr.glm_ocr.ocr_image_base64",
         _sequence_texts(["line1\r\nline2\r", "line3\r"]),
     )
 
@@ -66,9 +62,8 @@ def test_pdf_to_markdown_rejects_empty_input() -> None:
 
 
 def test_pdf_to_markdown_reports_progress(monkeypatch: pytest.MonkeyPatch) -> None:
-    _force_backend(monkeypatch, "lightonocr")
     _patch_iter_pdf_page_png_base64(monkeypatch, page_count=3)
-    monkeypatch.setattr("ragprep.ocr.lightonocr.ocr_image_base64", lambda _enc: "ok")
+    monkeypatch.setattr("ragprep.ocr.glm_ocr.ocr_image_base64", lambda _enc, *, settings: "ok")
 
     updates: list[PdfToMarkdownProgress] = []
 
@@ -89,9 +84,8 @@ def test_pdf_to_markdown_writes_document_artifact(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    _force_backend(monkeypatch, "lightonocr")
     _patch_iter_pdf_page_png_base64(monkeypatch, page_count=1)
-    monkeypatch.setattr("ragprep.ocr.lightonocr.ocr_image_base64", lambda _enc: "hello")
+    monkeypatch.setattr("ragprep.ocr.glm_ocr.ocr_image_base64", lambda _enc, *, settings: "hello")
 
     out_dir = tmp_path / "artifacts"
     result = pdf_to_markdown(b"%PDF", page_output_dir=out_dir)
@@ -123,10 +117,9 @@ def test_pdf_to_json_rejects_empty_input() -> None:
 
 
 def test_pdf_to_json_reports_progress(monkeypatch: pytest.MonkeyPatch) -> None:
-    _force_backend(monkeypatch, "lightonocr")
     _patch_iter_pdf_page_png_base64(monkeypatch, page_count=2)
     monkeypatch.setattr(
-        "ragprep.ocr.lightonocr.ocr_image_base64",
+        "ragprep.ocr.glm_ocr.ocr_image_base64",
         _sequence_texts(["PAGE1", "PAGE2"]),
     )
 
@@ -146,10 +139,9 @@ def test_pdf_to_json_reports_progress(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_pdf_to_json_calls_on_page_per_page(monkeypatch: pytest.MonkeyPatch) -> None:
-    _force_backend(monkeypatch, "lightonocr")
     _patch_iter_pdf_page_png_base64(monkeypatch, page_count=2)
     monkeypatch.setattr(
-        "ragprep.ocr.lightonocr.ocr_image_base64",
+        "ragprep.ocr.glm_ocr.ocr_image_base64",
         _sequence_texts(["PAGE1\r\n", " PAGE2 "]),
     )
 
@@ -167,9 +159,8 @@ def test_pdf_to_json_writes_document_artifact(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    _force_backend(monkeypatch, "lightonocr")
     _patch_iter_pdf_page_png_base64(monkeypatch, page_count=1)
-    monkeypatch.setattr("ragprep.ocr.lightonocr.ocr_image_base64", lambda _enc: "only")
+    monkeypatch.setattr("ragprep.ocr.glm_ocr.ocr_image_base64", lambda _enc, *, settings: "only")
 
     out_dir = tmp_path / "artifacts"
     result = pdf_to_json(b"%PDF", page_output_dir=out_dir)
@@ -199,7 +190,6 @@ def test_pdf_to_json_invalid_pdf_propagates_value_error(
 
 
 def test_pdf_to_markdown_uses_glm_ocr_backend(monkeypatch: pytest.MonkeyPatch) -> None:
-    _force_backend(monkeypatch, "glm-ocr")
     _patch_iter_pdf_page_png_base64(monkeypatch, page_count=2)
 
     outputs = iter(["PAGE1\r", " PAGE2 "])
