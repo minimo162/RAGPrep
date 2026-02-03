@@ -666,7 +666,30 @@ if (-not `$env:HF_HOME -or [string]::IsNullOrWhiteSpace(`$env:HF_HOME)) {
 }
 
 if (-not `$env:RAGPREP_PDF_BACKEND -or [string]::IsNullOrWhiteSpace(`$env:RAGPREP_PDF_BACKEND)) {
-    `$env:RAGPREP_PDF_BACKEND = "lightonocr"
+    `$glmBaseUrl = `$env:RAGPREP_GLM_OCR_BASE_URL
+    if (-not `$glmBaseUrl -or [string]::IsNullOrWhiteSpace(`$glmBaseUrl)) {
+        `$glmBaseUrl = "http://127.0.0.1:8080"
+        `$env:RAGPREP_GLM_OCR_BASE_URL = `$glmBaseUrl
+    }
+
+    `$probeUrl = `$glmBaseUrl.TrimEnd("/") + "/v1/models"
+    `$glmReachable = `$false
+    try {
+        `$resp = Invoke-WebRequest -UseBasicParsing -TimeoutSec 2 -Uri `$probeUrl
+        if (`$resp.StatusCode -eq 200) {
+            `$glmReachable = `$true
+        }
+    }
+    catch {
+        `$glmReachable = `$false
+    }
+
+    if (`$glmReachable) {
+        `$env:RAGPREP_PDF_BACKEND = "glm-ocr"
+    }
+    else {
+        `$env:RAGPREP_PDF_BACKEND = "lightonocr"
+    }
 }
 
 if (`$env:RAGPREP_PDF_BACKEND -eq "lightonocr") {
@@ -727,7 +750,15 @@ if "%HF_HOME%"=="" (
   if not exist "%ROOT%data\hf" mkdir "%ROOT%data\hf"
 )
 if "%RAGPREP_PDF_BACKEND%"=="" (
-  set RAGPREP_PDF_BACKEND=lightonocr
+  if "%RAGPREP_GLM_OCR_BASE_URL%"=="" (
+    set RAGPREP_GLM_OCR_BASE_URL=http://127.0.0.1:8080
+  )
+  powershell -NoProfile -Command "try { $u=$env:RAGPREP_GLM_OCR_BASE_URL; $r=Invoke-WebRequest -UseBasicParsing -TimeoutSec 2 -Uri ($u.TrimEnd('/') + '/v1/models'); if ($r.StatusCode -eq 200) { exit 0 } exit 1 } catch { exit 1 }"
+  if "%ERRORLEVEL%"=="0" (
+    set RAGPREP_PDF_BACKEND=glm-ocr
+  ) else (
+    set RAGPREP_PDF_BACKEND=lightonocr
+  )
 )
 if /I "%RAGPREP_PDF_BACKEND%"=="lightonocr" (
   if "%LIGHTONOCR_GGUF_MODEL_PATH%"=="" (
