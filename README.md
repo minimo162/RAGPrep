@@ -43,6 +43,11 @@ RAGPrep 側のデフォルト:
 - `RAGPREP_GLM_OCR_BASE_URL=http://127.0.0.1:8080`
 - `RAGPREP_GLM_OCR_MODEL=zai-org/GLM-OCR`
 
+疎通確認（例）:
+```powershell
+Invoke-WebRequest -UseBasicParsing http://127.0.0.1:8080/v1/models
+```
+
 ### vLLM（例）
 ```bash
 pip install -U vllm --extra-index-url https://wheels.vllm.ai/nightly

@@ -154,7 +154,16 @@ def _run_job(job_id: str, pdf_bytes: bytes) -> None:
                 on_page=on_page,
             )
         except Exception as exc:  # noqa: BLE001
-            logger.exception("Job %s failed", job_id)
+            message = str(exc)
+            expected_errors = (
+                "Failed to reach GLM-OCR server",
+                "GLM-OCR request timed out",
+                "GLM-OCR server is not reachable",
+            )
+            if any(token in message for token in expected_errors):
+                logger.warning("Job %s failed: %s", job_id, message)
+            else:
+                logger.exception("Job %s failed", job_id)
             jobs.update(job_id, status=JobStatus.error, phase="error", error=str(exc))
             return
         jobs.update(
