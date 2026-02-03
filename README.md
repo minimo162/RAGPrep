@@ -114,8 +114,11 @@ $env:RAGPREP_GLM_OCR_MODEL = "zai-org/GLM-OCR"
 スタンドアロンは llama.cpp（Vulkan/AVX2）と LightOnOCR GGUF を同梱できます。
 GLM-OCR を使う場合は別途サーバ起動が必要です（スタンドアロンにモデルは同梱しません）。
 
-スタンドアロンの `run.ps1` / `run.cmd` は **デフォルトで `lightonocr`** を選びます（オフラインで動作させるため）。
-GLM-OCR を使う場合は、GLM-OCR サーバを起動した上で `RAGPREP_PDF_BACKEND=glm-ocr` を設定してください。
+スタンドアロンの `run.ps1` / `run.cmd` は、`RAGPREP_PDF_BACKEND` 未設定の場合に以下を自動選択します。
+- `RAGPREP_GLM_OCR_BASE_URL`（未設定なら `http://127.0.0.1:8080`）へ `/v1/models` を 2 秒で疎通確認
+- 疎通できれば `glm-ocr`、できなければ `lightonocr`
+
+バックエンドを固定したい場合は `RAGPREP_PDF_BACKEND` を明示してください。
 
 ### 前提
 - Windows + PowerShell
