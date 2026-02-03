@@ -141,8 +141,7 @@ def ocr_image_base64(image_base64: str, *, settings: Settings) -> str:
             "Failed to reach GLM-OCR server. "
             f"base_url={base_url!r}. "
             f"error={exc}. "
-            "If you're running the Windows standalone build without a GLM-OCR server, "
-            "set RAGPREP_PDF_BACKEND=lightonocr."
+            "Ensure the GLM-OCR server is running and reachable."
         ) from exc
 
     return _parse_chat_completions_response(response).content

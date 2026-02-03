@@ -60,74 +60,6 @@ def _write_text_artifact(path: Path, text: str) -> None:
     path.write_text(text + ("\n" if text else ""), encoding="utf-8")
 
 
-def _pdf_to_markdown_lightonocr(
-    pdf_bytes: bytes,
-    *,
-    settings: Settings,
-    on_progress: ProgressCallback | None = None,
-    on_page: PageCallback | None = None,
-) -> str:
-    from ragprep.ocr import lightonocr
-    from ragprep.pdf_render import iter_pdf_page_png_base64
-
-    try:
-        total_pages, encoded_pages = iter_pdf_page_png_base64(
-            pdf_bytes,
-            dpi=settings.render_dpi,
-            max_edge=settings.render_max_edge,
-            max_pages=settings.max_pages,
-            max_bytes=settings.max_upload_bytes,
-        )
-    except ValueError:
-        raise
-    except Exception as exc:  # noqa: BLE001
-        raise RuntimeError("Failed to render PDF for LightOnOCR.") from exc
-
-    _notify_progress(
-        on_progress,
-        PdfToMarkdownProgress(
-            phase=ProgressPhase.rendering,
-            current=0,
-            total=int(total_pages),
-            message="converting",
-        ),
-    )
-
-    parts: list[str] = []
-    for page_index, encoded in enumerate(encoded_pages, start=1):
-        try:
-            text = lightonocr.ocr_image_base64(encoded)
-        except Exception as exc:  # noqa: BLE001
-            raise RuntimeError(f"LightOnOCR failed on page {page_index}: {exc}") from exc
-        normalized = str(text).replace("\r\n", "\n").replace("\r", "\n").strip()
-        if on_page is not None:
-            on_page(page_index, normalized)
-        if normalized:
-            parts.append(normalized)
-        _notify_progress(
-            on_progress,
-            PdfToMarkdownProgress(
-                phase=ProgressPhase.rendering,
-                current=page_index,
-                total=int(total_pages),
-                message="converting",
-            ),
-        )
-
-    markdown = "\n\n".join(parts).strip()
-
-    _notify_progress(
-        on_progress,
-        PdfToMarkdownProgress(
-            phase=ProgressPhase.done,
-            current=int(total_pages),
-            total=int(total_pages),
-            message="done",
-        ),
-    )
-    return markdown
-
-
 def _pdf_to_markdown_glm_ocr(
     pdf_bytes: bytes,
     *,
@@ -222,22 +154,15 @@ def pdf_to_markdown(
             f"PDF too large ({len(pdf_bytes)} bytes), max_bytes={settings.max_upload_bytes}"
         )
 
-    if settings.pdf_backend == "lightonocr":
-        markdown = _pdf_to_markdown_lightonocr(
-            pdf_bytes,
-            settings=settings,
-            on_progress=on_progress,
-            on_page=on_page,
-        )
-    elif settings.pdf_backend == "glm-ocr":
-        markdown = _pdf_to_markdown_glm_ocr(
-            pdf_bytes,
-            settings=settings,
-            on_progress=on_progress,
-            on_page=on_page,
-        )
-    else:
+    if settings.pdf_backend != "glm-ocr":
         raise RuntimeError(f"Unsupported PDF backend: {settings.pdf_backend!r}")
+
+    markdown = _pdf_to_markdown_glm_ocr(
+        pdf_bytes,
+        settings=settings,
+        on_progress=on_progress,
+        on_page=on_page,
+    )
 
     if page_output_dir is not None:
         _write_text_artifact(page_output_dir / "document.md", markdown)

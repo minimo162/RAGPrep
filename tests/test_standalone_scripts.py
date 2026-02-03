@@ -17,13 +17,13 @@ def _read_verify_standalone_ps1() -> str:
 
 def test_run_cmd_template_does_not_mkdir_empty_hf_home() -> None:
     content = _read_build_standalone_ps1()
-    assert 'if not exist "%ROOT%data\\hf" mkdir "%ROOT%data\\hf"' in content
-    assert 'if not exist "%HF_HOME%" mkdir "%HF_HOME%"' not in content
-    assert 'if "%RAGPREP_PDF_BACKEND%"=="" (' in content
     assert "set RAGPREP_PDF_BACKEND=glm-ocr" in content
-    assert "set RAGPREP_PDF_BACKEND=lightonocr" in content
+    assert "RAGPREP_GLM_OCR_BASE_URL" in content
     assert "Invoke-WebRequest -UseBasicParsing -TimeoutSec 2" in content
-    assert 'if /I "%RAGPREP_PDF_BACKEND%"=="lightonocr" (' in content
+    assert "/v1/models" in content
+    assert "lightonocr" not in content.lower()
+    assert "gguf" not in content.lower()
+    assert "llama.cpp" not in content.lower()
     expected = (
         '"%ROOT%python\\python.exe" -m ragprep.desktop --host %BIND_HOST% '
         "--port %PORT%"
@@ -40,23 +40,8 @@ def test_run_ps1_template_avoids_host_automatic_variable() -> None:
     assert '[string]`$Host = "127.0.0.1",' not in content
     assert "Invoke-WebRequest -UseBasicParsing -TimeoutSec 2" in content
     assert "`$env:RAGPREP_PDF_BACKEND = \"glm-ocr\"" in content
-    assert "`$env:RAGPREP_PDF_BACKEND = \"lightonocr\"" in content
-    assert "if (`$env:RAGPREP_PDF_BACKEND -eq \"lightonocr\") {" in content
-
-
-def test_build_standalone_prefetch_has_direct_download_and_artifact_checks() -> None:
-    content = _read_build_standalone_ps1()
-    assert "falling back to direct download" in content
-    assert "resolve/main/{filename}?download=1" in content
-    assert "GGUF artifact missing after prefetch" in content
-    assert "GGUF artifact is empty after prefetch" in content
-
-
-def test_run_scripts_have_gguf_preflight_checks() -> None:
-    content = _read_build_standalone_ps1()
-    assert "Missing GGUF artifact" in content
-    assert "Missing GGUF model" in content
-    assert "Missing GGUF mmproj" in content
+    assert "/v1/models" in content
+    assert "lightonocr" not in content.lower()
 
 
 def test_build_standalone_calls_verify_script() -> None:
@@ -66,23 +51,12 @@ def test_build_standalone_calls_verify_script() -> None:
     assert 'Assert-LastExitCode "verify standalone"' in content
 
 
-def test_build_standalone_bundles_vulkan_and_avx2() -> None:
-    content = _read_build_standalone_ps1()
-    assert 'Name = "avx2"' in content
-    assert 'Name = "vulkan"' in content
-    assert "bin-win-cpu-x64.zip" in content
-    assert "bin-win-vulkan-x64.zip" in content
-
-
 def test_verify_standalone_checks_required_artifacts() -> None:
     content = _read_verify_standalone_ps1()
     assert "python/python.exe" in content
     assert '"app"' in content
     assert '"site-packages"' in content
-    assert "bin/llama.cpp" in content
-    assert '"avx2"' in content
-    assert '"vulkan"' in content
-    assert "llama-mtmd-cli.exe" in content
-    assert "data/models/lightonocr-gguf" in content
-    assert "LightOnOCR-2-1B-Q6_K.gguf" in content
-    assert "mmproj-BF16.gguf" in content
+    assert '"run.ps1"' in content
+    assert '"run.cmd"' in content
+    assert "lightonocr" not in content.lower()
+    assert "gguf" not in content.lower()

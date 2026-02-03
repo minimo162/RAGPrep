@@ -10,7 +10,6 @@ def _squash_ws(text: str) -> str:
 
 
 def test_pdf_to_markdown_e2e_contains_text(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("RAGPREP_PDF_BACKEND", "lightonocr")
     encoded_pages = ["BASE64_PAGE_1", "BASE64_PAGE_2"]
 
     def _fake_iter_pdf_page_png_base64(
@@ -33,7 +32,11 @@ def test_pdf_to_markdown_e2e_contains_text(monkeypatch: pytest.MonkeyPatch) -> N
     def _fake_ocr_image(_encoded: str) -> str:
         return next(outputs)
 
-    monkeypatch.setattr("ragprep.ocr.lightonocr.ocr_image_base64", _fake_ocr_image)
+    def _fake_glm(_encoded: str, *, settings: object) -> str:
+        _ = settings
+        return _fake_ocr_image(_encoded)
+
+    monkeypatch.setattr("ragprep.ocr.glm_ocr.ocr_image_base64", _fake_glm)
 
     markdown = pdf_to_markdown(b"%PDF")
     squashed = _squash_ws(markdown)

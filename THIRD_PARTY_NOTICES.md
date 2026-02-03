@@ -23,11 +23,6 @@ each package's metadata (e.g. `*.dist-info/`) for license details.
 - The exact tag/asset used is recorded in `BUILD_INFO.txt` inside the standalone output.
 - Location in standalone output: `python/`
 
-## Model weights (Hugging Face)
-- By default, `scripts/build-standalone.ps1` prefetches the LightOnOCR GGUF model + mmproj files and
-  stages them under `data/models/lightonocr-gguf/` in the standalone output. Downloads are cached
-  under `data/hf/` (Hugging Face cache).
-- Model weights remain subject to their upstream license/terms; see:
-  https://huggingface.co/wangjazz/LightOnOCR-2-1B-gguf
-- To avoid bundling weights, pass `-SkipGgufPrefetch` and provide local GGUF paths at runtime.
+## Model weights
+This project does not vendor or bundle any OCR model weights into the repository.
 

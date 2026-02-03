@@ -15,9 +15,6 @@ ENV_GLM_OCR_MODEL: Final[str] = "RAGPREP_GLM_OCR_MODEL"
 ENV_GLM_OCR_API_KEY: Final[str] = "RAGPREP_GLM_OCR_API_KEY"
 ENV_GLM_OCR_MAX_TOKENS: Final[str] = "RAGPREP_GLM_OCR_MAX_TOKENS"
 ENV_GLM_OCR_TIMEOUT_SECONDS: Final[str] = "RAGPREP_GLM_OCR_TIMEOUT_SECONDS"
-ENV_LIGHTONOCR_GGUF_MODEL_PATH: Final[str] = "LIGHTONOCR_GGUF_MODEL_PATH"
-ENV_LIGHTONOCR_GGUF_MMPROJ_PATH: Final[str] = "LIGHTONOCR_GGUF_MMPROJ_PATH"
-ENV_LIGHTONOCR_LLAVA_CLI_PATH: Final[str] = "LIGHTONOCR_LLAVA_CLI_PATH"
 
 DEFAULT_MAX_UPLOAD_BYTES: Final[int] = 10 * 1024 * 1024
 DEFAULT_MAX_PAGES: Final[int] = 50
@@ -25,7 +22,7 @@ DEFAULT_RENDER_DPI: Final[int] = 400
 DEFAULT_RENDER_MAX_EDGE: Final[int] = 1540
 DEFAULT_MAX_CONCURRENCY: Final[int] = 1
 DEFAULT_PDF_BACKEND: Final[str] = "glm-ocr"
-SUPPORTED_PDF_BACKENDS: Final[tuple[str, ...]] = ("glm-ocr", "lightonocr")
+SUPPORTED_PDF_BACKENDS: Final[tuple[str, ...]] = ("glm-ocr",)
 DEFAULT_GLM_OCR_BASE_URL: Final[str] = "http://127.0.0.1:8080"
 DEFAULT_GLM_OCR_MODEL: Final[str] = "zai-org/GLM-OCR"
 DEFAULT_GLM_OCR_MAX_TOKENS: Final[int] = 8192
@@ -45,9 +42,6 @@ class Settings:
     glm_ocr_api_key: str | None
     glm_ocr_max_tokens: int
     glm_ocr_timeout_seconds: int
-    lightonocr_model_path: str | None
-    lightonocr_mmproj_path: str | None
-    lightonocr_llava_cli_path: str | None
 
 
 def _get_positive_int(name: str, default: int) -> int:
@@ -105,7 +99,4 @@ def get_settings() -> Settings:
         glm_ocr_timeout_seconds=_get_positive_int(
             ENV_GLM_OCR_TIMEOUT_SECONDS, DEFAULT_GLM_OCR_TIMEOUT_SECONDS
         ),
-        lightonocr_model_path=_get_optional_str(ENV_LIGHTONOCR_GGUF_MODEL_PATH),
-        lightonocr_mmproj_path=_get_optional_str(ENV_LIGHTONOCR_GGUF_MMPROJ_PATH),
-        lightonocr_llava_cli_path=_get_optional_str(ENV_LIGHTONOCR_LLAVA_CLI_PATH),
     )
