@@ -285,6 +285,67 @@ try {
     }
 
     $currentStep = "write run scripts"
+    $startGlmOcrPs1 = @"
+[CmdletBinding()]
+param(
+    [string]`$BaseUrl = "",
+    [string]`$Model = "zai-org/GLM-OCR",
+    [int]`$Port = 8080
+)
+
+Set-StrictMode -Version Latest
+`$ErrorActionPreference = "Stop"
+
+if (-not `$BaseUrl -or [string]::IsNullOrWhiteSpace(`$BaseUrl)) {
+    `$BaseUrl = `$env:RAGPREP_GLM_OCR_BASE_URL
+}
+if (-not `$BaseUrl -or [string]::IsNullOrWhiteSpace(`$BaseUrl)) {
+    `$BaseUrl = "http://127.0.0.1:8080"
+}
+
+`$probeUrl = `$BaseUrl.TrimEnd("/") + "/v1/models"
+Write-Host "GLM-OCR start helper" -ForegroundColor Cyan
+Write-Host "  base_url: `$BaseUrl" -ForegroundColor DarkGray
+Write-Host "  model:    `$Model" -ForegroundColor DarkGray
+Write-Host "  port:     `$Port" -ForegroundColor DarkGray
+
+try {
+    `$resp = Invoke-WebRequest -UseBasicParsing -TimeoutSec 2 -Uri `$probeUrl
+    if (`$resp.StatusCode -eq 200) {
+        Write-Host "Already running: `$probeUrl" -ForegroundColor Green
+        exit 0
+    }
+}
+catch {
+    # not reachable -> try to start
+}
+
+`$vllm = Get-Command vllm -ErrorAction SilentlyContinue
+if (`$vllm) {
+    Write-Host "Starting via: vllm serve" -ForegroundColor Cyan
+    Write-Host "NOTE: This will block. Keep this window open while using RAGPrep." -ForegroundColor Yellow
+    & vllm serve `$Model --port `$Port
+    exit `$LASTEXITCODE
+}
+
+Write-Warning "vllm not found on PATH."
+Write-Host "Install + run (example):" -ForegroundColor Yellow
+Write-Host "  pip install -U vllm --extra-index-url https://wheels.vllm.ai/nightly" -ForegroundColor Yellow
+Write-Host "  pip install git+https://github.com/huggingface/transformers.git" -ForegroundColor Yellow
+Write-Host "  vllm serve zai-org/GLM-OCR --port 8080" -ForegroundColor Yellow
+throw "Cannot start GLM-OCR automatically (vllm not installed)."
+"@
+    Set-Content -Path (Join-Path $OutputDir "start-glm-ocr.ps1") -Value $startGlmOcrPs1 -Encoding UTF8
+
+    $startGlmOcrCmd = @"
+@echo off
+setlocal
+set ROOT=%~dp0
+start "GLM-OCR" powershell -NoProfile -ExecutionPolicy Bypass -File "%ROOT%start-glm-ocr.ps1"
+exit /b 0
+"@
+    Set-Content -Path (Join-Path $OutputDir "start-glm-ocr.cmd") -Value $startGlmOcrCmd -Encoding ASCII
+
     $runPs1 = @"
 [CmdletBinding()]
 param(
@@ -320,7 +381,7 @@ try {
     }
 }
 catch {
-    throw "GLM-OCR server is not reachable: `$probeUrl. Start your server (vLLM/SGLang) and retry."
+    throw "GLM-OCR server is not reachable: `$probeUrl. Run start-glm-ocr.ps1 (or start-glm-ocr.cmd) and retry."
 }
 
 `$env:PYTHONNOUSERSITE = "1"
