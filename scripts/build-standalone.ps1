@@ -666,7 +666,7 @@ if (-not `$env:HF_HOME -or [string]::IsNullOrWhiteSpace(`$env:HF_HOME)) {
 }
 
 if (-not `$env:RAGPREP_PDF_BACKEND -or [string]::IsNullOrWhiteSpace(`$env:RAGPREP_PDF_BACKEND)) {
-    `$env:RAGPREP_PDF_BACKEND = "glm-ocr"
+    `$env:RAGPREP_PDF_BACKEND = "lightonocr"
 }
 
 if (`$env:RAGPREP_PDF_BACKEND -eq "lightonocr") {
@@ -727,7 +727,7 @@ if "%HF_HOME%"=="" (
   if not exist "%ROOT%data\hf" mkdir "%ROOT%data\hf"
 )
 if "%RAGPREP_PDF_BACKEND%"=="" (
-  set RAGPREP_PDF_BACKEND=glm-ocr
+  set RAGPREP_PDF_BACKEND=lightonocr
 )
 if /I "%RAGPREP_PDF_BACKEND%"=="lightonocr" (
   if "%LIGHTONOCR_GGUF_MODEL_PATH%"=="" (

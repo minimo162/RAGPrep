@@ -20,7 +20,7 @@ def test_run_cmd_template_does_not_mkdir_empty_hf_home() -> None:
     assert 'if not exist "%ROOT%data\\hf" mkdir "%ROOT%data\\hf"' in content
     assert 'if not exist "%HF_HOME%" mkdir "%HF_HOME%"' not in content
     assert 'if "%RAGPREP_PDF_BACKEND%"=="" (' in content
-    assert "set RAGPREP_PDF_BACKEND=glm-ocr" in content
+    assert "set RAGPREP_PDF_BACKEND=lightonocr" in content
     assert 'if /I "%RAGPREP_PDF_BACKEND%"=="lightonocr" (' in content
     expected = (
         '"%ROOT%python\\python.exe" -m ragprep.desktop --host %BIND_HOST% '
@@ -36,7 +36,7 @@ def test_run_ps1_template_avoids_host_automatic_variable() -> None:
     assert "--host `$BindHost" in content
     assert "& `$pythonExe -m ragprep.desktop --host `$BindHost --port `$Port" in content
     assert '[string]`$Host = "127.0.0.1",' not in content
-    assert "`$env:RAGPREP_PDF_BACKEND = \"glm-ocr\"" in content
+    assert "`$env:RAGPREP_PDF_BACKEND = \"lightonocr\"" in content
     assert "if (`$env:RAGPREP_PDF_BACKEND -eq \"lightonocr\") {" in content
 
 
