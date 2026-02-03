@@ -45,7 +45,12 @@ def _sequence_texts(texts: list[str]) -> Callable[[str], str]:
     return _fake_ocr_image
 
 
+def _force_backend(monkeypatch: pytest.MonkeyPatch, backend: str) -> None:
+    monkeypatch.setenv("RAGPREP_PDF_BACKEND", backend)
+
+
 def test_pdf_to_markdown_normalizes_newlines(monkeypatch: pytest.MonkeyPatch) -> None:
+    _force_backend(monkeypatch, "lightonocr")
     _patch_iter_pdf_page_png_base64(monkeypatch, page_count=2)
     monkeypatch.setattr(
         "ragprep.ocr.lightonocr.ocr_image_base64",
@@ -61,6 +66,7 @@ def test_pdf_to_markdown_rejects_empty_input() -> None:
 
 
 def test_pdf_to_markdown_reports_progress(monkeypatch: pytest.MonkeyPatch) -> None:
+    _force_backend(monkeypatch, "lightonocr")
     _patch_iter_pdf_page_png_base64(monkeypatch, page_count=3)
     monkeypatch.setattr("ragprep.ocr.lightonocr.ocr_image_base64", lambda _enc: "ok")
 
@@ -83,6 +89,7 @@ def test_pdf_to_markdown_writes_document_artifact(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    _force_backend(monkeypatch, "lightonocr")
     _patch_iter_pdf_page_png_base64(monkeypatch, page_count=1)
     monkeypatch.setattr("ragprep.ocr.lightonocr.ocr_image_base64", lambda _enc: "hello")
 
@@ -116,6 +123,7 @@ def test_pdf_to_json_rejects_empty_input() -> None:
 
 
 def test_pdf_to_json_reports_progress(monkeypatch: pytest.MonkeyPatch) -> None:
+    _force_backend(monkeypatch, "lightonocr")
     _patch_iter_pdf_page_png_base64(monkeypatch, page_count=2)
     monkeypatch.setattr(
         "ragprep.ocr.lightonocr.ocr_image_base64",
@@ -138,6 +146,7 @@ def test_pdf_to_json_reports_progress(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_pdf_to_json_calls_on_page_per_page(monkeypatch: pytest.MonkeyPatch) -> None:
+    _force_backend(monkeypatch, "lightonocr")
     _patch_iter_pdf_page_png_base64(monkeypatch, page_count=2)
     monkeypatch.setattr(
         "ragprep.ocr.lightonocr.ocr_image_base64",
@@ -158,6 +167,7 @@ def test_pdf_to_json_writes_document_artifact(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    _force_backend(monkeypatch, "lightonocr")
     _patch_iter_pdf_page_png_base64(monkeypatch, page_count=1)
     monkeypatch.setattr("ragprep.ocr.lightonocr.ocr_image_base64", lambda _enc: "only")
 
@@ -186,3 +196,17 @@ def test_pdf_to_json_invalid_pdf_propagates_value_error(
 
     with pytest.raises(ValueError, match="Invalid PDF data"):
         pdf_to_json(b"not a pdf")
+
+
+def test_pdf_to_markdown_uses_glm_ocr_backend(monkeypatch: pytest.MonkeyPatch) -> None:
+    _force_backend(monkeypatch, "glm-ocr")
+    _patch_iter_pdf_page_png_base64(monkeypatch, page_count=2)
+
+    outputs = iter(["PAGE1\r", " PAGE2 "])
+
+    def _fake_glm(_encoded: str, *, settings: object) -> str:
+        return next(outputs)
+
+    monkeypatch.setattr("ragprep.ocr.glm_ocr.ocr_image_base64", _fake_glm)
+
+    assert pdf_to_markdown(b"%PDF") == "PAGE1\n\nPAGE2"
