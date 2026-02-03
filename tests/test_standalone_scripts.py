@@ -21,6 +21,8 @@ def test_run_cmd_template_does_not_mkdir_empty_hf_home() -> None:
     assert "RAGPREP_GLM_OCR_BASE_URL" in content
     assert "Invoke-WebRequest -UseBasicParsing -TimeoutSec 2" in content
     assert "/v1/models" in content
+    assert "vllm/vllm-openai:nightly" in content
+    assert "docker run --rm -it" in content
     assert "lightonocr" not in content.lower()
     assert "gguf" not in content.lower()
     assert "llama.cpp" not in content.lower()
