@@ -432,9 +432,12 @@ def _get_paddleocr_engine() -> Any:
     desired_kwargs: dict[str, object] = {
         "show_log": False,
         "use_gpu": False,
+        "device": "cpu",
         "layout": True,
         "ocr": False,
         "table": False,
+        "enable_hpi": False,
+        "enable_mkldnn": False,
     }
 
     # PaddleOCR pipelines vary across versions and sometimes validate kwargs strictly.
