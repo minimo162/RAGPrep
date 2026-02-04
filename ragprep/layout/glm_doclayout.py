@@ -53,7 +53,9 @@ def _post_chat_completions(
     timeout_seconds: int,
 ) -> httpx.Response:
     timeout = httpx.Timeout(timeout_seconds)
-    with httpx.Client(timeout=timeout) as client:
+    # Desktop environments often have proxy env vars configured; avoid routing loopback
+    # layout requests through proxies.
+    with httpx.Client(timeout=timeout, follow_redirects=False, trust_env=False) as client:
         return client.post(url, headers=headers, json=payload)
 
 
@@ -632,7 +634,8 @@ def analyze_layout_image_base64(image_base64: str, *, settings: Settings) -> dic
         raise ValueError("image_base64 is empty")
     _validate_base64_payload(payload)
 
-    url = f"{_normalize_base_url(settings.layout_base_url)}/v1/chat/completions"
+    base_url = _normalize_base_url(settings.layout_base_url)
+    url = f"{base_url}/v1/chat/completions"
     headers: dict[str, str] = {"Content-Type": "application/json"}
     if settings.layout_api_key is not None:
         headers["Authorization"] = f"Bearer {settings.layout_api_key}"
@@ -652,12 +655,26 @@ def analyze_layout_image_base64(image_base64: str, *, settings: Settings) -> dic
         "max_tokens": settings.layout_max_tokens,
     }
 
-    response = _post_chat_completions(
-        url=url,
-        headers=headers,
-        payload=request_payload,
-        timeout_seconds=settings.layout_timeout_seconds,
-    )
+    try:
+        response = _post_chat_completions(
+            url=url,
+            headers=headers,
+            payload=request_payload,
+            timeout_seconds=settings.layout_timeout_seconds,
+        )
+    except httpx.TimeoutException as exc:
+        raise RuntimeError(
+            "Layout analysis request timed out. "
+            f"base_url={base_url!r}. "
+            "Ensure the layout server is running and reachable."
+        ) from exc
+    except httpx.RequestError as exc:
+        raise RuntimeError(
+            "Failed to reach layout server. "
+            f"base_url={base_url!r}. "
+            f"error={exc}. "
+            "Ensure the layout server is running and reachable."
+        ) from exc
 
     content = _parse_chat_completions_response_content(response)
     schema_version, raw_elements = _parse_layout_result(content)

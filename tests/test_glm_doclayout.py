@@ -82,6 +82,30 @@ def test_glm_doclayout_sends_openai_chat_completions_payload(
     assert captured["timeout_seconds"] == 9
 
 
+def test_glm_doclayout_timeout_maps_to_stable_runtime_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("RAGPREP_LAYOUT_MODE", "server")
+    monkeypatch.setenv("RAGPREP_LAYOUT_BASE_URL", "http://localhost:8080/")
+    monkeypatch.setenv("RAGPREP_LAYOUT_TIMEOUT_SECONDS", "1")
+    settings = get_settings()
+
+    def _fake_post(
+        *,
+        url: str,
+        headers: dict[str, str],
+        payload: dict[str, object],
+        timeout_seconds: int,
+    ) -> httpx.Response:
+        raise httpx.ReadTimeout("timed out", request=httpx.Request("POST", url))
+
+    monkeypatch.setattr("ragprep.layout.glm_doclayout._post_chat_completions", _fake_post)
+
+    image_b64 = base64.b64encode(b"not-a-real-png").decode("ascii")
+    with pytest.raises(RuntimeError, match=r"Layout analysis request timed out"):
+        glm_doclayout.analyze_layout_image_base64(image_b64, settings=settings)
+
+
 def test_glm_doclayout_local_mode_requires_optional_deps(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("RAGPREP_LAYOUT_MODE", "local-paddle")
     settings = get_settings()
