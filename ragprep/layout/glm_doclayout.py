@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import base64
 import binascii
-import inspect
 import io
 import json
 from functools import lru_cache
@@ -248,18 +247,31 @@ def _load_paddleocr_ppstructure() -> Any:
 def _get_paddleocr_engine() -> Any:
     PPStructure = _load_paddleocr_ppstructure()
 
-    kwargs: dict[str, object] = {"show_log": False}
-    sig = inspect.signature(PPStructure)
-    optional_kwargs: dict[str, object] = {
+    desired_kwargs: dict[str, object] = {
+        "show_log": False,
         "use_gpu": False,
         "layout": True,
         "ocr": False,
         "table": False,
     }
-    for key, value in optional_kwargs.items():
-        if key in sig.parameters:
-            kwargs[key] = value
-    return PPStructure(**kwargs)
+
+    # PaddleOCR pipelines vary across versions and sometimes validate kwargs strictly.
+    # We try a preferred set of arguments and retry by removing only the reported unknown ones.
+    kwargs = dict(desired_kwargs)
+    for _ in range(len(kwargs) + 1):
+        try:
+            return PPStructure(**kwargs)
+        except ValueError as exc:
+            message = str(exc).strip()
+            prefix = "Unknown argument:"
+            if not message.startswith(prefix):
+                raise
+            unknown = message[len(prefix) :].strip()
+            if not unknown or unknown not in kwargs:
+                raise
+            kwargs.pop(unknown, None)
+
+    raise RuntimeError("Failed to initialize PaddleOCR PPStructure backend.")
 
 
 def _paddle_bbox_to_xyxy(value: object) -> tuple[float, float, float, float] | None:
