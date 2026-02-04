@@ -328,6 +328,29 @@ def test_normalize_paddle_layout_output_flattens_singleton_list() -> None:
     assert isinstance(items[0], dict)
 
 
+def test_normalize_paddle_layout_output_extracts_boxes_from_paddlex_detresult_json() -> None:
+    class StubDetResult:
+        json = {
+            "res": {
+                "boxes": [
+                    {
+                        "label": "text",
+                        "score": 0.5,
+                        "coordinate": [0.0, 1.0, 2.0, 3.0],
+                    }
+                ]
+            }
+        }
+
+    items, raw = glm_doclayout._normalize_paddle_layout_output(
+        [{"layout_det_res": StubDetResult()}]
+    )
+    assert isinstance(raw, list)
+    assert items == [
+        {"bbox": [0.0, 1.0, 2.0, 3.0], "type": "text", "score": 0.5},
+    ]
+
+
 def test_invoke_paddle_engine_for_layout_instructs_on_pir_onednn_error() -> None:
     class Engine:
         def predict(self, _image: object) -> object:
