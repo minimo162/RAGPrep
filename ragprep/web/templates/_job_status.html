@@ -3,7 +3,8 @@
     class="job"
     data-job-id="{{ job.id }}"
     hx-get="/jobs/{{ job.id }}/status"
-    hx-trigger="load, every 0.5s"
+    hx-trigger="load, every 1s"
+    hx-headers='{"If-None-Match":"{{ job.version }}"}'
     hx-swap="outerHTML"
   >
     <p class="muted">Job {{ job.id }} - {{ job.status.value }}</p>
