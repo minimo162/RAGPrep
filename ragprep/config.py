@@ -24,6 +24,9 @@ ENV_LAYOUT_MAX_TOKENS: Final[str] = "RAGPREP_LAYOUT_MAX_TOKENS"
 ENV_LAYOUT_TIMEOUT_SECONDS: Final[str] = "RAGPREP_LAYOUT_TIMEOUT_SECONDS"
 ENV_LAYOUT_RENDER_DPI: Final[str] = "RAGPREP_LAYOUT_RENDER_DPI"
 ENV_LAYOUT_RENDER_MAX_EDGE: Final[str] = "RAGPREP_LAYOUT_RENDER_MAX_EDGE"
+ENV_LAYOUT_RENDER_AUTO: Final[str] = "RAGPREP_LAYOUT_RENDER_AUTO"
+ENV_LAYOUT_RENDER_AUTO_SMALL_DPI: Final[str] = "RAGPREP_LAYOUT_RENDER_AUTO_SMALL_DPI"
+ENV_LAYOUT_RENDER_AUTO_SMALL_MAX_EDGE: Final[str] = "RAGPREP_LAYOUT_RENDER_AUTO_SMALL_MAX_EDGE"
 ENV_LAYOUT_CONCURRENCY: Final[str] = "RAGPREP_LAYOUT_CONCURRENCY"
 ENV_LAYOUT_RETRY_COUNT: Final[str] = "RAGPREP_LAYOUT_RETRY_COUNT"
 ENV_LAYOUT_RETRY_BACKOFF_SECONDS: Final[str] = "RAGPREP_LAYOUT_RETRY_BACKOFF_SECONDS"
@@ -50,6 +53,9 @@ DEFAULT_LAYOUT_TIMEOUT_SECONDS: Final[int] = DEFAULT_GLM_OCR_TIMEOUT_SECONDS
 DEFAULT_LAYOUT_CONCURRENCY: Final[int] = 1
 DEFAULT_LAYOUT_RETRY_COUNT: Final[int] = 1
 DEFAULT_LAYOUT_RETRY_BACKOFF_SECONDS: Final[float] = 0.0
+DEFAULT_LAYOUT_RENDER_AUTO: Final[bool] = False
+DEFAULT_LAYOUT_RENDER_AUTO_SMALL_DPI: Final[int] = 250
+DEFAULT_LAYOUT_RENDER_AUTO_SMALL_MAX_EDGE: Final[int] = 1024
 
 
 @dataclass(frozen=True)
@@ -74,6 +80,9 @@ class Settings:
     layout_timeout_seconds: int
     layout_render_dpi: int
     layout_render_max_edge: int
+    layout_render_auto: bool
+    layout_render_auto_small_dpi: int
+    layout_render_auto_small_max_edge: int
     layout_concurrency: int
     layout_retry_count: int
     layout_retry_backoff_seconds: float
@@ -116,6 +125,18 @@ def _get_nonnegative_float(name: str, default: float) -> float:
     if value < 0:
         raise ValueError(f"{name} must be >= 0, got: {value}")
     return value
+
+
+def _get_bool(name: str, default: bool) -> bool:
+    raw = os.getenv(name)
+    if raw is None or not raw.strip():
+        return default
+    value = raw.strip().lower()
+    if value in {"1", "true", "yes", "on"}:
+        return True
+    if value in {"0", "false", "no", "off"}:
+        return False
+    raise ValueError(f"{name} must be a bool (0/1/true/false), got: {raw!r}")
 
 
 def _get_optional_str(name: str) -> str | None:
@@ -246,6 +267,20 @@ def _get_layout_render_max_edge() -> int:
     return value
 
 
+def _get_layout_render_auto() -> bool:
+    return _get_bool(ENV_LAYOUT_RENDER_AUTO, DEFAULT_LAYOUT_RENDER_AUTO)
+
+
+def _get_layout_render_auto_small_dpi() -> int:
+    return _get_positive_int(ENV_LAYOUT_RENDER_AUTO_SMALL_DPI, DEFAULT_LAYOUT_RENDER_AUTO_SMALL_DPI)
+
+
+def _get_layout_render_auto_small_max_edge() -> int:
+    return _get_positive_int(
+        ENV_LAYOUT_RENDER_AUTO_SMALL_MAX_EDGE, DEFAULT_LAYOUT_RENDER_AUTO_SMALL_MAX_EDGE
+    )
+
+
 def _get_layout_concurrency() -> int:
     return _get_positive_int(ENV_LAYOUT_CONCURRENCY, DEFAULT_LAYOUT_CONCURRENCY)
 
@@ -284,6 +319,9 @@ def get_settings() -> Settings:
         layout_timeout_seconds=_get_layout_timeout_seconds(),
         layout_render_dpi=_get_layout_render_dpi(),
         layout_render_max_edge=_get_layout_render_max_edge(),
+        layout_render_auto=_get_layout_render_auto(),
+        layout_render_auto_small_dpi=_get_layout_render_auto_small_dpi(),
+        layout_render_auto_small_max_edge=_get_layout_render_auto_small_max_edge(),
         layout_concurrency=_get_layout_concurrency(),
         layout_retry_count=_get_layout_retry_count(),
         layout_retry_backoff_seconds=_get_layout_retry_backoff_seconds(),

@@ -246,17 +246,27 @@ def pdf_to_html(
 
     from ragprep.html_render import render_document_html, render_page_html, wrap_html_document
     from ragprep.layout.glm_doclayout import analyze_layout_image_base64
-    from ragprep.pdf_render import iter_pdf_images
+    from ragprep.pdf_render import iter_pdf_images, render_pdf_page_image
     from ragprep.pdf_text import extract_pymupdf_page_sizes, extract_pymupdf_page_spans
     from ragprep.structure_ir import Document, Page, build_page_blocks, layout_element_from_raw
 
     spans_by_page = extract_pymupdf_page_spans(pdf_bytes)
     page_sizes = extract_pymupdf_page_sizes(pdf_bytes)
 
+    layout_mode = (settings.layout_mode or "").strip().lower()
+    adaptive_enabled = bool(settings.layout_render_auto) and layout_mode == "server"
+    primary_dpi = settings.layout_render_dpi
+    primary_max_edge = settings.layout_render_max_edge
+    fallback_dpi = settings.layout_render_dpi
+    fallback_max_edge = settings.layout_render_max_edge
+    if adaptive_enabled:
+        primary_dpi = settings.layout_render_auto_small_dpi
+        primary_max_edge = settings.layout_render_auto_small_max_edge
+
     total_pages, images = iter_pdf_images(
         pdf_bytes,
-        dpi=settings.layout_render_dpi,
-        max_edge=settings.layout_render_max_edge,
+        dpi=primary_dpi,
+        max_edge=primary_max_edge,
         max_pages=settings.max_pages,
         max_bytes=settings.max_upload_bytes,
     )
@@ -308,8 +318,41 @@ def pdf_to_html(
         page = Page(page_number=page_number, blocks=blocks)
         return page, render_page_html(page)
 
+    def _layout_needs_retry(layout_raw: dict[str, object]) -> bool:
+        elements = layout_raw.get("elements")
+        return isinstance(elements, list) and len(elements) == 0
+
+    def _analyze_layout_for_page(
+        *,
+        page_number: int,
+        encoded: str,
+        image_width: float,
+        image_height: float,
+    ) -> tuple[dict[str, object], float, float]:
+        layout_raw = analyze_layout_image_base64(encoded, settings=settings)
+        if not adaptive_enabled or not _layout_needs_retry(layout_raw):
+            return layout_raw, image_width, image_height
+
+        large_image = render_pdf_page_image(
+            pdf_bytes,
+            page_index=page_number - 1,
+            dpi=fallback_dpi,
+            max_edge=fallback_max_edge,
+            max_pages=settings.max_pages,
+            max_bytes=settings.max_upload_bytes,
+        )
+        try:
+            encoded_large = _image_to_png_base64(large_image)
+            layout_raw_large = analyze_layout_image_base64(encoded_large, settings=settings)
+            return layout_raw_large, float(large_image.width), float(large_image.height)
+        finally:
+            try:
+                large_image.close()
+            except Exception:  # noqa: BLE001
+                pass
+
     layout_workers = 1
-    if (settings.layout_mode or "").strip().lower() == "server":
+    if layout_mode == "server":
         layout_workers = max(1, int(settings.layout_concurrency))
 
     if layout_workers <= 1:
@@ -329,11 +372,16 @@ def pdf_to_html(
                 except Exception:  # noqa: BLE001
                     pass
 
-            layout_raw = analyze_layout_image_base64(encoded, settings=settings)
-            page, section_html = _build_page_from_layout(
+            layout_raw, used_w, used_h = _analyze_layout_for_page(
                 page_number=page_number,
+                encoded=encoded,
                 image_width=image_width,
                 image_height=image_height,
+            )
+            page, section_html = _build_page_from_layout(
+                page_number=page_number,
+                image_width=used_w,
+                image_height=used_h,
                 layout_raw=layout_raw,
             )
             pages.append(page)
@@ -352,7 +400,7 @@ def pdf_to_html(
                 ),
             )
     else:
-        inflight: dict[int, tuple[Future[dict[str, object]], float, float]] = {}
+        inflight: dict[int, Future[tuple[dict[str, object], float, float]]] = {}
         next_page_to_process = 1
         executor = ThreadPoolExecutor(
             max_workers=min(layout_workers, int(total_pages)),
@@ -360,8 +408,8 @@ def pdf_to_html(
         )
 
         def _process_page(page_number: int) -> None:
-            future, image_width, image_height = inflight[page_number]
-            layout_raw = future.result()
+            future = inflight[page_number]
+            layout_raw, image_width, image_height = future.result()
             page, section_html = _build_page_from_layout(
                 page_number=page_number,
                 image_width=image_width,
@@ -399,8 +447,14 @@ def pdf_to_html(
                     except Exception:  # noqa: BLE001
                         pass
 
-                future = executor.submit(analyze_layout_image_base64, encoded, settings=settings)
-                inflight[page_number] = (future, image_width, image_height)
+                future = executor.submit(
+                    _analyze_layout_for_page,
+                    page_number=page_number,
+                    encoded=encoded,
+                    image_width=image_width,
+                    image_height=image_height,
+                )
+                inflight[page_number] = future
 
                 while len(inflight) >= layout_workers and next_page_to_process in inflight:
                     _process_page(next_page_to_process)
@@ -409,7 +463,7 @@ def pdf_to_html(
 
                 while (
                     next_page_to_process in inflight
-                    and inflight[next_page_to_process][0].done()
+                    and inflight[next_page_to_process].done()
                 ):
                     _process_page(next_page_to_process)
                     inflight.pop(next_page_to_process, None)
@@ -420,7 +474,7 @@ def pdf_to_html(
                 inflight.pop(next_page_to_process, None)
                 next_page_to_process += 1
         finally:
-            for future, _w, _h in inflight.values():
+            for future in inflight.values():
                 future.cancel()
             executor.shutdown(wait=True, cancel_futures=True)
 
