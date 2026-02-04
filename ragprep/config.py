@@ -22,6 +22,8 @@ ENV_LAYOUT_MODEL: Final[str] = "RAGPREP_LAYOUT_MODEL"
 ENV_LAYOUT_API_KEY: Final[str] = "RAGPREP_LAYOUT_API_KEY"
 ENV_LAYOUT_MAX_TOKENS: Final[str] = "RAGPREP_LAYOUT_MAX_TOKENS"
 ENV_LAYOUT_TIMEOUT_SECONDS: Final[str] = "RAGPREP_LAYOUT_TIMEOUT_SECONDS"
+ENV_LAYOUT_RENDER_DPI: Final[str] = "RAGPREP_LAYOUT_RENDER_DPI"
+ENV_LAYOUT_RENDER_MAX_EDGE: Final[str] = "RAGPREP_LAYOUT_RENDER_MAX_EDGE"
 ENV_LAYOUT_CONCURRENCY: Final[str] = "RAGPREP_LAYOUT_CONCURRENCY"
 ENV_LAYOUT_RETRY_COUNT: Final[str] = "RAGPREP_LAYOUT_RETRY_COUNT"
 ENV_LAYOUT_RETRY_BACKOFF_SECONDS: Final[str] = "RAGPREP_LAYOUT_RETRY_BACKOFF_SECONDS"
@@ -70,6 +72,8 @@ class Settings:
     layout_api_key: str | None
     layout_max_tokens: int
     layout_timeout_seconds: int
+    layout_render_dpi: int
+    layout_render_max_edge: int
     layout_concurrency: int
     layout_retry_count: int
     layout_retry_backoff_seconds: float
@@ -216,6 +220,32 @@ def _get_layout_timeout_seconds() -> int:
     return value
 
 
+def _get_layout_render_dpi() -> int:
+    raw = os.getenv(ENV_LAYOUT_RENDER_DPI)
+    if raw is None or not raw.strip():
+        return _get_positive_int(ENV_RENDER_DPI, DEFAULT_RENDER_DPI)
+    try:
+        value = int(raw.strip())
+    except ValueError as exc:
+        raise ValueError(f"{ENV_LAYOUT_RENDER_DPI} must be an int, got: {raw!r}") from exc
+    if value <= 0:
+        raise ValueError(f"{ENV_LAYOUT_RENDER_DPI} must be > 0, got: {value}")
+    return value
+
+
+def _get_layout_render_max_edge() -> int:
+    raw = os.getenv(ENV_LAYOUT_RENDER_MAX_EDGE)
+    if raw is None or not raw.strip():
+        return _get_positive_int(ENV_RENDER_MAX_EDGE, DEFAULT_RENDER_MAX_EDGE)
+    try:
+        value = int(raw.strip())
+    except ValueError as exc:
+        raise ValueError(f"{ENV_LAYOUT_RENDER_MAX_EDGE} must be an int, got: {raw!r}") from exc
+    if value <= 0:
+        raise ValueError(f"{ENV_LAYOUT_RENDER_MAX_EDGE} must be > 0, got: {value}")
+    return value
+
+
 def _get_layout_concurrency() -> int:
     return _get_positive_int(ENV_LAYOUT_CONCURRENCY, DEFAULT_LAYOUT_CONCURRENCY)
 
@@ -252,6 +282,8 @@ def get_settings() -> Settings:
         layout_api_key=_get_layout_api_key(),
         layout_max_tokens=_get_layout_max_tokens(),
         layout_timeout_seconds=_get_layout_timeout_seconds(),
+        layout_render_dpi=_get_layout_render_dpi(),
+        layout_render_max_edge=_get_layout_render_max_edge(),
         layout_concurrency=_get_layout_concurrency(),
         layout_retry_count=_get_layout_retry_count(),
         layout_retry_backoff_seconds=_get_layout_retry_backoff_seconds(),

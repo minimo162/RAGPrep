@@ -255,8 +255,8 @@ def pdf_to_html(
 
     total_pages, images = iter_pdf_images(
         pdf_bytes,
-        dpi=settings.render_dpi,
-        max_edge=settings.render_max_edge,
+        dpi=settings.layout_render_dpi,
+        max_edge=settings.layout_render_max_edge,
         max_pages=settings.max_pages,
         max_bytes=settings.max_upload_bytes,
     )
