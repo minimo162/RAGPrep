@@ -1,19 +1,49 @@
 # RAGPrep
 
-PDF のテキストレイヤー（PyMuPDF）を使って、PDF を構造化された HTML に変換するツール（Web / Desktop / CLI）。
+RAGPrep converts PDFs to **structured HTML** by combining:
+- **Text layer extraction** (PyMuPDF): uses the PDF’s existing text layer (no OCR needed for text)
+- **Layout analysis (required)**: PP-DocLayout-V3 regions are used to structure the extracted text
 
-レイアウト解析は GLM-OCR（`zai-org/GLM-OCR`）のサーバーモード（OpenAI 互換）で利用できます。
-サーバーがない場合も、フォールバック（ページ全体を text として扱う）で HTML を出力します。
+Outputs:
+- Web / Desktop: download `.html`
+- CLI: writes an `.html` file
 
-## 最短で動かす
+## Quickstart
 
-### 1) セットアップ
+### 1) Install
 ```bash
-cd C:\Users\Administrator\RAGPrep
 uv sync --dev
 ```
 
-### 2) 起動
+### 2) Enable layout analysis (required)
+
+RAGPrep **requires layout analysis**. Choose one of the following backends.
+
+#### Option A: Local (no Docker) via PaddleOCR (recommended)
+Install the optional runtime:
+```bash
+uv pip install paddlepaddle paddleocr
+```
+
+Set the layout mode:
+```powershell
+$env:RAGPREP_LAYOUT_MODE = "local-paddle"
+```
+```bash
+export RAGPREP_LAYOUT_MODE=local-paddle
+```
+
+#### Option B: Server (OpenAI-compatible `/v1/chat/completions`)
+Point RAGPrep at a running server (for example, GLM-OCR served behind an OpenAI-compatible API):
+```powershell
+$env:RAGPREP_LAYOUT_MODE = "server"
+$env:RAGPREP_LAYOUT_BASE_URL = "http://127.0.0.1:8080"
+$env:RAGPREP_LAYOUT_MODEL = "zai-org/GLM-OCR"
+# optional:
+# $env:RAGPREP_LAYOUT_API_KEY = "..."
+```
+
+### 3) Run
 Desktop:
 ```bash
 uv run python -m ragprep.desktop
@@ -23,59 +53,23 @@ Web:
 ```bash
 uv run uvicorn ragprep.web.app:app --reload
 ```
-`http://127.0.0.1:8000` を開きます。
+Open `http://127.0.0.1:8000`.
 
-CLI（PDF → HTML）:
+CLI (PDF → HTML):
 ```bash
-uv run python scripts/pdf_to_html.py --pdf .\path\to\input.pdf --out .\out\input.html --overwrite
+uv run python scripts/pdf_to_html.py --pdf .\\path\\to\\input.pdf --out .\\out\\input.html --overwrite
 ```
 
-## レイアウト解析（環境変数）
+## Layout settings
 
-デフォルトは GLM 側の設定に追従します（後方互換）:
-- `RAGPREP_LAYOUT_MODE`（unset の場合は `RAGPREP_GLM_OCR_MODE` にフォールバック）
+- `RAGPREP_LAYOUT_MODE`: `local-paddle` (local PP-DocLayout-V3) or `server` (OpenAI-compatible HTTP)
+- `RAGPREP_LAYOUT_BASE_URL`: server base URL (server mode only)
+- `RAGPREP_LAYOUT_MODEL`: model name (server mode; kept for parity in local mode)
+- `RAGPREP_LAYOUT_API_KEY`: bearer token (optional, server mode)
 
-GLM-OCR サーバーでレイアウト解析を有効にする場合:
-- `RAGPREP_LAYOUT_MODE=server`
-- `RAGPREP_LAYOUT_BASE_URL=http://127.0.0.1:8080`（default）
-- `RAGPREP_LAYOUT_MODEL=zai-org/GLM-OCR`（default）
-- `RAGPREP_LAYOUT_API_KEY`（optional）
-
-### server モード: サーバー起動（Windows 推奨: Docker）
-```bash
-docker run --rm -it -p 8080:8080 vllm/vllm-openai:nightly vllm serve zai-org/GLM-OCR --host 0.0.0.0 --port 8080
-```
-
-疎通確認（200 なら OK）:
-```powershell
-Invoke-WebRequest -UseBasicParsing http://127.0.0.1:8080/v1/models
-```
-
-## Standalone（Windows）
-
-### ビルド
-```powershell
-cd C:\Users\Administrator\RAGPrep
-.\scripts\build-standalone.ps1 -Clean
-```
-
-### 起動
-Transformers（デフォルト）:
-```powershell
-.\dist\standalone\run.ps1
-```
-
-server モード（サーバーが必要）:
-```powershell
-$env:RAGPREP_GLM_OCR_MODE = "server"
-.\dist\standalone\start-glm-ocr.ps1
-.\dist\standalone\run.ps1
-```
-
-## 開発者向け（品質ゲート）
+## Quality gate
 ```bash
 uv run ruff check .
 uv run mypy ragprep tests
 uv run pytest
 ```
-
