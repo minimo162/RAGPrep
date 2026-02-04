@@ -168,6 +168,39 @@ def test_get_paddleocr_engine_instructs_paddlex_ocr_extras(
         glm_doclayout._get_paddleocr_engine()
 
 
+def test_invoke_paddle_engine_uses_predict_when_not_callable() -> None:
+    class Engine:
+        def predict(self, _image: object) -> object:
+            return [{"bbox": [0, 0, 1, 1], "type": "text"}]
+
+    out = glm_doclayout._invoke_paddle_engine(Engine(), image=object())
+    assert isinstance(out, list)
+
+
+def test_invoke_paddle_engine_falls_back_to_list_argument() -> None:
+    class Engine:
+        last_arg: object | None = None
+
+        def predict(self, image: object) -> object:
+            Engine.last_arg = image
+            if not isinstance(image, list):
+                raise TypeError("expected list")
+            return [{"bbox": [0, 0, 1, 1], "type": "text"}]
+
+    out = glm_doclayout._invoke_paddle_engine(Engine(), image=object())
+    assert isinstance(out, list)
+    assert isinstance(Engine.last_arg, list)
+
+
+def test_normalize_paddle_layout_output_flattens_singleton_list() -> None:
+    items, raw = glm_doclayout._normalize_paddle_layout_output(
+        [[{"bbox": [0, 0, 1, 1], "type": "text"}]]
+    )
+    assert isinstance(items, list)
+    assert isinstance(raw, list)
+    assert isinstance(items[0], dict)
+
+
 def test_glm_doclayout_raises_on_non_200(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("RAGPREP_LAYOUT_MODE", "server")
     settings = get_settings()
