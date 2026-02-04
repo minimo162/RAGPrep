@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
-from types import ModuleType, TracebackType
+from types import ModuleType, SimpleNamespace, TracebackType
 
 import pytest
 import uvicorn
@@ -48,6 +48,43 @@ def test_client_host_for_binds_all_interfaces_to_loopback() -> None:
     assert desktop._client_host_for("0.0.0.0") == "127.0.0.1"
     assert desktop._client_host_for("::") == "127.0.0.1"
     assert desktop._client_host_for("127.0.0.1") == "127.0.0.1"
+
+
+def test_wait_for_health_disables_env_proxies(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("HTTP_PROXY", "http://127.0.0.1:9")
+    monkeypatch.setenv("HTTPS_PROXY", "http://127.0.0.1:9")
+
+    captured: dict[str, object] = {}
+
+    class _FakeResponse:
+        def __init__(self, status_code: int, text: str) -> None:
+            self.status_code = status_code
+            self.text = text
+
+    class _FakeClient:
+        def __init__(self, *, trust_env: bool, **_kwargs: object) -> None:
+            captured["trust_env"] = trust_env
+
+        def __enter__(self) -> _FakeClient:
+            return self
+
+        def __exit__(self, *args: object, **kwargs: object) -> None:
+            _ = args
+            _ = kwargs
+            return None
+
+        def get(self, _url: str, **_kwargs: object) -> _FakeResponse:
+            return _FakeResponse(200, "ok")
+
+    def _monotonic() -> float:
+        return 0.0
+
+    monkeypatch.setattr(desktop, "httpx", SimpleNamespace(Client=_FakeClient, Timeout=lambda x: x))
+    monkeypatch.setattr(desktop.time, "monotonic", _monotonic)
+    monkeypatch.setattr(desktop.time, "sleep", lambda _s: None)
+
+    assert desktop._wait_for_health(health_url="http://127.0.0.1:8000/health", timeout_s=0.01)
+    assert captured["trust_env"] is False
 
 
 def test_desktop_launcher_calls_webview_and_stops_server(monkeypatch: pytest.MonkeyPatch) -> None:

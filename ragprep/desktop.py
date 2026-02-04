@@ -7,10 +7,10 @@ import threading
 import time
 from pathlib import Path
 from typing import Any, Final
-from urllib.error import URLError
 from urllib.parse import unquote
 from urllib.request import Request, urlopen
 
+import httpx
 import uvicorn
 
 from ragprep.web.app import app
@@ -33,17 +33,20 @@ def _client_host_for(bind_host: str) -> str:
 
 def _wait_for_health(*, health_url: str, timeout_s: float) -> bool:
     deadline = time.monotonic() + timeout_s
-    request = Request(health_url, headers={"User-Agent": "ragprep-desktop"})
+    headers = {"User-Agent": "ragprep-desktop"}
+    timeout = httpx.Timeout(1.0)
 
-    while time.monotonic() < deadline:
-        try:
-            with urlopen(request, timeout=1.0) as response:
-                body = response.read(32).decode("utf-8", errors="ignore").strip()
-                if response.status == 200 and body == "ok":
+    # Desktop environments often have proxy env vars configured. We must not send loopback
+    # readiness checks through a proxy.
+    with httpx.Client(timeout=timeout, follow_redirects=False, trust_env=False) as client:
+        while time.monotonic() < deadline:
+            try:
+                response = client.get(health_url, headers=headers)
+                if response.status_code == 200 and (response.text or "").strip() == "ok":
                     return True
-        except (OSError, URLError):
-            pass
-        time.sleep(0.2)
+            except httpx.HTTPError:
+                pass
+            time.sleep(0.2)
 
     return False
 
