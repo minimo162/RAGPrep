@@ -297,3 +297,8 @@ def download_html(job_id: str) -> HTMLResponse:
 @app.get("/health")
 def health() -> PlainTextResponse:
     return PlainTextResponse("ok", media_type="text/plain; charset=utf-8")
+
+
+@app.get("/favicon.ico", include_in_schema=False)
+def favicon() -> Response:
+    return Response(status_code=204)
