@@ -2,7 +2,11 @@ from __future__ import annotations
 
 import base64
 import binascii
+import inspect
+import io
 import json
+from functools import lru_cache
+from typing import Any, cast
 
 import httpx
 
@@ -88,6 +92,7 @@ def _parse_chat_completions_response_content(response: httpx.Response) -> str:
 class _GlmOcrMode:
     transformers = "transformers"
     server = "server"
+    local_paddle = "local-paddle"
 
 _CODE_FENCE = "```"
 
@@ -213,17 +218,190 @@ def _parse_layout_result(content: str) -> tuple[str, tuple[dict[str, object], ..
     return schema_version, tuple(cleaned)
 
 
+def _load_paddleocr_ppstructure() -> Any:
+    try:
+        from paddleocr import PPStructure
+    except Exception as exc:  # noqa: BLE001
+        raise RuntimeError(
+            "Local layout analysis requires optional dependencies. "
+            "Install PaddleOCR (CPU) and try again, or use RAGPREP_LAYOUT_MODE=server. "
+            "Suggested install: uv pip install paddlepaddle paddleocr"
+        ) from exc
+    return PPStructure
+
+
+@lru_cache(maxsize=1)
+def _get_paddleocr_engine() -> Any:
+    PPStructure = _load_paddleocr_ppstructure()
+
+    kwargs: dict[str, object] = {"show_log": False}
+    sig = inspect.signature(PPStructure)
+    optional_kwargs: dict[str, object] = {
+        "use_gpu": False,
+        "layout": True,
+        "ocr": False,
+        "table": False,
+    }
+    for key, value in optional_kwargs.items():
+        if key in sig.parameters:
+            kwargs[key] = value
+    return PPStructure(**kwargs)
+
+
+def _paddle_bbox_to_xyxy(value: object) -> tuple[float, float, float, float] | None:
+    if not isinstance(value, (list, tuple)):
+        return None
+
+    # Common format: [x0, y0, x1, y1]
+    if len(value) == 4 and all(isinstance(v, (int, float)) for v in value):
+        x0, y0, x1, y1 = (float(value[0]), float(value[1]), float(value[2]), float(value[3]))
+        if x0 < x1 and y0 < y1:
+            return x0, y0, x1, y1
+        return None
+
+    # Polygon format: [[x,y], [x,y], [x,y], [x,y]]
+    if len(value) == 4 and all(isinstance(v, (list, tuple)) and len(v) == 2 for v in value):
+        xs: list[float] = []
+        ys: list[float] = []
+        for pt in value:
+            x, y = pt[0], pt[1]
+            if not isinstance(x, (int, float)) or not isinstance(y, (int, float)):
+                return None
+            xs.append(float(x))
+            ys.append(float(y))
+        x0, y0, x1, y1 = min(xs), min(ys), max(xs), max(ys)
+        if x0 < x1 and y0 < y1:
+            return x0, y0, x1, y1
+        return None
+
+    return None
+
+
+_PADDLE_LABEL_MAP: dict[str, str] = {
+    "title": "title",
+    "header": "heading",
+    "heading": "heading",
+    "text": "text",
+    "paragraph": "text",
+    "list": "text",
+    "footer": "text",
+    "table": "table",
+    "figure": "figure",
+    "image": "figure",
+    "equation": "text",
+}
+
+
+def _normalize_paddle_label(value: str) -> str:
+    key = (value or "").strip().lower()
+    if not key:
+        return "text"
+    return _PADDLE_LABEL_MAP.get(key, key)
+
+
+def _analyze_layout_local_paddle(image_base64: str, *, settings: Settings) -> dict[str, object]:
+    if not image_base64:
+        raise ValueError("image_base64 is empty")
+
+    payload = _strip_data_url_prefix(image_base64)
+    if not payload:
+        raise ValueError("image_base64 is empty")
+    _validate_base64_payload(payload)
+
+    # Fail-fast on missing optional dependencies.
+    engine = _get_paddleocr_engine()
+
+    image_bytes = base64.b64decode(payload, validate=False)
+
+    try:
+        from PIL import Image
+    except Exception as exc:  # noqa: BLE001
+        raise RuntimeError("Pillow is required for local layout analysis.") from exc
+
+    try:
+        import numpy as np
+    except Exception as exc:  # noqa: BLE001
+        raise RuntimeError("numpy is required for local layout analysis.") from exc
+
+    try:
+        with Image.open(io.BytesIO(image_bytes)) as img:
+            rgb = img.convert("RGB")
+            arr = np.asarray(rgb)
+    except Exception as exc:  # noqa: BLE001
+        raise RuntimeError("Failed to decode PNG for local layout analysis.") from exc
+
+    # Many CV stacks expect BGR.
+    if getattr(arr, "ndim", 0) == 3 and getattr(arr, "shape", (0, 0, 0))[2] == 3:
+        arr = arr[:, :, ::-1]
+
+    result = engine(arr)
+    if not isinstance(result, list):
+        raise RuntimeError("Local layout analysis returned an invalid result.")
+
+    elements: list[dict[str, object]] = []
+    for item in result:
+        if not isinstance(item, dict):
+            continue
+        bbox_obj = item.get("bbox") if "bbox" in item else item.get("box")
+        bbox = _paddle_bbox_to_xyxy(bbox_obj)
+        if bbox is None:
+            continue
+
+        label_obj = item.get("type") if "type" in item else item.get("label")
+        label = _normalize_paddle_label(label_obj) if isinstance(label_obj, str) else "text"
+
+        score_obj = item.get("score", None)
+        score = float(score_obj) if isinstance(score_obj, (int, float)) else None
+        if score is not None and not (0.0 <= score <= 1.0):
+            score = None
+
+        elements.append(
+            {
+                "page_index": 0,
+                "bbox": bbox,
+                "label": label,
+                "score": score,
+            }
+        )
+
+    def _sort_key(e: dict[str, object]) -> tuple[float, float, str]:
+        bbox = cast(tuple[float, float, float, float], e["bbox"])
+        label = cast(str, e["label"])
+        return (bbox[1], bbox[0], label)
+
+    elements.sort(key=_sort_key)
+
+    raw = json.dumps(
+        {"backend": _GlmOcrMode.local_paddle, "model": settings.layout_model, "result": result},
+        ensure_ascii=False,
+        default=str,
+    )
+    return {
+        "schema_version": "pp-doclayout-v3",
+        "elements": elements,
+        "raw": raw,
+    }
+
+
 def analyze_layout_image_base64(image_base64: str, *, settings: Settings) -> dict[str, object]:
     """
     Request layout analysis for a single page image.
 
-    Current implementation supports `server` mode only. If you need local PP-DocLayout-V3
-    inference, implement it as a separate backend and keep this function's return shape stable.
+    Supported backends:
+    - `server`: call an OpenAI-compatible `/v1/chat/completions` endpoint (GLM-OCR server).
+    - `local-paddle`: run PP-DocLayout-V3 locally via PaddleOCR (no Docker).
+
+    Return shape is stable: `schema_version`, `elements[{page_index,bbox,label,score}]`, `raw`.
     """
 
     mode = (settings.layout_mode or "").strip().lower() or _GlmOcrMode.transformers
+    if mode in {_GlmOcrMode.transformers, _GlmOcrMode.local_paddle}:
+        return _analyze_layout_local_paddle(image_base64, settings=settings)
     if mode != _GlmOcrMode.server:
-        raise RuntimeError("Layout analysis currently requires RAGPREP_LAYOUT_MODE=server.")
+        raise RuntimeError(
+            "Layout analysis requires RAGPREP_LAYOUT_MODE=server or "
+            "RAGPREP_LAYOUT_MODE=local-paddle."
+        )
 
     if not image_base64:
         raise ValueError("image_base64 is empty")
