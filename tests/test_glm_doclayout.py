@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import builtins
 import json
+import os
 import sys
 from types import ModuleType
 from typing import Any, cast
@@ -211,6 +212,28 @@ def test_invoke_paddle_engine_for_layout_instructs_on_pir_onednn_error() -> None
 
     with pytest.raises(RuntimeError, match=r"FLAGS_use_mkldnn"):
         glm_doclayout._invoke_paddle_engine_for_layout(Engine(), image=object())
+
+
+def test_apply_paddle_safe_mode_env_sets_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("RAGPREP_LAYOUT_PADDLE_SAFE_MODE", "1")
+    monkeypatch.delenv("FLAGS_use_mkldnn", raising=False)
+    monkeypatch.delenv("FLAGS_enable_pir_api", raising=False)
+
+    glm_doclayout._apply_paddle_safe_mode_env()
+
+    assert os.environ["FLAGS_use_mkldnn"] == "0"
+    assert os.environ["FLAGS_enable_pir_api"] == "0"
+
+
+def test_apply_paddle_safe_mode_env_does_not_override(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("RAGPREP_LAYOUT_PADDLE_SAFE_MODE", "true")
+    monkeypatch.setenv("FLAGS_use_mkldnn", "1")
+    monkeypatch.setenv("FLAGS_enable_pir_api", "1")
+
+    glm_doclayout._apply_paddle_safe_mode_env()
+
+    assert os.environ["FLAGS_use_mkldnn"] == "1"
+    assert os.environ["FLAGS_enable_pir_api"] == "1"
 
 
 def test_glm_doclayout_raises_on_non_200(monkeypatch: pytest.MonkeyPatch) -> None:

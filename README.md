@@ -84,6 +84,11 @@ export FLAGS_use_mkldnn=0
 export FLAGS_enable_pir_api=0
 ```
 
+Or set a single switch and restart:
+```bash
+export RAGPREP_LAYOUT_PADDLE_SAFE_MODE=1
+```
+
 ## Quality gate
 ```bash
 uv run ruff check .

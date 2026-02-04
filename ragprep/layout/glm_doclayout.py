@@ -4,6 +4,7 @@ import base64
 import binascii
 import io
 import json
+import os
 from functools import lru_cache
 from typing import Any, cast
 
@@ -16,6 +17,8 @@ DEFAULT_LAYOUT_ANALYSIS_PROMPT = (
     "Return JSON only with keys: schema_version, elements[]. "
     "Each element must include: page_index, bbox[x0,y0,x1,y1], label, score."
 )
+
+ENV_LAYOUT_PADDLE_SAFE_MODE = "RAGPREP_LAYOUT_PADDLE_SAFE_MODE"
 
 
 def _normalize_base_url(base_url: str) -> str:
@@ -282,6 +285,23 @@ def _paddlex_ocr_install_hint() -> str:
     return 'uv pip install "paddlex[ocr]"'
 
 
+def _is_truthy_env(name: str) -> bool:
+    raw = os.getenv(name)
+    if raw is None:
+        return False
+    value = raw.strip().lower()
+    return value not in {"", "0", "false", "no", "off"}
+
+
+def _apply_paddle_safe_mode_env() -> None:
+    if not _is_truthy_env(ENV_LAYOUT_PADDLE_SAFE_MODE):
+        return
+
+    # These should be set before importing/initializing paddle/paddleocr.
+    os.environ.setdefault("FLAGS_use_mkldnn", "0")
+    os.environ.setdefault("FLAGS_enable_pir_api", "0")
+
+
 def _is_paddle_pir_onednn_error(exc: BaseException) -> bool:
     message = str(exc)
     if "ConvertPirAttribute2RuntimeAttribute" in message:
@@ -304,6 +324,9 @@ def _paddle_pir_onednn_workaround_hint() -> str:
             "bash:",
             "  export FLAGS_use_mkldnn=0",
             "  export FLAGS_enable_pir_api=0",
+            "",
+            "Or set a single switch and restart:",
+            f"  {ENV_LAYOUT_PADDLE_SAFE_MODE}=1",
             "",
             "If it still fails, try upgrading/downgrading Paddle packages, or use server mode:",
             "  RAGPREP_LAYOUT_MODE=server",
@@ -502,6 +525,7 @@ def _analyze_layout_local_paddle(image_base64: str, *, settings: Settings) -> di
     _validate_base64_payload(payload)
 
     # Fail-fast on missing optional dependencies.
+    _apply_paddle_safe_mode_env()
     engine = _get_paddleocr_engine()
 
     image_bytes = base64.b64decode(payload, validate=False)
