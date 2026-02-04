@@ -53,6 +53,8 @@ DEFAULT_LAYOUT_TIMEOUT_SECONDS: Final[int] = DEFAULT_GLM_OCR_TIMEOUT_SECONDS
 DEFAULT_LAYOUT_CONCURRENCY: Final[int] = 1
 DEFAULT_LAYOUT_RETRY_COUNT: Final[int] = 1
 DEFAULT_LAYOUT_RETRY_BACKOFF_SECONDS: Final[float] = 0.0
+DEFAULT_LAYOUT_RENDER_DPI: Final[int] = 300
+DEFAULT_LAYOUT_RENDER_MAX_EDGE: Final[int] = 1280
 DEFAULT_LAYOUT_RENDER_AUTO: Final[bool] = False
 DEFAULT_LAYOUT_RENDER_AUTO_SMALL_DPI: Final[int] = 250
 DEFAULT_LAYOUT_RENDER_AUTO_SMALL_MAX_EDGE: Final[int] = 1024
@@ -244,7 +246,7 @@ def _get_layout_timeout_seconds() -> int:
 def _get_layout_render_dpi() -> int:
     raw = os.getenv(ENV_LAYOUT_RENDER_DPI)
     if raw is None or not raw.strip():
-        return _get_positive_int(ENV_RENDER_DPI, DEFAULT_RENDER_DPI)
+        return DEFAULT_LAYOUT_RENDER_DPI
     try:
         value = int(raw.strip())
     except ValueError as exc:
@@ -257,7 +259,7 @@ def _get_layout_render_dpi() -> int:
 def _get_layout_render_max_edge() -> int:
     raw = os.getenv(ENV_LAYOUT_RENDER_MAX_EDGE)
     if raw is None or not raw.strip():
-        return _get_positive_int(ENV_RENDER_MAX_EDGE, DEFAULT_RENDER_MAX_EDGE)
+        return DEFAULT_LAYOUT_RENDER_MAX_EDGE
     try:
         value = int(raw.strip())
     except ValueError as exc:
