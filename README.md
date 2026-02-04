@@ -67,6 +67,23 @@ uv run python scripts/pdf_to_html.py --pdf .\\path\\to\\input.pdf --out .\\out\\
 - `RAGPREP_LAYOUT_MODEL`: model name (server mode; kept for parity in local mode)
 - `RAGPREP_LAYOUT_API_KEY`: bearer token (optional, server mode)
 
+## Troubleshooting (local paddle)
+
+If local layout fails with a Paddle runtime error mentioning `ConvertPirAttribute2RuntimeAttribute` or
+`onednn_instruction.cc`, try disabling OneDNN/MKLDNN and PIR API flags and restart:
+
+PowerShell:
+```powershell
+$env:FLAGS_use_mkldnn = "0"
+$env:FLAGS_enable_pir_api = "0"
+```
+
+bash:
+```bash
+export FLAGS_use_mkldnn=0
+export FLAGS_enable_pir_api=0
+```
+
 ## Quality gate
 ```bash
 uv run ruff check .

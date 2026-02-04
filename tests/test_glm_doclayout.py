@@ -201,6 +201,18 @@ def test_normalize_paddle_layout_output_flattens_singleton_list() -> None:
     assert isinstance(items[0], dict)
 
 
+def test_invoke_paddle_engine_for_layout_instructs_on_pir_onednn_error() -> None:
+    class Engine:
+        def predict(self, _image: object) -> object:
+            raise NotImplementedError(
+                "(Unimplemented) ConvertPirAttribute2RuntimeAttribute not support "
+                "[pir::ArrayAttribute<pir::DoubleAttribute>] (at onednn_instruction.cc:118)"
+            )
+
+    with pytest.raises(RuntimeError, match=r"FLAGS_use_mkldnn"):
+        glm_doclayout._invoke_paddle_engine_for_layout(Engine(), image=object())
+
+
 def test_glm_doclayout_raises_on_non_200(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("RAGPREP_LAYOUT_MODE", "server")
     settings = get_settings()
