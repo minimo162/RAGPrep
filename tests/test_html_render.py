@@ -1,0 +1,35 @@
+from __future__ import annotations
+
+from ragprep.html_render import render_document_html, wrap_html_document
+from ragprep.structure_ir import Document, Heading, Page, Paragraph, Unknown
+
+
+def test_render_document_html_escapes_text_and_wraps_pages() -> None:
+    doc = Document(
+        pages=(
+            Page(
+                page_number=1,
+                blocks=(
+                    Heading(level=1, text="<Title>"),
+                    Paragraph(text='A & B "C"'),
+                    Unknown(text="X>Y"),
+                ),
+            ),
+        )
+    )
+
+    html = render_document_html(doc)
+    assert '<section data-page="1">' in html
+    assert "&lt;Title&gt;" in html
+    assert "A &amp; B &quot;C&quot;" in html
+    assert "X&gt;Y" in html
+
+
+def test_wrap_html_document_produces_full_document() -> None:
+    fragment = "<div>ok</div>"
+    html = wrap_html_document(fragment, title='T & "Q"')
+    assert html.startswith("<!doctype html>")
+    assert "<meta charset" in html
+    assert "<div>ok</div>" in html
+    assert "<title>T &amp; &quot;Q&quot;</title>" in html
+
