@@ -397,6 +397,51 @@ def _coerce_to_list(value: object) -> list[object] | None:
     return None
 
 
+def _extract_paddlex_det_boxes(value: object) -> list[dict[str, object]] | None:
+    """
+    Extract a list of detection box dicts from PaddleX object detection result objects.
+
+    Some PP-Structure pipelines return a container object (e.g. `DetResult`) that stores its
+    payload under a `.json` attribute (dict). We support this shape so local-paddle can
+    produce normalized `elements`.
+    """
+
+    if value is None:
+        return None
+
+    # PaddleX result objects often store a JSON-ish dict as an attribute named `json`.
+    json_attr = getattr(value, "json", None)
+    if isinstance(json_attr, dict):
+        payload = json_attr
+    elif isinstance(value, dict):
+        payload = value
+    else:
+        return None
+
+    res = payload.get("res") if isinstance(payload.get("res"), dict) else payload
+    if not isinstance(res, dict):
+        return None
+    boxes = res.get("boxes")
+    if not isinstance(boxes, list) or not all(isinstance(x, dict) for x in boxes):
+        return None
+
+    out: list[dict[str, object]] = []
+    for box in boxes:
+        coordinate = box.get("coordinate")
+        if coordinate is None:
+            coordinate = box.get("bbox")
+        if coordinate is None:
+            coordinate = box.get("box")
+        out.append(
+            {
+                "bbox": coordinate,
+                "type": box.get("label") or box.get("type") or box.get("cls_name") or "text",
+                "score": box.get("score"),
+            }
+        )
+    return out
+
+
 def _normalize_paddle_layout_output(raw: object) -> tuple[list[dict[str, object]], object]:
     """
     Normalize PaddleOCR pipeline output to a list of item dicts.
@@ -415,6 +460,15 @@ def _normalize_paddle_layout_output(raw: object) -> tuple[list[dict[str, object]
         else:
             raw_list = []
             raw_for_json = raw
+
+    # PP-StructureV3 often returns a singleton container dict with a `layout_det_res` object
+    # (e.g. PaddleX `DetResult`). Extract the underlying `boxes` list when available.
+    if raw_list and len(raw_list) == 1 and isinstance(raw_list[0], dict):
+        container = cast(dict[str, object], raw_list[0])
+        for key in ("layout_det_res", "region_det_res"):
+            extracted = _extract_paddlex_det_boxes(container.get(key))
+            if extracted is not None:
+                return extracted, raw_for_json
 
     if raw_list and len(raw_list) == 1 and isinstance(raw_list[0], list):
         inner = raw_list[0]
