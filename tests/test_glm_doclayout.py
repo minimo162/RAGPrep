@@ -143,6 +143,34 @@ def test_get_paddleocr_engine_retries_on_unknown_show_log(
     assert "show_log" not in _StubPPStructureV3.last_kwargs
 
 
+def test_get_paddleocr_engine_defaults_to_cpu_and_disables_hpi(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class _StubPPStructureV3:
+        last_kwargs: dict[str, object] | None = None
+
+        def __init__(self, **kwargs: object) -> None:
+            if "show_log" in kwargs:
+                raise ValueError("Unknown argument: show_log")
+            _StubPPStructureV3.last_kwargs = dict(kwargs)
+            if kwargs.get("device") != "cpu":
+                raise AssertionError("expected device=cpu")
+            if kwargs.get("enable_hpi") is not False:
+                raise AssertionError("expected enable_hpi=False")
+
+    stub = ModuleType("paddleocr")
+    stub.PPStructureV3 = _StubPPStructureV3  # type: ignore[attr-defined]
+
+    monkeypatch.setitem(sys.modules, "paddleocr", stub)
+    glm_doclayout._get_paddleocr_engine.cache_clear()
+
+    engine = glm_doclayout._get_paddleocr_engine()
+    assert isinstance(engine, _StubPPStructureV3)
+    assert _StubPPStructureV3.last_kwargs is not None
+    assert _StubPPStructureV3.last_kwargs.get("device") == "cpu"
+    assert _StubPPStructureV3.last_kwargs.get("enable_hpi") is False
+
+
 def test_get_paddleocr_engine_instructs_paddlex_ocr_extras(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
