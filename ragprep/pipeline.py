@@ -286,21 +286,10 @@ def pdf_to_html(
             except Exception:  # noqa: BLE001
                 pass
 
-        try:
-            layout_raw = analyze_layout_image_base64(encoded, settings=settings)
-            raw_elements = layout_raw.get("elements", [])
-            if not isinstance(raw_elements, list):
-                raise RuntimeError("Layout analysis returned invalid elements.")
-        except RuntimeError as exc:
-            # Fallback: keep the HTML pipeline usable without a layout server by treating the
-            # whole page as a single text region. This preserves the intent (text-layer-first)
-            # while allowing incremental adoption of PP-DocLayout-V3.
-            message = str(exc)
-            if "requires RAGPREP_LAYOUT_MODE=server" not in message:
-                raise
-            raw_elements = [
-                {"bbox": (0.0, 0.0, image_width, image_height), "label": "text", "score": None}
-            ]
+        layout_raw = analyze_layout_image_base64(encoded, settings=settings)
+        raw_elements = layout_raw.get("elements", [])
+        if not isinstance(raw_elements, list):
+            raise RuntimeError("Layout analysis returned invalid elements.")
 
         layout_elements = [
             layout_element_from_raw(

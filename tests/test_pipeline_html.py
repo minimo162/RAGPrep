@@ -64,3 +64,33 @@ def test_pdf_to_html_reports_progress_and_renders_html(monkeypatch: pytest.Monke
         (ProgressPhase.rendering, 2, 2),
         (ProgressPhase.done, 2, 2),
     ]
+
+
+def test_pdf_to_html_requires_layout_analysis(monkeypatch: pytest.MonkeyPatch) -> None:
+    def _fake_iter_pdf_images(
+        *_args: object,
+        **_kwargs: object,
+    ) -> tuple[int, Iterator[Image.Image]]:
+        def generate() -> Iterator[Image.Image]:
+            yield Image.new("RGB", (10, 10), color=(255, 255, 255))
+
+        return 1, generate()
+
+    monkeypatch.setattr("ragprep.pdf_render.iter_pdf_images", _fake_iter_pdf_images)
+    monkeypatch.setattr(
+        "ragprep.pdf_text.extract_pymupdf_page_spans",
+        lambda _pdf: [[Span(x0=0, y0=0, x1=10, y1=10, text="X")]],
+    )
+    monkeypatch.setattr(
+        "ragprep.pdf_text.extract_pymupdf_page_sizes",
+        lambda _pdf: [(1000.0, 1000.0)],
+    )
+
+    def _raise_layout(_image_b64: str, *, settings: object) -> dict[str, object]:
+        _ = settings
+        raise RuntimeError("Layout analysis currently requires RAGPREP_LAYOUT_MODE=server.")
+
+    monkeypatch.setattr("ragprep.layout.glm_doclayout.analyze_layout_image_base64", _raise_layout)
+
+    with pytest.raises(RuntimeError, match="Layout analysis currently requires"):
+        _ = pdf_to_html(b"%PDF", full_document=False)
