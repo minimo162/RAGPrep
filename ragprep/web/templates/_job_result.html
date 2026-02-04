@@ -4,12 +4,12 @@
     <div class="download-links" style="display: flex; gap: 12px">
       <a
         class="link"
-        href="/download/{{ job.id }}.md"
-        onclick="if (window.pywebview && window.pywebview.api && window.pywebview.api.save_markdown) { const result = window.pywebview.api.save_markdown('{{ job.id }}', this.href); if (result && typeof result.then === 'function') { result.then((payload) => { if (payload && payload.status && payload.status !== 'ok') { console.warn('save_markdown result', payload); } }).catch((error) => { console.error('save_markdown failed', error); }); } return false; }"
-        >Download .md</a
+        href="/download/{{ job.id }}.html"
+        onclick="if (window.pywebview && window.pywebview.api && window.pywebview.api.save_html) { const result = window.pywebview.api.save_html('{{ job.id }}', this.href); if (result && typeof result.then === 'function') { result.then((payload) => { if (payload && payload.status && payload.status !== 'ok') { console.warn('save_html result', payload); } }).catch((error) => { console.error('save_html failed', error); }); } return false; }"
+        >Download .html</a
       >
     </div>
   </div>
   <h2>Result</h2>
-  <pre class="json-output">{{ job.markdown_output or job.partial_markdown }}</pre>
+  <div class="html-output">{{ (job.html_output or job.partial_html) | safe }}</div>
 </div>

@@ -19,6 +19,16 @@ def render_document_html(document: Document) -> str:
     return "\n".join(parts)
 
 
+def render_page_html(page: Page) -> str:
+    """
+    Render a single Page IR to HTML.
+
+    Returns a `<section data-page="...">…</section>` fragment.
+    """
+
+    return _render_page(page)
+
+
 def wrap_html_document(fragment_html: str, *, title: str = "RAGPrep") -> str:
     """
     Wrap a fragment in a minimal standalone HTML document.

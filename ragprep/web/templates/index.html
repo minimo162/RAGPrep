@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>PDF to JSON</title>
+    <title>PDF to HTML</title>
     <style>
       :root {
         --fg: #111827;
@@ -75,6 +75,14 @@
         overflow-x: auto;
         user-select: text;
       }
+      .html-output {
+        background: #ffffff;
+        color: var(--fg);
+        border: 1px solid var(--border);
+        padding: 12px;
+        border-radius: 8px;
+        overflow: auto;
+      }
       pre.streaming-output {
         max-height: 320px;
         overflow: auto;
@@ -103,7 +111,7 @@
 
         function getStreamingOutput(jobElt) {
           if (!(jobElt instanceof HTMLElement)) return null;
-          return jobElt.querySelector('pre.streaming-output[data-streaming-output="partial"]');
+          return jobElt.querySelector('[data-streaming-output="partial"]');
         }
 
         function getJobId(jobElt) {
@@ -173,8 +181,8 @@
   </head>
   <body>
     <main class="container">
-      <h1>PDF to JSON</h1>
-      <p class="muted">Upload a PDF and wait for JSON conversion to finish.</p>
+      <h1>PDF to HTML</h1>
+      <p class="muted">Upload a PDF and wait for HTML conversion to finish.</p>
 
       <form
         hx-post="/convert"

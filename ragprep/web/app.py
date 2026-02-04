@@ -15,7 +15,8 @@ from fastapi.templating import Jinja2Templates
 from starlette.responses import Response
 
 from ragprep.config import get_settings
-from ragprep.pipeline import PdfToMarkdownProgress, pdf_to_markdown
+from ragprep.html_render import wrap_html_document
+from ragprep.pipeline import PdfToHtmlProgress, pdf_to_html
 
 TEMPLATES_DIR = Path(__file__).resolve().parent / "templates"
 STATIC_DIR = Path(__file__).resolve().parent / "static"
@@ -44,9 +45,9 @@ class Job:
     processed_pages: int = 0
     total_pages: int = 0
     progress_message: str | None = None
-    markdown_output: str | None = None
+    html_output: str | None = None
     error: str | None = None
-    partial_markdown: str = ""
+    partial_html: str = ""
     partial_pages: int = 0
 
 
@@ -74,24 +75,23 @@ class JobStore:
             self._jobs[job_id] = updated
             return updated
 
-    def append_partial(self, job_id: str, *, page_index: int, markdown: str) -> Job:
-        entry_text = markdown.strip()
-        page_block = f"## Page {page_index}\n\n{entry_text}".strip()
+    def append_partial(self, job_id: str, *, page_index: int, html: str) -> Job:
+        page_block = html.strip()
 
         with self._lock:
             existing = self._jobs.get(job_id)
             if existing is None:
                 raise KeyError(job_id)
 
-            partial_markdown = existing.partial_markdown.strip()
-            if partial_markdown:
-                partial_markdown = f"{partial_markdown}\n\n{page_block}".strip()
+            partial_html = existing.partial_html.strip()
+            if partial_html:
+                partial_html = f"{partial_html}\n{page_block}".strip()
             else:
-                partial_markdown = page_block
+                partial_html = page_block
 
             updated = replace(
                 existing,
-                partial_markdown=partial_markdown,
+                partial_html=partial_html,
                 partial_pages=max(existing.partial_pages, int(page_index)),
             )
             self._jobs[job_id] = updated
@@ -128,11 +128,11 @@ def _run_job(job_id: str, pdf_bytes: bytes) -> None:
             processed_pages=0,
             total_pages=0,
             progress_message=None,
-            partial_markdown="",
+            partial_html="",
             partial_pages=0,
         )
 
-        def on_progress(update: PdfToMarkdownProgress) -> None:
+        def on_progress(update: PdfToHtmlProgress) -> None:
             jobs.update(
                 job_id,
                 phase=update.phase.value,
@@ -141,15 +141,16 @@ def _run_job(job_id: str, pdf_bytes: bytes) -> None:
                 progress_message=update.message,
             )
 
-        def on_page(page_index: int, markdown: str) -> None:
+        def on_page(page_index: int, html: str) -> None:
             try:
-                jobs.append_partial(job_id, page_index=page_index, markdown=markdown)
+                jobs.append_partial(job_id, page_index=page_index, html=html)
             except Exception:  # noqa: BLE001
                 logger.debug("Failed to append partial output for job %s", job_id, exc_info=True)
 
         try:
-            markdown_output = pdf_to_markdown(
+            html_output = pdf_to_html(
                 pdf_bytes,
+                full_document=False,
                 on_progress=on_progress,
                 on_page=on_page,
             )
@@ -174,7 +175,7 @@ def _run_job(job_id: str, pdf_bytes: bytes) -> None:
             job_id,
             status=JobStatus.done,
             phase="done",
-            markdown_output=markdown_output,
+            html_output=html_output,
             error=None,
         )
 
@@ -184,7 +185,7 @@ def index(request: Request) -> Response:
     return templates.TemplateResponse(
         request,
         "index.html",
-        {"markdown_output": None, "error": None},
+        {"html_output": None, "error": None},
     )
 
 
@@ -202,7 +203,7 @@ async def convert(
         return templates.TemplateResponse(
             request,
             "_result.html",
-            {"markdown_output": None, "error": "Empty upload."},
+            {"html_output": None, "error": "Empty upload."},
             status_code=400,
         )
     if len(content) > settings.max_upload_bytes:
@@ -210,7 +211,7 @@ async def convert(
             request,
             "_result.html",
             {
-                "markdown_output": None,
+                "html_output": None,
                 "error": f"File too large (>{settings.max_upload_bytes} bytes).",
             },
             status_code=413,
@@ -219,7 +220,7 @@ async def convert(
         return templates.TemplateResponse(
             request,
             "_result.html",
-            {"markdown_output": None, "error": "Please upload a .pdf file."},
+            {"html_output": None, "error": "Please upload a .pdf file."},
             status_code=400,
         )
 
@@ -250,7 +251,7 @@ def job_result(request: Request, job_id: str) -> Response:
         return templates.TemplateResponse(
             request,
             "_result.html",
-            {"markdown_output": None, "error": "Result not ready yet."},
+            {"html_output": None, "error": "Result not ready yet."},
             status_code=409,
         )
     return templates.TemplateResponse(request, "_job_result.html", {"job": job})
@@ -269,33 +270,28 @@ def _download_filename_from_upload(upload_filename: str, *, suffix: str) -> str:
     stem = _safe_download_stem(upload_filename)
     return f"{stem}.{suffix}"
 
-def _markdown_from_job(job: Job) -> str:
-    if job.markdown_output:
-        return job.markdown_output.strip()
-    if job.partial_markdown:
-        return job.partial_markdown.strip()
+def _html_fragment_from_job(job: Job) -> str:
+    if job.html_output:
+        return job.html_output.strip()
+    if job.partial_html:
+        return job.partial_html.strip()
     return ""
 
 
-@app.get("/download/{job_id}.md")
-def download_markdown(job_id: str) -> PlainTextResponse:
+@app.get("/download/{job_id}.html")
+def download_html(job_id: str) -> HTMLResponse:
     job = jobs.get(job_id)
     if job is None:
         raise HTTPException(status_code=404, detail="job not found")
-    if job.status != JobStatus.done or job.markdown_output is None:
+    if job.status != JobStatus.done or job.html_output is None:
         raise HTTPException(status_code=409, detail="job not complete")
 
-    markdown = _markdown_from_job(job)
-    if markdown:
-        markdown = markdown + "\n"
+    fragment = _html_fragment_from_job(job)
+    html = wrap_html_document(fragment, title=_safe_download_stem(job.filename))
 
-    download_filename = _download_filename_from_upload(job.filename, suffix="md")
+    download_filename = _download_filename_from_upload(job.filename, suffix="html")
     headers = {"Content-Disposition": f'attachment; filename="{download_filename}"'}
-    return PlainTextResponse(
-        markdown,
-        media_type="text/markdown; charset=utf-8",
-        headers=headers,
-    )
+    return HTMLResponse(html, media_type="text/html; charset=utf-8", headers=headers)
 
 
 @app.get("/health")

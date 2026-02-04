@@ -46,23 +46,27 @@ def test_convert_creates_job_and_downloads_markdown(
     pdf_bytes = _make_pdf_bytes(page_count=2)
 
     calls: dict[str, int] = {"n": 0}
-    expected_markdown = "page1\n\npage2"
+    expected_fragment = (
+        '<section data-page="1">page1</section>\n<section data-page="2">page2</section>'
+    )
 
-    def fake_to_markdown(
+    def fake_to_html(
         _bytes: bytes,
         *,
+        full_document: bool = True,
         on_progress: object | None = None,
         on_page: Callable[[int, str], None] | None = None,
         _page_output_dir: object | None = None,
     ) -> str:
+        _ = full_document
         _ = on_progress
         calls["n"] += 1
         if on_page is not None:
-            on_page(1, "page1")
-            on_page(2, "page2")
-        return expected_markdown
+            on_page(1, '<section data-page="1">page1</section>')
+            on_page(2, '<section data-page="2">page2</section>')
+        return expected_fragment
 
-    monkeypatch.setattr(web_app, "pdf_to_markdown", fake_to_markdown)
+    monkeypatch.setattr(web_app, "pdf_to_html", fake_to_html)
 
     files = {"file": ("test.pdf", pdf_bytes, "application/pdf")}
     response = client.post("/convert", files=files)
@@ -82,18 +86,17 @@ def test_convert_creates_job_and_downloads_markdown(
     assert "page1" in result.text
     assert "page2" in result.text
     assert f"/download/{job_id}.json" not in result.text
-    assert f"/download/{job_id}.md" in result.text
+    assert f"/download/{job_id}.html" in result.text
     assert "save_json" not in result.text
-    assert "save_markdown" in result.text
+    assert "save_html" in result.text
 
-    download_md = client.get(f"/download/{job_id}.md")
-    assert download_md.status_code == 200
-    assert "text/markdown" in download_md.headers["content-type"]
-    assert "test.md" in download_md.headers["content-disposition"]
-    assert "page1" in download_md.text
-    assert "page2" in download_md.text
-    assert "page1\n\npage2" in download_md.text
-    assert download_md.text == expected_markdown + "\n"
+    download_html = client.get(f"/download/{job_id}.html")
+    assert download_html.status_code == 200
+    assert "text/html" in download_html.headers["content-type"]
+    assert "test.html" in download_html.headers["content-disposition"]
+    assert "page1" in download_html.text
+    assert "page2" in download_html.text
+    assert "<!doctype html>" in download_html.text.lower()
     assert calls["n"] == 1
 
     _ = client.get(f"/jobs/{job_id}/status")
