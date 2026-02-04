@@ -5,10 +5,10 @@ import uuid
 from dataclasses import dataclass, replace
 from enum import Enum
 from pathlib import Path
-from threading import Lock, Semaphore
+from threading import Lock, Semaphore, Thread
 from typing import Any
 
-from fastapi import BackgroundTasks, FastAPI, File, HTTPException, Request, UploadFile
+from fastapi import FastAPI, File, HTTPException, Request, UploadFile
 from fastapi.responses import HTMLResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -182,6 +182,11 @@ def _run_job(job_id: str, pdf_bytes: bytes) -> None:
         )
 
 
+def _start_job(job_id: str, pdf_bytes: bytes) -> None:
+    # Avoid tying long-running sync work to the request lifecycle/threadpool.
+    Thread(target=_run_job, args=(job_id, pdf_bytes), daemon=True).start()
+
+
 @app.get("/", response_class=HTMLResponse)
 def index(request: Request) -> Response:
     return templates.TemplateResponse(
@@ -194,7 +199,6 @@ def index(request: Request) -> Response:
 @app.post("/convert", response_class=HTMLResponse)
 async def convert(
     request: Request,
-    background_tasks: BackgroundTasks,
     file: UploadFile = File(...),  # noqa: B008
 ) -> Response:
     settings = get_settings()
@@ -227,7 +231,7 @@ async def convert(
         )
 
     job = jobs.create(filename=filename)
-    background_tasks.add_task(_run_job, job.id, content)
+    _start_job(job.id, content)
 
     return templates.TemplateResponse(
         request,
