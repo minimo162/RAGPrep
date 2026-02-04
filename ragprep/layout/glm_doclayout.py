@@ -282,6 +282,44 @@ def _paddlex_ocr_install_hint() -> str:
     return 'uv pip install "paddlex[ocr]"'
 
 
+def _is_paddle_pir_onednn_error(exc: BaseException) -> bool:
+    message = str(exc)
+    if "ConvertPirAttribute2RuntimeAttribute" in message:
+        return True
+    if "onednn_instruction.cc" in message:
+        return True
+    return False
+
+
+def _paddle_pir_onednn_workaround_hint() -> str:
+    return "\n".join(
+        [
+            "This appears to be a PaddlePaddle runtime limitation (PIR/OneDNN). Try disabling",
+            "OneDNN/MKLDNN and PIR API flags, then restart the app:",
+            "",
+            "PowerShell:",
+            "  $env:FLAGS_use_mkldnn = \"0\"",
+            "  $env:FLAGS_enable_pir_api = \"0\"",
+            "",
+            "bash:",
+            "  export FLAGS_use_mkldnn=0",
+            "  export FLAGS_enable_pir_api=0",
+            "",
+            "If it still fails, try upgrading/downgrading Paddle packages, or use server mode:",
+            "  RAGPREP_LAYOUT_MODE=server",
+        ]
+    )
+
+
+def _invoke_paddle_engine_for_layout(engine: object, image: object) -> object:
+    try:
+        return _invoke_paddle_engine(engine, image)
+    except (NotImplementedError, RuntimeError) as exc:
+        if _is_paddle_pir_onednn_error(exc):
+            raise RuntimeError(_paddle_pir_onednn_workaround_hint()) from exc
+        raise
+
+
 def _invoke_paddle_engine(engine: object, image: object) -> object:
     if callable(engine):
         return engine(image)
@@ -489,7 +527,7 @@ def _analyze_layout_local_paddle(image_base64: str, *, settings: Settings) -> di
     if getattr(arr, "ndim", 0) == 3 and getattr(arr, "shape", (0, 0, 0))[2] == 3:
         arr = arr[:, :, ::-1]
 
-    raw_result = _invoke_paddle_engine(engine, arr)
+    raw_result = _invoke_paddle_engine_for_layout(engine, arr)
     result, raw_for_json = _normalize_paddle_layout_output(raw_result)
 
     elements: list[dict[str, object]] = []
