@@ -70,6 +70,10 @@ uv run python scripts/pdf_to_html.py --pdf .\\path\\to\\input.pdf --out .\\out\\
 - `RAGPREP_LAYOUT_RETRY_COUNT`: retry count for transient failures (server mode; default: `1`)
 - `RAGPREP_LAYOUT_RETRY_BACKOFF_SECONDS`: base backoff in seconds between retries (server mode; default: `0.0`)
 
+## Web settings
+
+- `RAGPREP_WEB_PARTIAL_PREVIEW_PAGES`: limit streaming “partial output” preview to the last N pages (default: `3`)
+
 ## Troubleshooting (layout server)
 
 If you see `Layout analysis request timed out`:
