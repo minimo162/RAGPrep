@@ -216,6 +216,60 @@ def test_pdf_to_html_uses_layout_render_settings(monkeypatch: pytest.MonkeyPatch
     assert captured["max_edge"] == 456
 
 
+def test_pdf_to_html_layout_render_defaults_are_fixed(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("RAGPREP_LAYOUT_MODE", "server")
+    monkeypatch.setenv("RAGPREP_LAYOUT_CONCURRENCY", "1")
+    monkeypatch.setenv("RAGPREP_RENDER_DPI", "999")
+    monkeypatch.setenv("RAGPREP_RENDER_MAX_EDGE", "999")
+
+    captured: dict[str, int] = {}
+
+    def _fake_iter_pdf_images(
+        _pdf_bytes: bytes,
+        *,
+        dpi: int | None = None,
+        max_edge: int | None = None,
+        max_pages: int | None = None,
+        max_bytes: int | None = None,
+    ) -> tuple[int, Iterator[Image.Image]]:
+        captured["dpi"] = int(dpi or 0)
+        captured["max_edge"] = int(max_edge or 0)
+        _ = max_pages, max_bytes
+
+        def generate() -> Iterator[Image.Image]:
+            yield Image.new("RGB", (10, 10), color=(255, 255, 255))
+
+        return 1, generate()
+
+    monkeypatch.setattr("ragprep.pdf_render.iter_pdf_images", _fake_iter_pdf_images)
+    monkeypatch.setattr(
+        "ragprep.pdf_text.extract_pymupdf_page_spans",
+        lambda _pdf: [[Span(x0=0, y0=0, x1=10, y1=10, text="X")]],
+    )
+    monkeypatch.setattr(
+        "ragprep.pdf_text.extract_pymupdf_page_sizes",
+        lambda _pdf: [(1000.0, 1000.0)],
+    )
+
+    def _fake_analyze_layout(_image_b64: str, *, settings: object) -> dict[str, object]:
+        _ = settings
+        return {
+            "schema_version": "v1",
+            "elements": [{"bbox": (0.0, 0.0, 10.0, 10.0), "label": "text", "score": 0.9}],
+            "raw": "{}",
+        }
+
+    monkeypatch.setattr(
+        "ragprep.layout.glm_doclayout.analyze_layout_image_base64",
+        _fake_analyze_layout,
+    )
+
+    html = pdf_to_html(b"%PDF", full_document=False)
+    assert "X" in html
+    assert captured["dpi"] == 300
+    assert captured["max_edge"] == 1280
+
+
 def test_pdf_to_html_adaptive_layout_rerenders_on_empty_elements(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
