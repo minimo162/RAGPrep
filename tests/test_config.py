@@ -86,3 +86,9 @@ def test_layout_settings_override_glm_ocr_settings(monkeypatch: pytest.MonkeyPat
     assert settings.layout_api_key == "layout-key"
     assert settings.layout_max_tokens == 222
     assert settings.layout_timeout_seconds == 9
+
+
+def test_layout_mode_accepts_local_paddle(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("RAGPREP_LAYOUT_MODE", "local-paddle")
+    settings = config.get_settings()
+    assert settings.layout_mode == "local-paddle"

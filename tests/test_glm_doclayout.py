@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import base64
+import builtins
 import json
+from typing import Any, cast
 
 import httpx
 import pytest
@@ -77,11 +79,26 @@ def test_glm_doclayout_sends_openai_chat_completions_payload(
     assert captured["timeout_seconds"] == 9
 
 
-def test_glm_doclayout_requires_server_mode(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("RAGPREP_LAYOUT_MODE", "transformers")
+def test_glm_doclayout_local_mode_requires_optional_deps(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("RAGPREP_LAYOUT_MODE", "local-paddle")
     settings = get_settings()
-    image_b64 = base64.b64encode(b"x").decode("ascii")
-    with pytest.raises(RuntimeError, match="requires RAGPREP_LAYOUT_MODE=server"):
+
+    # Force ImportError even if paddleocr is installed on the machine running tests.
+    orig_import = cast(Any, builtins.__import__)
+
+    def _fake_import(name: str, *args: object, **kwargs: object) -> object:
+        if name == "paddleocr" or name.startswith("paddleocr."):
+            raise ImportError("blocked for test")
+        return orig_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", _fake_import)
+    glm_doclayout._get_paddleocr_engine.cache_clear()
+
+    image_b64 = (
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/"
+        "mGQAAAAASUVORK5CYII="
+    )
+    with pytest.raises(RuntimeError, match="Install PaddleOCR"):
         glm_doclayout.analyze_layout_image_base64(image_b64, settings=settings)
 
 

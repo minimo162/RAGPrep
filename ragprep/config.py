@@ -34,6 +34,7 @@ DEFAULT_GLM_OCR_BASE_URL: Final[str] = "http://127.0.0.1:8080"
 DEFAULT_GLM_OCR_MODEL: Final[str] = "zai-org/GLM-OCR"
 DEFAULT_GLM_OCR_MODE: Final[str] = "transformers"
 SUPPORTED_GLM_OCR_MODES: Final[tuple[str, ...]] = ("transformers", "server")
+SUPPORTED_LAYOUT_MODES: Final[tuple[str, ...]] = ("transformers", "server", "local-paddle")
 DEFAULT_GLM_OCR_MAX_TOKENS: Final[int] = 8192
 DEFAULT_GLM_OCR_TIMEOUT_SECONDS: Final[int] = 60
 DEFAULT_LAYOUT_MODE: Final[str] = ""
@@ -125,9 +126,9 @@ def _get_layout_mode() -> str:
     value = raw.strip().lower()
     if not value:
         return _get_glm_ocr_mode()
-    if value not in SUPPORTED_GLM_OCR_MODES:
+    if value not in SUPPORTED_LAYOUT_MODES:
         raise ValueError(
-            f"{ENV_LAYOUT_MODE} must be one of {', '.join(SUPPORTED_GLM_OCR_MODES)}, got: {raw!r}"
+            f"{ENV_LAYOUT_MODE} must be one of {', '.join(SUPPORTED_LAYOUT_MODES)}, got: {raw!r}"
         )
     return value
 
