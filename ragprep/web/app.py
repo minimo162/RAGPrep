@@ -41,6 +41,7 @@ class Job:
     id: str
     filename: str
     status: JobStatus
+    version: int = 0
     phase: str | None = None
     processed_pages: int = 0
     total_pages: int = 0
@@ -71,7 +72,8 @@ class JobStore:
             existing = self._jobs.get(job_id)
             if existing is None:
                 raise KeyError(job_id)
-            updated = replace(existing, **changes)
+            next_version = int(existing.version) + 1
+            updated = replace(existing, version=next_version, **changes)
             self._jobs[job_id] = updated
             return updated
 
@@ -91,6 +93,7 @@ class JobStore:
 
             updated = replace(
                 existing,
+                version=int(existing.version) + 1,
                 partial_html=partial_html,
                 partial_pages=max(existing.partial_pages, int(page_index)),
             )
@@ -245,6 +248,9 @@ def job_status(request: Request, job_id: str) -> Response:
     job = jobs.get(job_id)
     if job is None:
         raise HTTPException(status_code=404, detail="job not found")
+    if_none_match = request.headers.get("if-none-match")
+    if if_none_match is not None and if_none_match.strip() == str(job.version):
+        return Response(status_code=204)
     return templates.TemplateResponse(request, "_job_status.html", {"job": job})
 
 
