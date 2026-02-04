@@ -88,6 +88,7 @@ def test_glm_doclayout_timeout_maps_to_stable_runtime_error(
     monkeypatch.setenv("RAGPREP_LAYOUT_MODE", "server")
     monkeypatch.setenv("RAGPREP_LAYOUT_BASE_URL", "http://localhost:8080/")
     monkeypatch.setenv("RAGPREP_LAYOUT_TIMEOUT_SECONDS", "1")
+    monkeypatch.setenv("RAGPREP_LAYOUT_RETRY_COUNT", "0")
     settings = get_settings()
 
     def _fake_post(
@@ -104,6 +105,79 @@ def test_glm_doclayout_timeout_maps_to_stable_runtime_error(
     image_b64 = base64.b64encode(b"not-a-real-png").decode("ascii")
     with pytest.raises(RuntimeError, match=r"Layout analysis request timed out"):
         glm_doclayout.analyze_layout_image_base64(image_b64, settings=settings)
+
+
+def test_glm_doclayout_retries_timeout_then_succeeds(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("RAGPREP_LAYOUT_MODE", "server")
+    monkeypatch.setenv("RAGPREP_LAYOUT_BASE_URL", "http://localhost:8080/")
+    monkeypatch.setenv("RAGPREP_LAYOUT_TIMEOUT_SECONDS", "1")
+    monkeypatch.setenv("RAGPREP_LAYOUT_RETRY_COUNT", "1")
+    monkeypatch.setenv("RAGPREP_LAYOUT_RETRY_BACKOFF_SECONDS", "0")
+    settings = get_settings()
+
+    calls = 0
+
+    def _fake_post(
+        *,
+        url: str,
+        headers: dict[str, str],
+        payload: dict[str, object],
+        timeout_seconds: int,
+    ) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise httpx.ReadTimeout("timed out", request=httpx.Request("POST", url))
+        content = {
+            "schema_version": "v1",
+            "elements": [
+                {"page_index": 0, "bbox": [0, 0, 1, 1], "label": "text", "score": 0.9},
+            ],
+        }
+        return httpx.Response(
+            200,
+            json={"choices": [{"message": {"content": json.dumps(content)}}]},
+        )
+
+    monkeypatch.setattr("ragprep.layout.glm_doclayout._post_chat_completions", _fake_post)
+
+    image_b64 = base64.b64encode(b"not-a-real-png").decode("ascii")
+    result = glm_doclayout.analyze_layout_image_base64(image_b64, settings=settings)
+    assert result["schema_version"] == "v1"
+    assert calls == 2
+
+
+def test_glm_doclayout_retry_exhaustion_raises_timeout_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("RAGPREP_LAYOUT_MODE", "server")
+    monkeypatch.setenv("RAGPREP_LAYOUT_BASE_URL", "http://localhost:8080/")
+    monkeypatch.setenv("RAGPREP_LAYOUT_TIMEOUT_SECONDS", "1")
+    monkeypatch.setenv("RAGPREP_LAYOUT_RETRY_COUNT", "2")
+    monkeypatch.setenv("RAGPREP_LAYOUT_RETRY_BACKOFF_SECONDS", "0")
+    settings = get_settings()
+
+    calls = 0
+
+    def _fake_post(
+        *,
+        url: str,
+        headers: dict[str, str],
+        payload: dict[str, object],
+        timeout_seconds: int,
+    ) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        raise httpx.ReadTimeout("timed out", request=httpx.Request("POST", url))
+
+    monkeypatch.setattr("ragprep.layout.glm_doclayout._post_chat_completions", _fake_post)
+
+    image_b64 = base64.b64encode(b"not-a-real-png").decode("ascii")
+    with pytest.raises(RuntimeError, match=r"Layout analysis request timed out"):
+        glm_doclayout.analyze_layout_image_base64(image_b64, settings=settings)
+    assert calls == 3
 
 
 def test_glm_doclayout_local_mode_requires_optional_deps(monkeypatch: pytest.MonkeyPatch) -> None:

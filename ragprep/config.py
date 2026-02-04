@@ -22,6 +22,8 @@ ENV_LAYOUT_MODEL: Final[str] = "RAGPREP_LAYOUT_MODEL"
 ENV_LAYOUT_API_KEY: Final[str] = "RAGPREP_LAYOUT_API_KEY"
 ENV_LAYOUT_MAX_TOKENS: Final[str] = "RAGPREP_LAYOUT_MAX_TOKENS"
 ENV_LAYOUT_TIMEOUT_SECONDS: Final[str] = "RAGPREP_LAYOUT_TIMEOUT_SECONDS"
+ENV_LAYOUT_RETRY_COUNT: Final[str] = "RAGPREP_LAYOUT_RETRY_COUNT"
+ENV_LAYOUT_RETRY_BACKOFF_SECONDS: Final[str] = "RAGPREP_LAYOUT_RETRY_BACKOFF_SECONDS"
 
 DEFAULT_MAX_UPLOAD_BYTES: Final[int] = 10 * 1024 * 1024
 DEFAULT_MAX_PAGES: Final[int] = 50
@@ -42,6 +44,8 @@ DEFAULT_LAYOUT_BASE_URL: Final[str] = DEFAULT_GLM_OCR_BASE_URL
 DEFAULT_LAYOUT_MODEL: Final[str] = DEFAULT_GLM_OCR_MODEL
 DEFAULT_LAYOUT_MAX_TOKENS: Final[int] = DEFAULT_GLM_OCR_MAX_TOKENS
 DEFAULT_LAYOUT_TIMEOUT_SECONDS: Final[int] = DEFAULT_GLM_OCR_TIMEOUT_SECONDS
+DEFAULT_LAYOUT_RETRY_COUNT: Final[int] = 1
+DEFAULT_LAYOUT_RETRY_BACKOFF_SECONDS: Final[float] = 0.0
 
 
 @dataclass(frozen=True)
@@ -64,6 +68,8 @@ class Settings:
     layout_api_key: str | None
     layout_max_tokens: int
     layout_timeout_seconds: int
+    layout_retry_count: int
+    layout_retry_backoff_seconds: float
 
 
 def _get_positive_int(name: str, default: int) -> int:
@@ -76,6 +82,32 @@ def _get_positive_int(name: str, default: int) -> int:
         raise ValueError(f"{name} must be an int, got: {raw!r}") from exc
     if value <= 0:
         raise ValueError(f"{name} must be > 0, got: {value}")
+    return value
+
+
+def _get_nonnegative_int(name: str, default: int) -> int:
+    raw = os.getenv(name)
+    if raw is None or not raw.strip():
+        return default
+    try:
+        value = int(raw.strip())
+    except ValueError as exc:
+        raise ValueError(f"{name} must be an int, got: {raw!r}") from exc
+    if value < 0:
+        raise ValueError(f"{name} must be >= 0, got: {value}")
+    return value
+
+
+def _get_nonnegative_float(name: str, default: float) -> float:
+    raw = os.getenv(name)
+    if raw is None or not raw.strip():
+        return default
+    try:
+        value = float(raw.strip())
+    except ValueError as exc:
+        raise ValueError(f"{name} must be a float, got: {raw!r}") from exc
+    if value < 0:
+        raise ValueError(f"{name} must be >= 0, got: {value}")
     return value
 
 
@@ -181,6 +213,16 @@ def _get_layout_timeout_seconds() -> int:
     return value
 
 
+def _get_layout_retry_count() -> int:
+    return _get_nonnegative_int(ENV_LAYOUT_RETRY_COUNT, DEFAULT_LAYOUT_RETRY_COUNT)
+
+
+def _get_layout_retry_backoff_seconds() -> float:
+    return _get_nonnegative_float(
+        ENV_LAYOUT_RETRY_BACKOFF_SECONDS, DEFAULT_LAYOUT_RETRY_BACKOFF_SECONDS
+    )
+
+
 def get_settings() -> Settings:
     return Settings(
         max_upload_bytes=_get_positive_int(ENV_MAX_UPLOAD_BYTES, DEFAULT_MAX_UPLOAD_BYTES),
@@ -203,4 +245,6 @@ def get_settings() -> Settings:
         layout_api_key=_get_layout_api_key(),
         layout_max_tokens=_get_layout_max_tokens(),
         layout_timeout_seconds=_get_layout_timeout_seconds(),
+        layout_retry_count=_get_layout_retry_count(),
+        layout_retry_backoff_seconds=_get_layout_retry_backoff_seconds(),
     )

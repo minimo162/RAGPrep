@@ -5,6 +5,7 @@ import binascii
 import io
 import json
 import os
+import time
 from functools import lru_cache
 from typing import Any, cast
 
@@ -99,6 +100,14 @@ class _GlmOcrMode:
     local_paddle = "local-paddle"
 
 _CODE_FENCE = "```"
+
+
+def _sleep_backoff(*, base_seconds: float, attempt_index: int) -> None:
+    if base_seconds <= 0:
+        return
+    if attempt_index < 0:
+        attempt_index = 0
+    time.sleep(base_seconds * (2**attempt_index))
 
 
 def _as_float(value: object, *, name: str) -> float:
@@ -655,26 +664,44 @@ def analyze_layout_image_base64(image_base64: str, *, settings: Settings) -> dic
         "max_tokens": settings.layout_max_tokens,
     }
 
-    try:
-        response = _post_chat_completions(
-            url=url,
-            headers=headers,
-            payload=request_payload,
-            timeout_seconds=settings.layout_timeout_seconds,
-        )
-    except httpx.TimeoutException as exc:
-        raise RuntimeError(
-            "Layout analysis request timed out. "
-            f"base_url={base_url!r}. "
-            "Ensure the layout server is running and reachable."
-        ) from exc
-    except httpx.RequestError as exc:
-        raise RuntimeError(
-            "Failed to reach layout server. "
-            f"base_url={base_url!r}. "
-            f"error={exc}. "
-            "Ensure the layout server is running and reachable."
-        ) from exc
+    retry_count = max(0, int(settings.layout_retry_count))
+    backoff_seconds = float(settings.layout_retry_backoff_seconds)
+
+    for attempt_index in range(retry_count + 1):
+        try:
+            response = _post_chat_completions(
+                url=url,
+                headers=headers,
+                payload=request_payload,
+                timeout_seconds=settings.layout_timeout_seconds,
+            )
+        except httpx.TimeoutException as exc:
+            if attempt_index < retry_count:
+                _sleep_backoff(base_seconds=backoff_seconds, attempt_index=attempt_index)
+                continue
+            raise RuntimeError(
+                "Layout analysis request timed out. "
+                f"base_url={base_url!r}. "
+                "Ensure the layout server is running and reachable."
+            ) from exc
+        except httpx.RequestError as exc:
+            if attempt_index < retry_count:
+                _sleep_backoff(base_seconds=backoff_seconds, attempt_index=attempt_index)
+                continue
+            raise RuntimeError(
+                "Failed to reach layout server. "
+                f"base_url={base_url!r}. "
+                f"error={exc}. "
+                "Ensure the layout server is running and reachable."
+            ) from exc
+
+        # Retry on transient gateway/service errors from the server.
+        if response.status_code in {502, 503, 504} and attempt_index < retry_count:
+            _sleep_backoff(base_seconds=backoff_seconds, attempt_index=attempt_index)
+            continue
+        break
+    else:  # pragma: no cover
+        raise RuntimeError("unreachable")
 
     content = _parse_chat_completions_response_content(response)
     schema_version, raw_elements = _parse_layout_result(content)
