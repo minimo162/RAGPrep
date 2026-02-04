@@ -21,7 +21,9 @@
     {% endif %}
     {% if job.partial_html %}
       <div class="partial-output">
-        <p class="muted">Partial output ({{ job.partial_pages }} pages)</p>
+        <p class="muted">
+          Partial output preview (showing {{ job.partial_preview_pages }} page(s); latest page {{ job.partial_pages }})
+        </p>
         <div
           class="html-output streaming-output"
           data-streaming-output="partial"

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import uuid
 from dataclasses import dataclass, replace
 from enum import Enum
@@ -28,6 +29,21 @@ app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
 logger = logging.getLogger(__name__)
 
+ENV_WEB_PARTIAL_PREVIEW_PAGES = "RAGPREP_WEB_PARTIAL_PREVIEW_PAGES"
+DEFAULT_WEB_PARTIAL_PREVIEW_PAGES = 3
+_PARTIAL_PAGE_SEPARATOR = "\n<!-- ragprep:partial-page -->\n"
+
+
+def _get_web_partial_preview_pages() -> int:
+    raw = os.getenv(ENV_WEB_PARTIAL_PREVIEW_PAGES)
+    if raw is None or not raw.strip():
+        return DEFAULT_WEB_PARTIAL_PREVIEW_PAGES
+    try:
+        value = int(raw.strip())
+    except ValueError:
+        return DEFAULT_WEB_PARTIAL_PREVIEW_PAGES
+    return max(1, value)
+
 
 class JobStatus(str, Enum):
     queued = "queued"
@@ -50,6 +66,7 @@ class Job:
     error: str | None = None
     partial_html: str = ""
     partial_pages: int = 0
+    partial_preview_pages: int = 0
 
 
 class JobStore:
@@ -85,17 +102,24 @@ class JobStore:
             if existing is None:
                 raise KeyError(job_id)
 
-            partial_html = existing.partial_html.strip()
-            if partial_html:
-                partial_html = f"{partial_html}\n{page_block}".strip()
-            else:
-                partial_html = page_block
+            existing_html = existing.partial_html.strip()
+            blocks = (
+                [b for b in existing_html.split(_PARTIAL_PAGE_SEPARATOR) if b.strip()]
+                if existing_html
+                else []
+            )
+            blocks.append(page_block)
+
+            limit = _get_web_partial_preview_pages()
+            preview_blocks = blocks[-limit:]
+            partial_html = _PARTIAL_PAGE_SEPARATOR.join(preview_blocks).strip()
 
             updated = replace(
                 existing,
                 version=int(existing.version) + 1,
                 partial_html=partial_html,
                 partial_pages=max(existing.partial_pages, int(page_index)),
+                partial_preview_pages=len(preview_blocks),
             )
             self._jobs[job_id] = updated
             return updated
@@ -133,6 +157,7 @@ def _run_job(job_id: str, pdf_bytes: bytes) -> None:
             progress_message=None,
             partial_html="",
             partial_pages=0,
+            partial_preview_pages=0,
         )
 
         def on_progress(update: PdfToHtmlProgress) -> None:
