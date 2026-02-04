@@ -67,6 +67,7 @@ uv run python scripts/pdf_to_html.py --pdf .\\path\\to\\input.pdf --out .\\out\\
 - `RAGPREP_LAYOUT_MODEL`: model name (server mode; kept for parity in local mode)
 - `RAGPREP_LAYOUT_API_KEY`: bearer token (optional, server mode)
 - `RAGPREP_LAYOUT_TIMEOUT_SECONDS`: request timeout in seconds (server mode; default: `60`)
+- `RAGPREP_LAYOUT_CONCURRENCY`: number of in-flight layout requests in server mode (default: `1`)
 - `RAGPREP_LAYOUT_RETRY_COUNT`: retry count for transient failures (server mode; default: `1`)
 - `RAGPREP_LAYOUT_RETRY_BACKOFF_SECONDS`: base backoff in seconds between retries (server mode; default: `0.0`)
 
