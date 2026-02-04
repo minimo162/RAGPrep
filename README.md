@@ -66,6 +66,16 @@ uv run python scripts/pdf_to_html.py --pdf .\\path\\to\\input.pdf --out .\\out\\
 - `RAGPREP_LAYOUT_BASE_URL`: server base URL (server mode only)
 - `RAGPREP_LAYOUT_MODEL`: model name (server mode; kept for parity in local mode)
 - `RAGPREP_LAYOUT_API_KEY`: bearer token (optional, server mode)
+- `RAGPREP_LAYOUT_TIMEOUT_SECONDS`: request timeout in seconds (server mode; default: `60`)
+- `RAGPREP_LAYOUT_RETRY_COUNT`: retry count for transient failures (server mode; default: `1`)
+- `RAGPREP_LAYOUT_RETRY_BACKOFF_SECONDS`: base backoff in seconds between retries (server mode; default: `0.0`)
+
+## Troubleshooting (layout server)
+
+If you see `Layout analysis request timed out`:
+- Confirm the server at `RAGPREP_LAYOUT_BASE_URL` is reachable and supports `POST /v1/chat/completions`.
+- Try increasing `RAGPREP_LAYOUT_TIMEOUT_SECONDS` (or reducing PDF pages / image size limits).
+- If you don't need a server backend, switch to `RAGPREP_LAYOUT_MODE=local-paddle`.
 
 ## Troubleshooting (local paddle)
 
