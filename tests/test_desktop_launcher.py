@@ -118,7 +118,7 @@ def test_desktop_launcher_exits_when_not_ready(monkeypatch: pytest.MonkeyPatch) 
     assert server.should_exit is True
 
 
-def test_save_markdown_writes_to_downloads(
+def test_save_html_writes_to_downloads(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
@@ -130,7 +130,7 @@ def test_save_markdown_writes_to_downloads(
         return _FakeResponse(
             status=200,
             body=b"hello",
-            headers={"Content-Disposition": 'attachment; filename="report.md"'},
+            headers={"Content-Disposition": 'attachment; filename="report.html"'},
         )
 
     dialog_called = {"value": False}
@@ -146,9 +146,9 @@ def test_save_markdown_writes_to_downloads(
     monkeypatch.setattr(desktop, "_resolve_downloads_dir", lambda: downloads_dir)
 
     api = desktop._DesktopApi(base_url="http://127.0.0.1:8000", webview=WebviewStub())
-    result = api.save_markdown("job123", "http://127.0.0.1:8000/download/job123.md")
+    result = api.save_html("job123", "http://127.0.0.1:8000/download/job123.html")
 
-    saved_path = downloads_dir / "report.md"
+    saved_path = downloads_dir / "report.html"
     assert result["status"] == "ok"
     assert result["path"] == str(saved_path)
     assert saved_path.exists()
@@ -156,13 +156,13 @@ def test_save_markdown_writes_to_downloads(
     assert dialog_called["value"] is False
 
 
-def test_save_markdown_renames_on_collision(
+def test_save_html_renames_on_collision(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
     downloads_dir = tmp_path / "Downloads"
     downloads_dir.mkdir(parents=True, exist_ok=True)
-    existing_path = downloads_dir / "report.md"
+    existing_path = downloads_dir / "report.html"
     existing_path.write_bytes(b"old")
 
     def _fake_urlopen(_request: object, timeout: float = 0.0) -> _FakeResponse:
@@ -170,7 +170,7 @@ def test_save_markdown_renames_on_collision(
         return _FakeResponse(
             status=200,
             body=b"new",
-            headers={"Content-Disposition": 'attachment; filename="report.md"'},
+            headers={"Content-Disposition": 'attachment; filename="report.html"'},
         )
 
     class WebviewStub:
@@ -183,9 +183,9 @@ def test_save_markdown_renames_on_collision(
     monkeypatch.setattr(desktop, "_resolve_downloads_dir", lambda: downloads_dir)
 
     api = desktop._DesktopApi(base_url="http://127.0.0.1:8000", webview=WebviewStub())
-    result = api.save_markdown("job123", "http://127.0.0.1:8000/download/job123.md")
+    result = api.save_html("job123", "http://127.0.0.1:8000/download/job123.html")
 
-    renamed_path = downloads_dir / "report (1).md"
+    renamed_path = downloads_dir / "report (1).html"
     assert result["status"] == "ok"
     assert result["path"] == str(renamed_path)
     assert existing_path.read_bytes() == b"old"

@@ -256,6 +256,46 @@ def extract_pymupdf_page_texts(pdf_bytes: bytes) -> list[str]:
     return pages
 
 
+def extract_pymupdf_page_sizes(pdf_bytes: bytes) -> list[tuple[float, float]]:
+    """
+    Extract per-page sizes (width, height) in PyMuPDF page coordinates.
+    """
+
+    if not pdf_bytes:
+        raise ValueError("pdf_bytes is empty")
+
+    settings = get_settings()
+    if len(pdf_bytes) > settings.max_upload_bytes:
+        raise ValueError(
+            f"PDF too large ({len(pdf_bytes)} bytes), max_bytes={settings.max_upload_bytes}"
+        )
+
+    fitz = _import_fitz()
+    try:
+        doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+    except Exception as exc:  # noqa: BLE001
+        raise ValueError("Invalid PDF data") from exc
+
+    try:
+        page_count = int(doc.page_count)
+    except Exception as exc:  # noqa: BLE001
+        doc.close()
+        raise RuntimeError("Failed to read PDF page count") from exc
+    if page_count > settings.max_pages:
+        doc.close()
+        raise ValueError(f"PDF has {page_count} pages, max_pages={settings.max_pages}")
+
+    sizes: list[tuple[float, float]] = []
+    with doc:
+        for i in range(page_count):
+            page = doc.load_page(i)
+            rect = getattr(page, "rect", None)
+            width = float(getattr(rect, "width", 0.0)) if rect is not None else 0.0
+            height = float(getattr(rect, "height", 0.0)) if rect is not None else 0.0
+            sizes.append((width, height))
+    return sizes
+
+
 def extract_pymupdf_page_spans(pdf_bytes: bytes) -> list[list[Span]]:
     """
     Extract per-page text spans with bounding boxes using PyMuPDF.

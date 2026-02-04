@@ -9,6 +9,7 @@ from PIL import Image
 from ragprep.pdf_text import (
     PageKind,
     analyze_pdf_pages,
+    extract_pymupdf_page_sizes,
     extract_pymupdf_page_spans,
     extract_pymupdf_page_texts,
     normalize_extracted_text,
@@ -83,6 +84,15 @@ def test_extract_pymupdf_page_spans_returns_spans_per_page() -> None:
         assert span.x0 < span.x1
         assert span.y0 < span.y1
         assert span.text.strip() == span.text
+
+
+def test_extract_pymupdf_page_sizes_returns_page_sizes() -> None:
+    pdf_bytes = _make_pdf_bytes_with_text([["Hello 1"], ["Hello 2"]])
+    sizes = extract_pymupdf_page_sizes(pdf_bytes)
+    assert len(sizes) == 2
+    for w, h in sizes:
+        assert w > 0
+        assert h > 0
 
 
 def test_normalize_extracted_text_normalizes_newlines_and_controls() -> None:
