@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import statistics
 from dataclasses import dataclass
 
 from ragprep.pdf_text import Span
@@ -208,7 +209,55 @@ def _join_spans_text(spans: list[Span]) -> str:
     if not spans:
         return ""
     ordered = sorted(spans, key=lambda s: (s.y0, s.x0, s.y1, s.x1, s.text))
-    return " ".join(s.text for s in ordered if s.text).strip()
+    heights = [max(0.0, s.y1 - s.y0) for s in ordered]
+    line_bin = max(2.0, _median_or_default(heights, default=10.0) * 0.75)
+
+    lines: dict[int, list[Span]] = {}
+    for s in ordered:
+        cy = (s.y0 + s.y1) / 2.0
+        key = int(round(cy / line_bin)) if line_bin > 0 else 0
+        lines.setdefault(key, []).append(s)
+
+    line_keys = sorted(lines.keys())
+    rendered_lines: list[str] = []
+    for key in line_keys:
+        rendered = _join_spans_in_line(lines[key])
+        if rendered:
+            rendered_lines.append(rendered)
+
+    return "\n".join(rendered_lines).strip()
+
+
+def _median_or_default(values: list[float], *, default: float) -> float:
+    cleaned = [v for v in values if v > 0 and v == v]  # filter non-positive and NaN
+    if not cleaned:
+        return float(default)
+    try:
+        return float(statistics.median(cleaned))
+    except statistics.StatisticsError:
+        return float(default)
+
+
+def _join_spans_in_line(spans: list[Span]) -> str:
+    if not spans:
+        return ""
+    ordered = sorted(spans, key=lambda s: (s.x0, s.x1, s.text))
+    heights = [max(0.0, s.y1 - s.y0) for s in ordered]
+    median_h = _median_or_default(heights, default=10.0)
+    gap_threshold = max(1.0, median_h * 0.25)
+
+    out: list[str] = []
+    prev: Span | None = None
+    for s in ordered:
+        if not s.text:
+            continue
+        if prev is not None:
+            gap = s.x0 - prev.x1
+            if gap >= gap_threshold:
+                out.append(" ")
+        out.append(s.text)
+        prev = s
+    return "".join(out).strip()
 
 
 def _block_from_label(label: str, text: str) -> Block:
