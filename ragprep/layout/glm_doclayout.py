@@ -221,9 +221,9 @@ def analyze_layout_image_base64(image_base64: str, *, settings: Settings) -> dic
     inference, implement it as a separate backend and keep this function's return shape stable.
     """
 
-    mode = (settings.glm_ocr_mode or "").strip().lower() or _GlmOcrMode.transformers
+    mode = (settings.layout_mode or "").strip().lower() or _GlmOcrMode.transformers
     if mode != _GlmOcrMode.server:
-        raise RuntimeError("Layout analysis currently requires RAGPREP_GLM_OCR_MODE=server.")
+        raise RuntimeError("Layout analysis currently requires RAGPREP_LAYOUT_MODE=server.")
 
     if not image_base64:
         raise ValueError("image_base64 is empty")
@@ -233,14 +233,14 @@ def analyze_layout_image_base64(image_base64: str, *, settings: Settings) -> dic
         raise ValueError("image_base64 is empty")
     _validate_base64_payload(payload)
 
-    url = f"{_normalize_base_url(settings.glm_ocr_base_url)}/v1/chat/completions"
+    url = f"{_normalize_base_url(settings.layout_base_url)}/v1/chat/completions"
     headers: dict[str, str] = {"Content-Type": "application/json"}
-    if settings.glm_ocr_api_key is not None:
-        headers["Authorization"] = f"Bearer {settings.glm_ocr_api_key}"
+    if settings.layout_api_key is not None:
+        headers["Authorization"] = f"Bearer {settings.layout_api_key}"
 
     data_url = f"data:image/png;base64,{payload}"
     request_payload: dict[str, object] = {
-        "model": settings.glm_ocr_model,
+        "model": settings.layout_model,
         "messages": [
             {
                 "role": "user",
@@ -250,14 +250,14 @@ def analyze_layout_image_base64(image_base64: str, *, settings: Settings) -> dic
                 ],
             }
         ],
-        "max_tokens": settings.glm_ocr_max_tokens,
+        "max_tokens": settings.layout_max_tokens,
     }
 
     response = _post_chat_completions(
         url=url,
         headers=headers,
         payload=request_payload,
-        timeout_seconds=settings.glm_ocr_timeout_seconds,
+        timeout_seconds=settings.layout_timeout_seconds,
     )
 
     content = _parse_chat_completions_response_content(response)
