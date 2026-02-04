@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterator
+from threading import Barrier, BrokenBarrierError, Lock
 
 import pytest
 from PIL import Image
@@ -64,6 +65,69 @@ def test_pdf_to_html_reports_progress_and_renders_html(monkeypatch: pytest.Monke
         (ProgressPhase.rendering, 2, 2),
         (ProgressPhase.done, 2, 2),
     ]
+
+
+def test_pdf_to_html_pipelines_layout_requests_in_server_mode(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("RAGPREP_LAYOUT_MODE", "server")
+    monkeypatch.setenv("RAGPREP_LAYOUT_CONCURRENCY", "2")
+
+    def _fake_iter_pdf_images(
+        *_args: object,
+        **_kwargs: object,
+    ) -> tuple[int, Iterator[Image.Image]]:
+        def generate() -> Iterator[Image.Image]:
+            yield Image.new("RGB", (10, 10), color=(255, 255, 255))
+            yield Image.new("RGB", (10, 10), color=(255, 255, 255))
+            yield Image.new("RGB", (10, 10), color=(255, 255, 255))
+
+        return 3, generate()
+
+    monkeypatch.setattr("ragprep.pdf_render.iter_pdf_images", _fake_iter_pdf_images)
+
+    spans_by_page = [
+        [Span(x0=0, y0=0, x1=10, y1=10, text="A")],
+        [Span(x0=0, y0=0, x1=10, y1=10, text="B")],
+        [Span(x0=0, y0=0, x1=10, y1=10, text="C")],
+    ]
+    monkeypatch.setattr("ragprep.pdf_text.extract_pymupdf_page_spans", lambda _pdf: spans_by_page)
+    monkeypatch.setattr(
+        "ragprep.pdf_text.extract_pymupdf_page_sizes",
+        lambda _pdf: [(1000.0, 1000.0), (1000.0, 1000.0), (1000.0, 1000.0)],
+    )
+
+    barrier = Barrier(2)
+    call_lock = Lock()
+    call_count = 0
+
+    def _fake_analyze_layout(_image_b64: str, *, settings: object) -> dict[str, object]:
+        nonlocal call_count
+        _ = settings
+        with call_lock:
+            call_count += 1
+            index = call_count
+        if index in {1, 2}:
+            try:
+                barrier.wait(timeout=2.0)
+            except BrokenBarrierError as exc:  # pragma: no cover
+                raise AssertionError("expected concurrent layout requests") from exc
+        return {
+            "schema_version": "v1",
+            "elements": [{"bbox": (0.0, 0.0, 10.0, 10.0), "label": "text", "score": 0.9}],
+            "raw": "{}",
+        }
+
+    monkeypatch.setattr(
+        "ragprep.layout.glm_doclayout.analyze_layout_image_base64",
+        _fake_analyze_layout,
+    )
+
+    html = pdf_to_html(b"%PDF", full_document=False)
+    assert "<section data-page=\"1\">" in html
+    assert "<section data-page=\"2\">" in html
+    assert "<section data-page=\"3\">" in html
+    assert call_count == 3
 
 
 def test_pdf_to_html_requires_layout_analysis(monkeypatch: pytest.MonkeyPatch) -> None:
