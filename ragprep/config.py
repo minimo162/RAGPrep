@@ -22,6 +22,7 @@ ENV_LAYOUT_MODEL: Final[str] = "RAGPREP_LAYOUT_MODEL"
 ENV_LAYOUT_API_KEY: Final[str] = "RAGPREP_LAYOUT_API_KEY"
 ENV_LAYOUT_MAX_TOKENS: Final[str] = "RAGPREP_LAYOUT_MAX_TOKENS"
 ENV_LAYOUT_TIMEOUT_SECONDS: Final[str] = "RAGPREP_LAYOUT_TIMEOUT_SECONDS"
+ENV_LAYOUT_CONCURRENCY: Final[str] = "RAGPREP_LAYOUT_CONCURRENCY"
 ENV_LAYOUT_RETRY_COUNT: Final[str] = "RAGPREP_LAYOUT_RETRY_COUNT"
 ENV_LAYOUT_RETRY_BACKOFF_SECONDS: Final[str] = "RAGPREP_LAYOUT_RETRY_BACKOFF_SECONDS"
 
@@ -44,6 +45,7 @@ DEFAULT_LAYOUT_BASE_URL: Final[str] = DEFAULT_GLM_OCR_BASE_URL
 DEFAULT_LAYOUT_MODEL: Final[str] = DEFAULT_GLM_OCR_MODEL
 DEFAULT_LAYOUT_MAX_TOKENS: Final[int] = DEFAULT_GLM_OCR_MAX_TOKENS
 DEFAULT_LAYOUT_TIMEOUT_SECONDS: Final[int] = DEFAULT_GLM_OCR_TIMEOUT_SECONDS
+DEFAULT_LAYOUT_CONCURRENCY: Final[int] = 1
 DEFAULT_LAYOUT_RETRY_COUNT: Final[int] = 1
 DEFAULT_LAYOUT_RETRY_BACKOFF_SECONDS: Final[float] = 0.0
 
@@ -68,6 +70,7 @@ class Settings:
     layout_api_key: str | None
     layout_max_tokens: int
     layout_timeout_seconds: int
+    layout_concurrency: int
     layout_retry_count: int
     layout_retry_backoff_seconds: float
 
@@ -213,6 +216,10 @@ def _get_layout_timeout_seconds() -> int:
     return value
 
 
+def _get_layout_concurrency() -> int:
+    return _get_positive_int(ENV_LAYOUT_CONCURRENCY, DEFAULT_LAYOUT_CONCURRENCY)
+
+
 def _get_layout_retry_count() -> int:
     return _get_nonnegative_int(ENV_LAYOUT_RETRY_COUNT, DEFAULT_LAYOUT_RETRY_COUNT)
 
@@ -245,6 +252,7 @@ def get_settings() -> Settings:
         layout_api_key=_get_layout_api_key(),
         layout_max_tokens=_get_layout_max_tokens(),
         layout_timeout_seconds=_get_layout_timeout_seconds(),
+        layout_concurrency=_get_layout_concurrency(),
         layout_retry_count=_get_layout_retry_count(),
         layout_retry_backoff_seconds=_get_layout_retry_backoff_seconds(),
     )
