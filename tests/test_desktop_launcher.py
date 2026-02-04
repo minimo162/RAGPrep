@@ -44,6 +44,14 @@ def test_health_endpoint_returns_ok() -> None:
     assert response.text == "ok"
 
 
+def test_favicon_is_not_404() -> None:
+    from fastapi.testclient import TestClient
+
+    client = TestClient(app)
+    response = client.get("/favicon.ico")
+    assert response.status_code == 204
+
+
 def test_client_host_for_binds_all_interfaces_to_loopback() -> None:
     assert desktop._client_host_for("0.0.0.0") == "127.0.0.1"
     assert desktop._client_host_for("::") == "127.0.0.1"
