@@ -3,10 +3,11 @@ from __future__ import annotations
 from typing import Any
 
 import pytest
+from fastapi.testclient import TestClient
 
 from ragprep.pipeline import PdfToHtmlProgress, ProgressPhase
 from ragprep.web import app as webapp
-from ragprep.web.app import JobStatus
+from ragprep.web.app import JobStatus, app
 
 
 def test_run_job_appends_partial_output(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -84,3 +85,26 @@ def test_run_job_sets_error_on_layout_timeout(monkeypatch: pytest.MonkeyPatch) -
     assert updated.phase == "error"
     assert updated.error is not None
     assert "Layout analysis request timed out" in updated.error
+
+
+def test_job_status_returns_204_when_version_matches() -> None:
+    client = TestClient(app)
+    job = webapp.jobs.create(filename="sample.pdf")
+    response = client.get(f"/jobs/{job.id}/status", headers={"If-None-Match": str(job.version)})
+    assert response.status_code == 204
+
+
+def test_partial_preview_is_capped_by_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("RAGPREP_WEB_PARTIAL_PREVIEW_PAGES", "2")
+
+    job = webapp.jobs.create(filename="sample.pdf")
+    webapp.jobs.append_partial(job.id, page_index=1, html='<section data-page="1">PAGE1</section>')
+    webapp.jobs.append_partial(job.id, page_index=2, html='<section data-page="2">PAGE2</section>')
+    webapp.jobs.append_partial(job.id, page_index=3, html='<section data-page="3">PAGE3</section>')
+
+    updated = webapp.jobs.get(job.id)
+    assert updated is not None
+    assert updated.partial_preview_pages == 2
+    assert 'data-page="1"' not in updated.partial_html
+    assert "PAGE2" in updated.partial_html
+    assert "PAGE3" in updated.partial_html
