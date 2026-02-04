@@ -221,13 +221,27 @@ def _parse_layout_result(content: str) -> tuple[str, tuple[dict[str, object], ..
 def _load_paddleocr_ppstructure() -> Any:
     try:
         from paddleocr import PPStructure
+
+        return PPStructure
+    except ImportError:
+        # Some PaddleOCR versions expose PPStructureV3 instead of PPStructure.
+        try:
+            from paddleocr import PPStructureV3
+
+            return PPStructureV3
+        except Exception as exc:  # noqa: BLE001
+            raise RuntimeError(
+                "Local layout analysis requires PaddleOCR with PPStructure/PPStructureV3 "
+                "available. Install PaddleOCR (CPU) and try again, or use "
+                "RAGPREP_LAYOUT_MODE=server. Suggested install: uv pip install paddlepaddle "
+                "paddleocr"
+            ) from exc
     except Exception as exc:  # noqa: BLE001
         raise RuntimeError(
             "Local layout analysis requires optional dependencies. "
             "Install PaddleOCR (CPU) and try again, or use RAGPREP_LAYOUT_MODE=server. "
             "Suggested install: uv pip install paddlepaddle paddleocr"
         ) from exc
-    return PPStructure
 
 
 @lru_cache(maxsize=1)

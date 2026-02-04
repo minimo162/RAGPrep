@@ -3,6 +3,8 @@ from __future__ import annotations
 import base64
 import builtins
 import json
+import sys
+from types import ModuleType
 from typing import Any, cast
 
 import httpx
@@ -100,6 +102,21 @@ def test_glm_doclayout_local_mode_requires_optional_deps(monkeypatch: pytest.Mon
     )
     with pytest.raises(RuntimeError, match="Install PaddleOCR"):
         glm_doclayout.analyze_layout_image_base64(image_b64, settings=settings)
+
+
+def test_load_paddleocr_ppstructure_falls_back_to_v3(monkeypatch: pytest.MonkeyPatch) -> None:
+    class _StubPPStructureV3:
+        def __init__(self, **_kwargs: object) -> None:
+            return
+
+    stub = ModuleType("paddleocr")
+    stub.PPStructureV3 = _StubPPStructureV3  # type: ignore[attr-defined]
+
+    monkeypatch.setitem(sys.modules, "paddleocr", stub)
+    glm_doclayout._get_paddleocr_engine.cache_clear()
+
+    loaded = glm_doclayout._load_paddleocr_ppstructure()
+    assert loaded is _StubPPStructureV3
 
 
 def test_glm_doclayout_raises_on_non_200(monkeypatch: pytest.MonkeyPatch) -> None:
