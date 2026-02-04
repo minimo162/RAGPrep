@@ -7,7 +7,7 @@ from pathlib import Path
 
 def _parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="PDF -> Markdown",
+        description="LEGACY: PDF -> Markdown (OCR)",
     )
     parser.add_argument("--pdf", type=Path, required=True, help="Path to a local PDF file")
     parser.add_argument(
@@ -31,6 +31,11 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
 
 def main(argv: list[str]) -> int:
     args = _parse_args(argv)
+    print(
+        "[WARN] scripts/pdf_to_markdown.py is a legacy OCR-based tool. "
+        "Use scripts/pdf_to_html.py for the primary HTML output.",
+        file=sys.stderr,
+    )
 
     repo_root = Path(__file__).resolve().parents[1]
     sys.path.insert(0, str(repo_root))

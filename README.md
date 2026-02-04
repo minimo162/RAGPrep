@@ -51,13 +51,6 @@ docker run --rm -it -p 8080:8080 vllm/vllm-openai:nightly vllm serve zai-org/GLM
 Invoke-WebRequest -UseBasicParsing http://127.0.0.1:8080/v1/models
 ```
 
-## （任意）OCR で Markdown を作りたい場合
-OCR ベースの Markdown 変換も残しています（レイアウト解析とは別）。
-```bash
-uv run python scripts/pdf_to_markdown.py --pdf .\path\to\input.pdf --out .\out\input.md --overwrite
-```
-Transformers で GLM-OCR を動かす場合は `torch` / `transformers` を別途インストールしてください。
-
 ## Standalone（Windows）
 
 ### ビルド
