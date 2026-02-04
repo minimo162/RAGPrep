@@ -40,6 +40,83 @@ def _image_to_png_base64(image: Image.Image) -> str:
     return base64.b64encode(buffer.getvalue()).decode("ascii")
 
 
+def _downscale_to_max_edge(image: Image.Image, *, max_edge: int) -> Image.Image:
+    width, height = image.size
+    current_max_edge = max(width, height)
+    if current_max_edge <= max_edge:
+        return image
+
+    if width >= height:
+        new_width = max_edge
+        new_height = max(1, round(max_edge * height / width))
+    else:
+        new_height = max_edge
+        new_width = max(1, round(max_edge * width / height))
+    return image.resize(
+        (int(new_width), int(new_height)),
+        resample=Image.Resampling.LANCZOS,
+    )
+
+
+def render_pdf_page_image(
+    pdf_bytes: bytes,
+    *,
+    page_index: int,
+    dpi: int,
+    max_edge: int,
+    max_pages: int | None = None,
+    max_bytes: int | None = None,
+) -> Image.Image:
+    """
+    Render a single PDF page to a PIL RGB image, applying max-edge downscaling.
+
+    This is used for adaptive fallback paths where we may need to re-render a page at
+    a higher resolution.
+    """
+
+    settings = get_settings()
+    max_pages = settings.max_pages if max_pages is None else max_pages
+    max_bytes = settings.max_upload_bytes if max_bytes is None else max_bytes
+
+    if not pdf_bytes:
+        raise ValueError("pdf_bytes is empty")
+    if dpi <= 0:
+        raise ValueError("dpi must be > 0")
+    if max_edge <= 0:
+        raise ValueError("max_edge must be > 0")
+    if max_pages <= 0:
+        raise ValueError("max_pages must be > 0")
+    if max_bytes <= 0:
+        raise ValueError("max_bytes must be > 0")
+    if len(pdf_bytes) > max_bytes:
+        raise ValueError(f"PDF too large ({len(pdf_bytes)} bytes), max_bytes={max_bytes}")
+    if page_index < 0:
+        raise ValueError("page_index must be >= 0")
+
+    scale = dpi / 72.0
+
+    fitz = _import_fitz()
+    try:
+        doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+    except Exception as exc:  # noqa: BLE001
+        raise ValueError("Invalid PDF data") from exc
+
+    try:
+        page_count = int(len(doc))
+        if page_count > max_pages:
+            raise ValueError(f"PDF has {page_count} pages, max_pages={max_pages}")
+        if page_index >= page_count:
+            raise ValueError(f"page_index out of range: {page_index} >= {page_count}")
+
+        page = doc.load_page(page_index)
+        matrix = fitz.Matrix(scale, scale)
+        pixmap = page.get_pixmap(matrix=matrix, alpha=False)
+        rgb = _pixmap_to_rgb_image(pixmap)
+        return _downscale_to_max_edge(rgb, max_edge=max_edge)
+    finally:
+        doc.close()
+
+
 def iter_pdf_images(
     pdf_bytes: bytes,
     *,
@@ -91,22 +168,7 @@ def iter_pdf_images(
                 matrix = fitz.Matrix(scale, scale)
                 pixmap = page.get_pixmap(matrix=matrix, alpha=False)
                 rgb = _pixmap_to_rgb_image(pixmap)
-
-                width, height = rgb.size
-                current_max_edge = max(width, height)
-                if current_max_edge > max_edge:
-                    if width >= height:
-                        new_width = max_edge
-                        new_height = max(1, round(max_edge * height / width))
-                    else:
-                        new_height = max_edge
-                        new_width = max(1, round(max_edge * width / height))
-                    rgb = rgb.resize(
-                        (int(new_width), int(new_height)),
-                        resample=Image.Resampling.LANCZOS,
-                    )
-
-                yield rgb
+                yield _downscale_to_max_edge(rgb, max_edge=max_edge)
         finally:
             doc.close()
 
