@@ -282,6 +282,88 @@ def _paddlex_ocr_install_hint() -> str:
     return 'uv pip install "paddlex[ocr]"'
 
 
+def _invoke_paddle_engine(engine: object, image: object) -> object:
+    if callable(engine):
+        return engine(image)
+
+    tried: list[str] = []
+    for method in ("predict", "run", "infer", "process"):
+        fn = getattr(engine, method, None)
+        if not callable(fn):
+            continue
+        tried.append(method)
+
+        try:
+            return fn(image)
+        except TypeError as exc:
+            # Some versions expect a list of images.
+            try:
+                return fn([image])
+            except TypeError:
+                raise exc from None
+
+    engine_type = type(engine).__name__
+    tried_str = ", ".join(tried) if tried else "(none found)"
+    raise RuntimeError(
+        f"Unsupported PaddleOCR engine {engine_type!r}: not callable and no supported methods "
+        f"found (tried: {tried_str})."
+    )
+
+
+def _coerce_to_list(value: object) -> list[object] | None:
+    if isinstance(value, list):
+        return value
+    if isinstance(value, tuple):
+        return list(value)
+    if isinstance(value, dict) or isinstance(value, (str, bytes)):
+        return None
+    if hasattr(value, "__iter__"):
+        try:
+            return list(value)
+        except TypeError:
+            return None
+    return None
+
+
+def _normalize_paddle_layout_output(raw: object) -> tuple[list[dict[str, object]], object]:
+    """
+    Normalize PaddleOCR pipeline output to a list of item dicts.
+
+    We keep this permissive because PaddleOCR output shapes vary across versions.
+    """
+
+    if isinstance(raw, list):
+        raw_list = raw
+        raw_for_json: object = raw
+    else:
+        coerced = _coerce_to_list(raw)
+        if coerced is not None:
+            raw_list = coerced
+            raw_for_json = coerced
+        else:
+            raw_list = []
+            raw_for_json = raw
+
+    if raw_list and len(raw_list) == 1 and isinstance(raw_list[0], list):
+        inner = raw_list[0]
+        if isinstance(inner, list) and all(isinstance(x, dict) for x in inner):
+            return cast(list[dict[str, object]], inner), raw_for_json
+
+    if raw_list and all(isinstance(x, dict) for x in raw_list):
+        return cast(list[dict[str, object]], raw_list), raw_for_json
+
+    if isinstance(raw, dict):
+        for key in ("layout_res", "layout", "result", "elements", "data", "outputs"):
+            value = raw.get(key)
+            if isinstance(value, list) and all(isinstance(x, dict) for x in value):
+                return cast(list[dict[str, object]], value), raw
+
+    raise RuntimeError(
+        "Local layout analysis returned an invalid result "
+        f"(expected list[dict], got: {type(raw).__name__})."
+    )
+
+
 @lru_cache(maxsize=1)
 def _get_paddleocr_engine() -> Any:
     PPStructure = _load_paddleocr_ppstructure()
@@ -407,14 +489,11 @@ def _analyze_layout_local_paddle(image_base64: str, *, settings: Settings) -> di
     if getattr(arr, "ndim", 0) == 3 and getattr(arr, "shape", (0, 0, 0))[2] == 3:
         arr = arr[:, :, ::-1]
 
-    result = engine(arr)
-    if not isinstance(result, list):
-        raise RuntimeError("Local layout analysis returned an invalid result.")
+    raw_result = _invoke_paddle_engine(engine, arr)
+    result, raw_for_json = _normalize_paddle_layout_output(raw_result)
 
     elements: list[dict[str, object]] = []
     for item in result:
-        if not isinstance(item, dict):
-            continue
         bbox_obj = item.get("bbox") if "bbox" in item else item.get("box")
         bbox = _paddle_bbox_to_xyxy(bbox_obj)
         if bbox is None:
@@ -445,7 +524,11 @@ def _analyze_layout_local_paddle(image_base64: str, *, settings: Settings) -> di
     elements.sort(key=_sort_key)
 
     raw = json.dumps(
-        {"backend": _GlmOcrMode.local_paddle, "model": settings.layout_model, "result": result},
+        {
+            "backend": _GlmOcrMode.local_paddle,
+            "model": settings.layout_model,
+            "result": raw_for_json,
+        },
         ensure_ascii=False,
         default=str,
     )
