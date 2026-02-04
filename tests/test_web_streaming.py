@@ -55,3 +55,32 @@ def test_run_job_appends_partial_output(monkeypatch: pytest.MonkeyPatch) -> None
     assert updated.html_output == "<article>DONE</article>"
     assert 'data-page="1"' in updated.partial_html
     assert "PAGE2" in updated.partial_html
+
+
+def test_run_job_sets_error_on_layout_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
+    job = webapp.jobs.create(filename="sample.pdf")
+
+    def _fake_pdf_to_html(
+        _pdf_bytes: bytes,
+        *,
+        full_document: bool = True,
+        on_progress: Any = None,
+        on_page: Any = None,
+        _page_output_dir: Any = None,
+    ) -> str:
+        _ = _pdf_bytes, full_document, on_progress, on_page, _page_output_dir
+        raise RuntimeError(
+            "Layout analysis request timed out. base_url='http://127.0.0.1:8080'. "
+            "Ensure the layout server is running and reachable."
+        )
+
+    monkeypatch.setattr(webapp, "pdf_to_html", _fake_pdf_to_html)
+
+    webapp._run_job(job.id, b"%PDF")
+    updated = webapp.jobs.get(job.id)
+
+    assert updated is not None
+    assert updated.status == JobStatus.error
+    assert updated.phase == "error"
+    assert updated.error is not None
+    assert "Layout analysis request timed out" in updated.error
