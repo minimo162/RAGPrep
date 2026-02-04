@@ -59,6 +59,18 @@ class Word:
     word_no: int
 
 
+@dataclass(frozen=True)
+class Span:
+    x0: float
+    y0: float
+    x1: float
+    y1: float
+    text: str
+    size: float | None = None
+    flags: int | None = None
+    font: str | None = None
+
+
 def _import_fitz() -> Any:
     try:
         import fitz  # PyMuPDF
@@ -241,6 +253,117 @@ def extract_pymupdf_page_texts(pdf_bytes: bytes) -> list[str]:
         for i in range(page_count):
             page = doc.load_page(i)
             pages.append(str(page.get_text("text") or ""))
+    return pages
+
+
+def extract_pymupdf_page_spans(pdf_bytes: bytes) -> list[list[Span]]:
+    """
+    Extract per-page text spans with bounding boxes using PyMuPDF.
+
+    This reads the PDF text layer only (it does NOT OCR images).
+    """
+
+    if not pdf_bytes:
+        raise ValueError("pdf_bytes is empty")
+
+    settings = get_settings()
+    if len(pdf_bytes) > settings.max_upload_bytes:
+        raise ValueError(
+            f"PDF too large ({len(pdf_bytes)} bytes), max_bytes={settings.max_upload_bytes}"
+        )
+
+    fitz = _import_fitz()
+    try:
+        doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+    except Exception as exc:  # noqa: BLE001
+        raise ValueError("Invalid PDF data") from exc
+
+    try:
+        page_count = int(doc.page_count)
+    except Exception as exc:  # noqa: BLE001
+        doc.close()
+        raise RuntimeError("Failed to read PDF page count") from exc
+    if page_count > settings.max_pages:
+        doc.close()
+        raise ValueError(f"PDF has {page_count} pages, max_pages={settings.max_pages}")
+
+    pages: list[list[Span]] = []
+    with doc:
+        for i in range(page_count):
+            page = doc.load_page(i)
+            try:
+                data = page.get_text("dict") or {}
+            except Exception:  # noqa: BLE001
+                pages.append([])
+                continue
+
+            blocks = data.get("blocks")
+            if not isinstance(blocks, list):
+                pages.append([])
+                continue
+
+            spans: list[Span] = []
+            for block in blocks:
+                if not isinstance(block, dict):
+                    continue
+                if int(block.get("type", -1)) != 0:
+                    continue
+                lines = block.get("lines")
+                if not isinstance(lines, list):
+                    continue
+                for line in lines:
+                    if not isinstance(line, dict):
+                        continue
+                    line_spans = line.get("spans")
+                    if not isinstance(line_spans, list):
+                        continue
+                    for span in line_spans:
+                        if not isinstance(span, dict):
+                            continue
+                        bbox = span.get("bbox")
+                        if not isinstance(bbox, (list, tuple)) or len(bbox) != 4:
+                            continue
+                        try:
+                            x0 = float(bbox[0])
+                            y0 = float(bbox[1])
+                            x1 = float(bbox[2])
+                            y1 = float(bbox[3])
+                        except Exception:  # noqa: BLE001
+                            continue
+                        if not (x0 < x1 and y0 < y1):
+                            continue
+
+                        text = normalize_extracted_text(str(span.get("text") or "")).strip()
+                        if not text:
+                            continue
+
+                        size_obj = span.get("size")
+                        size = float(size_obj) if isinstance(size_obj, (int, float)) else None
+                        flags_obj = span.get("flags")
+                        flags = (
+                            int(flags_obj)
+                            if isinstance(flags_obj, int) and not isinstance(flags_obj, bool)
+                            else None
+                        )
+                        font_obj = span.get("font")
+                        font = str(font_obj) if isinstance(font_obj, str) and font_obj else None
+
+                        spans.append(
+                            Span(
+                                x0=x0,
+                                y0=y0,
+                                x1=x1,
+                                y1=y1,
+                                text=text,
+                                size=size,
+                                flags=flags,
+                                font=font,
+                            )
+                        )
+
+            spans.sort(key=lambda s: (s.y0, s.x0, s.y1, s.x1, s.text))
+            pages.append(spans)
+
     return pages
 
 
