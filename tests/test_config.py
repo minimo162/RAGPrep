@@ -44,3 +44,45 @@ def test_default_glm_ocr_mode_is_transformers(monkeypatch: pytest.MonkeyPatch) -
     monkeypatch.delenv("RAGPREP_GLM_OCR_MODE", raising=False)
     settings = config.get_settings()
     assert settings.glm_ocr_mode == "transformers"
+
+
+def test_layout_settings_default_to_glm_ocr_settings(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("RAGPREP_LAYOUT_MODE", raising=False)
+    monkeypatch.delenv("RAGPREP_LAYOUT_BASE_URL", raising=False)
+    monkeypatch.delenv("RAGPREP_LAYOUT_MODEL", raising=False)
+    monkeypatch.delenv("RAGPREP_LAYOUT_API_KEY", raising=False)
+    monkeypatch.delenv("RAGPREP_LAYOUT_MAX_TOKENS", raising=False)
+    monkeypatch.delenv("RAGPREP_LAYOUT_TIMEOUT_SECONDS", raising=False)
+
+    monkeypatch.setenv("RAGPREP_GLM_OCR_MODE", "server")
+    monkeypatch.setenv("RAGPREP_GLM_OCR_BASE_URL", "http://example:8080")
+    monkeypatch.setenv("RAGPREP_GLM_OCR_MODEL", "model-x")
+    monkeypatch.setenv("RAGPREP_GLM_OCR_API_KEY", "k")
+    monkeypatch.setenv("RAGPREP_GLM_OCR_MAX_TOKENS", "111")
+    monkeypatch.setenv("RAGPREP_GLM_OCR_TIMEOUT_SECONDS", "7")
+
+    settings = config.get_settings()
+    assert settings.layout_mode == "server"
+    assert settings.layout_base_url == "http://example:8080"
+    assert settings.layout_model == "model-x"
+    assert settings.layout_api_key == "k"
+    assert settings.layout_max_tokens == 111
+    assert settings.layout_timeout_seconds == 7
+
+
+def test_layout_settings_override_glm_ocr_settings(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("RAGPREP_GLM_OCR_MODE", "transformers")
+    monkeypatch.setenv("RAGPREP_LAYOUT_MODE", "server")
+    monkeypatch.setenv("RAGPREP_LAYOUT_BASE_URL", "http://layout:8080")
+    monkeypatch.setenv("RAGPREP_LAYOUT_MODEL", "layout-model")
+    monkeypatch.setenv("RAGPREP_LAYOUT_API_KEY", "layout-key")
+    monkeypatch.setenv("RAGPREP_LAYOUT_MAX_TOKENS", "222")
+    monkeypatch.setenv("RAGPREP_LAYOUT_TIMEOUT_SECONDS", "9")
+
+    settings = config.get_settings()
+    assert settings.layout_mode == "server"
+    assert settings.layout_base_url == "http://layout:8080"
+    assert settings.layout_model == "layout-model"
+    assert settings.layout_api_key == "layout-key"
+    assert settings.layout_max_tokens == 222
+    assert settings.layout_timeout_seconds == 9

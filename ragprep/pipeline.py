@@ -296,7 +296,7 @@ def pdf_to_html(
             # whole page as a single text region. This preserves the intent (text-layer-first)
             # while allowing incremental adoption of PP-DocLayout-V3.
             message = str(exc)
-            if "requires RAGPREP_GLM_OCR_MODE=server" not in message:
+            if "requires RAGPREP_LAYOUT_MODE=server" not in message:
                 raise
             raw_elements = [
                 {"bbox": (0.0, 0.0, image_width, image_height), "label": "text", "score": None}

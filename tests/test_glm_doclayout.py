@@ -13,12 +13,12 @@ from ragprep.layout import glm_doclayout
 def test_glm_doclayout_sends_openai_chat_completions_payload(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setenv("RAGPREP_GLM_OCR_MODE", "server")
-    monkeypatch.setenv("RAGPREP_GLM_OCR_BASE_URL", "http://localhost:8080/")
-    monkeypatch.setenv("RAGPREP_GLM_OCR_MODEL", "zai-org/GLM-OCR")
-    monkeypatch.setenv("RAGPREP_GLM_OCR_API_KEY", "secret")
-    monkeypatch.setenv("RAGPREP_GLM_OCR_MAX_TOKENS", "123")
-    monkeypatch.setenv("RAGPREP_GLM_OCR_TIMEOUT_SECONDS", "9")
+    monkeypatch.setenv("RAGPREP_LAYOUT_MODE", "server")
+    monkeypatch.setenv("RAGPREP_LAYOUT_BASE_URL", "http://localhost:8080/")
+    monkeypatch.setenv("RAGPREP_LAYOUT_MODEL", "zai-org/GLM-OCR")
+    monkeypatch.setenv("RAGPREP_LAYOUT_API_KEY", "secret")
+    monkeypatch.setenv("RAGPREP_LAYOUT_MAX_TOKENS", "123")
+    monkeypatch.setenv("RAGPREP_LAYOUT_TIMEOUT_SECONDS", "9")
     settings = get_settings()
 
     captured: dict[str, object] = {}
@@ -78,15 +78,15 @@ def test_glm_doclayout_sends_openai_chat_completions_payload(
 
 
 def test_glm_doclayout_requires_server_mode(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("RAGPREP_GLM_OCR_MODE", "transformers")
+    monkeypatch.setenv("RAGPREP_LAYOUT_MODE", "transformers")
     settings = get_settings()
     image_b64 = base64.b64encode(b"x").decode("ascii")
-    with pytest.raises(RuntimeError, match="requires RAGPREP_GLM_OCR_MODE=server"):
+    with pytest.raises(RuntimeError, match="requires RAGPREP_LAYOUT_MODE=server"):
         glm_doclayout.analyze_layout_image_base64(image_b64, settings=settings)
 
 
 def test_glm_doclayout_raises_on_non_200(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("RAGPREP_GLM_OCR_MODE", "server")
+    monkeypatch.setenv("RAGPREP_LAYOUT_MODE", "server")
     settings = get_settings()
 
     def _fake_post(**_kwargs: object) -> httpx.Response:
@@ -100,14 +100,14 @@ def test_glm_doclayout_raises_on_non_200(monkeypatch: pytest.MonkeyPatch) -> Non
 
 
 def test_glm_doclayout_rejects_invalid_base64(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("RAGPREP_GLM_OCR_MODE", "server")
+    monkeypatch.setenv("RAGPREP_LAYOUT_MODE", "server")
     settings = get_settings()
     with pytest.raises(ValueError, match="not valid base64"):
         glm_doclayout.analyze_layout_image_base64("not base64 !!!", settings=settings)
 
 
 def test_glm_doclayout_rejects_non_json_content(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("RAGPREP_GLM_OCR_MODE", "server")
+    monkeypatch.setenv("RAGPREP_LAYOUT_MODE", "server")
     settings = get_settings()
 
     def _fake_post(**_kwargs: object) -> httpx.Response:
@@ -121,7 +121,7 @@ def test_glm_doclayout_rejects_non_json_content(monkeypatch: pytest.MonkeyPatch)
 
 
 def test_glm_doclayout_parses_fenced_json(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("RAGPREP_GLM_OCR_MODE", "server")
+    monkeypatch.setenv("RAGPREP_LAYOUT_MODE", "server")
     settings = get_settings()
 
     fenced = """```json
@@ -143,7 +143,7 @@ def test_glm_doclayout_parses_fenced_json(monkeypatch: pytest.MonkeyPatch) -> No
 
 
 def test_glm_doclayout_extracts_json_from_surrounding_text(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("RAGPREP_GLM_OCR_MODE", "server")
+    monkeypatch.setenv("RAGPREP_LAYOUT_MODE", "server")
     settings = get_settings()
 
     content = (

@@ -32,14 +32,14 @@ uv run python scripts/pdf_to_html.py --pdf .\path\to\input.pdf --out .\out\input
 
 ## レイアウト解析（環境変数）
 
-デフォルトは `transformers`（= レイアウト解析はフォールバック）です:
-- `RAGPREP_GLM_OCR_MODE=transformers`（default）
+デフォルトは GLM 側の設定に追従します（後方互換）:
+- `RAGPREP_LAYOUT_MODE`（unset の場合は `RAGPREP_GLM_OCR_MODE` にフォールバック）
 
 GLM-OCR サーバーでレイアウト解析を有効にする場合:
-- `RAGPREP_GLM_OCR_MODE=server`
-- `RAGPREP_GLM_OCR_BASE_URL=http://127.0.0.1:8080`（default）
-- `RAGPREP_GLM_OCR_MODEL=zai-org/GLM-OCR`（default）
-- `RAGPREP_GLM_OCR_API_KEY`（optional）
+- `RAGPREP_LAYOUT_MODE=server`
+- `RAGPREP_LAYOUT_BASE_URL=http://127.0.0.1:8080`（default）
+- `RAGPREP_LAYOUT_MODEL=zai-org/GLM-OCR`（default）
+- `RAGPREP_LAYOUT_API_KEY`（optional）
 
 ### server モード: サーバー起動（Windows 推奨: Docker）
 ```bash
