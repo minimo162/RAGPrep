@@ -119,6 +119,29 @@ def test_load_paddleocr_ppstructure_falls_back_to_v3(monkeypatch: pytest.MonkeyP
     assert loaded is _StubPPStructureV3
 
 
+def test_get_paddleocr_engine_retries_on_unknown_show_log(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class _StubPPStructureV3:
+        last_kwargs: dict[str, object] | None = None
+
+        def __init__(self, **kwargs: object) -> None:
+            _StubPPStructureV3.last_kwargs = dict(kwargs)
+            if "show_log" in kwargs:
+                raise ValueError("Unknown argument: show_log")
+
+    stub = ModuleType("paddleocr")
+    stub.PPStructureV3 = _StubPPStructureV3  # type: ignore[attr-defined]
+
+    monkeypatch.setitem(sys.modules, "paddleocr", stub)
+    glm_doclayout._get_paddleocr_engine.cache_clear()
+
+    engine = glm_doclayout._get_paddleocr_engine()
+    assert isinstance(engine, _StubPPStructureV3)
+    assert _StubPPStructureV3.last_kwargs is not None
+    assert "show_log" not in _StubPPStructureV3.last_kwargs
+
+
 def test_glm_doclayout_raises_on_non_200(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("RAGPREP_LAYOUT_MODE", "server")
     settings = get_settings()
