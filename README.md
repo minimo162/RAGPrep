@@ -22,7 +22,7 @@ RAGPrep **requires layout analysis**. Choose one of the following backends.
 #### Option A: Local (no Docker) via PaddleOCR (recommended)
 Install the optional runtime:
 ```bash
-uv pip install paddlepaddle paddleocr
+uv pip install paddlepaddle paddleocr "paddlex[ocr]"
 ```
 
 Set the layout mode:

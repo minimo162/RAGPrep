@@ -243,6 +243,45 @@ def _load_paddleocr_ppstructure() -> Any:
         ) from exc
 
 
+def _try_get_dist_version(dist_name: str) -> str | None:
+    try:
+        from importlib.metadata import version
+    except Exception:  # noqa: BLE001
+        return None
+
+    try:
+        return str(version(dist_name))
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def _is_paddlex_dependency_error(exc: BaseException) -> bool:
+    message = str(exc).lower()
+    if "dependency error occurred during pipeline creation" in message:
+        return True
+
+    cause = getattr(exc, "__cause__", None)
+    if cause is None:
+        return False
+
+    cause_mod = getattr(cause.__class__, "__module__", "") or ""
+    cause_name = getattr(cause.__class__, "__name__", "") or ""
+    if cause_mod.startswith("paddlex.") and cause_name == "DependencyError":
+        return True
+
+    cause_message = str(cause).lower()
+    if "paddlex" in cause_message and "requires additional dependencies" in cause_message:
+        return True
+    return False
+
+
+def _paddlex_ocr_install_hint() -> str:
+    paddlex_version = _try_get_dist_version("paddlex")
+    if paddlex_version:
+        return f'uv pip install "paddlex[ocr]=={paddlex_version}"'
+    return 'uv pip install "paddlex[ocr]"'
+
+
 @lru_cache(maxsize=1)
 def _get_paddleocr_engine() -> Any:
     PPStructure = _load_paddleocr_ppstructure()
@@ -270,6 +309,14 @@ def _get_paddleocr_engine() -> Any:
             if not unknown or unknown not in kwargs:
                 raise
             kwargs.pop(unknown, None)
+        except RuntimeError as exc:
+            if _is_paddlex_dependency_error(exc):
+                hint = _paddlex_ocr_install_hint()
+                raise RuntimeError(
+                    "Local layout analysis requires PaddleX OCR extras for PP-StructureV3. "
+                    f"Install them and try again: {hint}"
+                ) from exc
+            raise
 
     raise RuntimeError("Failed to initialize PaddleOCR PPStructure backend.")
 

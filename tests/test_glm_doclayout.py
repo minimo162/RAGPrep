@@ -142,6 +142,32 @@ def test_get_paddleocr_engine_retries_on_unknown_show_log(
     assert "show_log" not in _StubPPStructureV3.last_kwargs
 
 
+def test_get_paddleocr_engine_instructs_paddlex_ocr_extras(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class _DependencyError(Exception):
+        __module__ = "paddlex.utils.deps"
+
+    class _StubPPStructureV3:
+        def __init__(self, **_kwargs: object) -> None:
+            err = _DependencyError(
+                'PP-StructureV3 requires additional dependencies. Install `paddlex[ocr]`.'
+            )
+            raise RuntimeError(
+                "A dependency error occurred during pipeline creation. Please refer to the "
+                "installation documentation to ensure all required dependencies are installed."
+            ) from err
+
+    stub = ModuleType("paddleocr")
+    stub.PPStructureV3 = _StubPPStructureV3  # type: ignore[attr-defined]
+
+    monkeypatch.setitem(sys.modules, "paddleocr", stub)
+    glm_doclayout._get_paddleocr_engine.cache_clear()
+
+    with pytest.raises(RuntimeError, match=r"paddlex\[ocr\]"):
+        glm_doclayout._get_paddleocr_engine()
+
+
 def test_glm_doclayout_raises_on_non_200(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("RAGPREP_LAYOUT_MODE", "server")
     settings = get_settings()
