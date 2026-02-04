@@ -89,6 +89,8 @@ class _GlmOcrMode:
     transformers = "transformers"
     server = "server"
 
+_CODE_FENCE = "```"
+
 
 def _as_float(value: object, *, name: str) -> float:
     if isinstance(value, (int, float)):
@@ -122,9 +124,74 @@ def _parse_bbox(value: object) -> tuple[float, float, float, float]:
     return x0, y0, x1, y1
 
 
+def _strip_code_fence(content: str) -> str:
+    text = content.strip()
+    if not text.startswith(_CODE_FENCE):
+        return content
+
+    # Format we expect: ```json\n{...}\n```
+    first_nl = text.find("\n")
+    if first_nl == -1:
+        return content
+    closing = text.find(_CODE_FENCE, first_nl + 1)
+    if closing == -1:
+        return content
+    inner = text[first_nl + 1 : closing]
+    return inner.strip()
+
+
+def _extract_first_json_object(content: str) -> str:
+    text = content.strip()
+    if not text:
+        raise RuntimeError("Layout analysis returned empty content.")
+
+    start = text.find("{")
+    if start == -1:
+        raise RuntimeError("Layout analysis content does not contain a JSON object.")
+
+    depth = 0
+    in_string = False
+    escaped = False
+    for i in range(start, len(text)):
+        ch = text[i]
+
+        if in_string:
+            if escaped:
+                escaped = False
+                continue
+            if ch == "\\":
+                escaped = True
+                continue
+            if ch == '"':
+                in_string = False
+            continue
+
+        if ch == '"':
+            in_string = True
+            continue
+        if ch == "{":
+            depth += 1
+            continue
+        if ch == "}":
+            depth -= 1
+            if depth == 0:
+                return text[start : i + 1]
+            if depth < 0:
+                break
+
+    raise RuntimeError("Layout analysis content contains an unterminated JSON object.")
+
+
+def _sanitize_layout_content(content: str) -> str:
+    # Prefer fenced JSON if present, but fall back to brace extraction.
+    unfenced = _strip_code_fence(content)
+    return _extract_first_json_object(unfenced)
+
+
 def _parse_layout_result(content: str) -> tuple[str, tuple[dict[str, object], ...]]:
+    sanitized = _sanitize_layout_content(content)
     try:
-        payload = json.loads(content)
+        payload = json.loads(sanitized)
     except json.JSONDecodeError as exc:
         raise RuntimeError("Layout analysis did not return valid JSON.") from exc
 
