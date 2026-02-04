@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass
 from enum import Enum
 from io import BytesIO
@@ -240,6 +241,9 @@ def pdf_to_html(
             f"PDF too large ({len(pdf_bytes)} bytes), max_bytes={settings.max_upload_bytes}"
         )
 
+    if not pdf_bytes.lstrip().startswith(b"%PDF"):
+        raise ValueError("Invalid PDF data")
+
     from ragprep.html_render import render_document_html, render_page_html, wrap_html_document
     from ragprep.layout.glm_doclayout import analyze_layout_image_base64
     from ragprep.pdf_render import iter_pdf_images
@@ -272,21 +276,13 @@ def pdf_to_html(
 
     pages: list[Page] = []
     partial_sections: list[str] = []
-    for page_number, image in enumerate(images, start=1):
-        image_width = float(getattr(image, "width", 0))
-        image_height = float(getattr(image, "height", 0))
-        if image_width <= 0 or image_height <= 0:
-            raise RuntimeError("Failed to read rendered image size for layout normalization.")
-
-        try:
-            encoded = _image_to_png_base64(image)
-        finally:
-            try:
-                image.close()
-            except Exception:  # noqa: BLE001
-                pass
-
-        layout_raw = analyze_layout_image_base64(encoded, settings=settings)
+    def _build_page_from_layout(
+        *,
+        page_number: int,
+        image_width: float,
+        image_height: float,
+        layout_raw: dict[str, object],
+    ) -> tuple[Page, str]:
         raw_elements = layout_raw.get("elements", [])
         if not isinstance(raw_elements, list):
             raise RuntimeError("Layout analysis returned invalid elements.")
@@ -310,22 +306,123 @@ def pdf_to_html(
             layout_elements=layout_elements,
         )
         page = Page(page_number=page_number, blocks=blocks)
-        pages.append(page)
+        return page, render_page_html(page)
 
-        section_html = render_page_html(page)
-        partial_sections.append(section_html)
-        if on_page is not None:
-            on_page(page_number, section_html)
+    layout_workers = 1
+    if (settings.layout_mode or "").strip().lower() == "server":
+        layout_workers = max(1, int(settings.layout_concurrency))
 
-        _notify_html_progress(
-            on_progress,
-            PdfToHtmlProgress(
-                phase=ProgressPhase.rendering,
-                current=page_number,
-                total=int(total_pages),
-                message="converting",
-            ),
+    if layout_workers <= 1:
+        for page_number, image in enumerate(images, start=1):
+            image_width = float(getattr(image, "width", 0))
+            image_height = float(getattr(image, "height", 0))
+            if image_width <= 0 or image_height <= 0:
+                raise RuntimeError(
+                    "Failed to read rendered image size for layout normalization."
+                )
+
+            try:
+                encoded = _image_to_png_base64(image)
+            finally:
+                try:
+                    image.close()
+                except Exception:  # noqa: BLE001
+                    pass
+
+            layout_raw = analyze_layout_image_base64(encoded, settings=settings)
+            page, section_html = _build_page_from_layout(
+                page_number=page_number,
+                image_width=image_width,
+                image_height=image_height,
+                layout_raw=layout_raw,
+            )
+            pages.append(page)
+
+            partial_sections.append(section_html)
+            if on_page is not None:
+                on_page(page_number, section_html)
+
+            _notify_html_progress(
+                on_progress,
+                PdfToHtmlProgress(
+                    phase=ProgressPhase.rendering,
+                    current=page_number,
+                    total=int(total_pages),
+                    message="converting",
+                ),
+            )
+    else:
+        inflight: dict[int, tuple[Future[dict[str, object]], float, float]] = {}
+        next_page_to_process = 1
+        executor = ThreadPoolExecutor(
+            max_workers=min(layout_workers, int(total_pages)),
+            thread_name_prefix="ragprep-layout",
         )
+
+        def _process_page(page_number: int) -> None:
+            future, image_width, image_height = inflight[page_number]
+            layout_raw = future.result()
+            page, section_html = _build_page_from_layout(
+                page_number=page_number,
+                image_width=image_width,
+                image_height=image_height,
+                layout_raw=layout_raw,
+            )
+            pages.append(page)
+            partial_sections.append(section_html)
+            if on_page is not None:
+                on_page(page_number, section_html)
+            _notify_html_progress(
+                on_progress,
+                PdfToHtmlProgress(
+                    phase=ProgressPhase.rendering,
+                    current=page_number,
+                    total=int(total_pages),
+                    message="converting",
+                ),
+            )
+
+        try:
+            for page_number, image in enumerate(images, start=1):
+                image_width = float(getattr(image, "width", 0))
+                image_height = float(getattr(image, "height", 0))
+                if image_width <= 0 or image_height <= 0:
+                    raise RuntimeError(
+                        "Failed to read rendered image size for layout normalization."
+                    )
+
+                try:
+                    encoded = _image_to_png_base64(image)
+                finally:
+                    try:
+                        image.close()
+                    except Exception:  # noqa: BLE001
+                        pass
+
+                future = executor.submit(analyze_layout_image_base64, encoded, settings=settings)
+                inflight[page_number] = (future, image_width, image_height)
+
+                while len(inflight) >= layout_workers and next_page_to_process in inflight:
+                    _process_page(next_page_to_process)
+                    inflight.pop(next_page_to_process, None)
+                    next_page_to_process += 1
+
+                while (
+                    next_page_to_process in inflight
+                    and inflight[next_page_to_process][0].done()
+                ):
+                    _process_page(next_page_to_process)
+                    inflight.pop(next_page_to_process, None)
+                    next_page_to_process += 1
+
+            while next_page_to_process in inflight:
+                _process_page(next_page_to_process)
+                inflight.pop(next_page_to_process, None)
+                next_page_to_process += 1
+        finally:
+            for future, _w, _h in inflight.values():
+                future.cancel()
+            executor.shutdown(wait=True, cancel_futures=True)
 
     document = Document(pages=tuple(pages))
     fragment = render_document_html(document)
