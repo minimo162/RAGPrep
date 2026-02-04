@@ -63,19 +63,24 @@ def _render_page(page: Page) -> str:
 def _render_block(block: Block) -> str:
     if isinstance(block, Heading):
         level = max(1, min(6, int(block.level)))
-        text = escape(block.text, quote=True)
+        text = _escape_with_breaks(block.text)
         return f"<h{level}>{text}</h{level}>"
     if isinstance(block, Paragraph):
-        text = escape(block.text, quote=True)
+        text = _escape_with_breaks(block.text)
         return f"<p>{text}</p>"
     if isinstance(block, Table):
-        text = escape(block.text, quote=True)
+        text = _escape_with_breaks(block.text)
         return f'<pre data-kind="table">{text}</pre>'
     if isinstance(block, Figure):
-        alt = escape(block.alt, quote=True)
+        alt = _escape_with_breaks(block.alt)
         return f"<figure><figcaption>{alt}</figcaption></figure>"
     if isinstance(block, Unknown):
-        text = escape(block.text, quote=True)
+        text = _escape_with_breaks(block.text)
         return f"<p>{text}</p>"
     raise TypeError(f"Unsupported block type: {type(block)!r}")
+
+
+def _escape_with_breaks(text: str) -> str:
+    escaped = escape(text, quote=True)
+    return escaped.replace("\n", "<br />\n")
 

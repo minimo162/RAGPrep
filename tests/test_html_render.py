@@ -11,7 +11,7 @@ def test_render_document_html_escapes_text_and_wraps_pages() -> None:
                 page_number=1,
                 blocks=(
                     Heading(level=1, text="<Title>"),
-                    Paragraph(text='A & B "C"'),
+                    Paragraph(text='A & B "C"\nD'),
                     Unknown(text="X>Y"),
                 ),
             ),
@@ -22,6 +22,7 @@ def test_render_document_html_escapes_text_and_wraps_pages() -> None:
     assert '<section data-page="1">' in html
     assert "&lt;Title&gt;" in html
     assert "A &amp; B &quot;C&quot;" in html
+    assert "<br" in html
     assert "X&gt;Y" in html
 
 
