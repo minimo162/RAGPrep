@@ -135,10 +135,7 @@ def build_page_blocks(
     if page_width <= 0 or page_height <= 0:
         raise ValueError("page_width/page_height must be > 0")
 
-    elements_sorted = sorted(
-        layout_elements,
-        key=lambda e: (e.bbox.y0, e.bbox.x0, e.bbox.y1, e.bbox.x1, e.label),
-    )
+    elements_sorted = _order_layout_elements_for_reading(layout_elements)
 
     assignments: dict[int, list[Span]] = {i: [] for i in range(len(elements_sorted))}
     unassigned: list[Span] = []
@@ -205,6 +202,74 @@ def build_document(
     return Document(pages=tuple(pages))
 
 
+def _order_layout_elements_for_reading(elements: list[LayoutElement]) -> list[LayoutElement]:
+    """
+    Order layout regions for a human reading order.
+
+    Heuristic:
+    - If there are clear left/right column regions, output all left-column blocks top→bottom,
+      then all right-column blocks top→bottom.
+    - Full-width regions above the columns (e.g., title) come first; full-width below come last.
+    - Otherwise fall back to (y0, x0) ordering.
+    """
+
+    if not elements:
+        return []
+
+    fallback = sorted(elements, key=lambda e: (e.bbox.y0, e.bbox.x0, e.bbox.y1, e.bbox.x1, e.label))
+
+    full_width: list[LayoutElement] = []
+    left: list[LayoutElement] = []
+    right: list[LayoutElement] = []
+    middle: list[LayoutElement] = []
+
+    for e in fallback:
+        width = max(0.0, e.bbox.x1 - e.bbox.x0)
+        if e.bbox.x0 <= 0.15 and e.bbox.x1 >= 0.85 and width >= 0.70:
+            full_width.append(e)
+        elif e.bbox.x1 <= 0.52:
+            left.append(e)
+        elif e.bbox.x0 >= 0.48:
+            right.append(e)
+        else:
+            middle.append(e)
+
+    # Only treat as two-column when both sides have multiple regions.
+    if len(left) < 2 or len(right) < 2:
+        return fallback
+
+    columns_start_y0 = min((e.bbox.y0 for e in left + right), default=0.0)
+    columns_end_y1 = max((e.bbox.y1 for e in left + right), default=1.0)
+
+    top_full = [e for e in full_width if e.bbox.y1 <= columns_start_y0 + 1e-6]
+    bottom_full = [
+        e
+        for e in full_width
+        if e not in top_full and e.bbox.y0 >= columns_end_y1 - 1e-6
+    ]
+    mid_full = [e for e in full_width if e not in top_full and e not in bottom_full]
+
+    # Keep anything ambiguous in the fallback position by y0.
+    ordered: list[LayoutElement] = []
+    ordered.extend(sorted(top_full, key=lambda e: (e.bbox.y0, e.bbox.x0)))
+    ordered.extend(sorted(mid_full, key=lambda e: (e.bbox.y0, e.bbox.x0)))
+    ordered.extend(sorted(left, key=lambda e: (e.bbox.y0, e.bbox.x0)))
+    ordered.extend(sorted(right, key=lambda e: (e.bbox.y0, e.bbox.x0)))
+    ordered.extend(sorted(middle, key=lambda e: (e.bbox.y0, e.bbox.x0)))
+    ordered.extend(sorted(bottom_full, key=lambda e: (e.bbox.y0, e.bbox.x0)))
+
+    # Dedupe while preserving order.
+    seen: set[int] = set()
+    out: list[LayoutElement] = []
+    for e in ordered:
+        key = id(e)
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(e)
+    return out if len(out) == len(fallback) else fallback
+
+
 def _join_spans_text(spans: list[Span]) -> str:
     if not spans:
         return ""
@@ -219,13 +284,44 @@ def _join_spans_text(spans: list[Span]) -> str:
         lines.setdefault(key, []).append(s)
 
     line_keys = sorted(lines.keys())
-    rendered_lines: list[str] = []
-    for key in line_keys:
-        rendered = _join_spans_in_line(lines[key])
-        if rendered:
-            rendered_lines.append(rendered)
 
-    return "\n".join(rendered_lines).strip()
+    line_items: list[tuple[float, float, str]] = []
+    for key in line_keys:
+        spans_in_line = lines[key]
+        rendered = _join_spans_in_line(spans_in_line)
+        if not rendered:
+            continue
+        y0 = min(s.y0 for s in spans_in_line)
+        y1 = max(s.y1 for s in spans_in_line)
+        line_items.append((float(y0), float(y1), rendered))
+
+    if not line_items:
+        return ""
+
+    # Join wrapped lines with spaces; keep paragraph breaks when there is a large vertical gap.
+    heights = [max(0.0, y1 - y0) for (y0, y1, _t) in line_items]
+    median_h = _median_or_default(heights, default=10.0)
+    paragraph_gap = max(6.0, median_h * 1.8)
+
+    out: list[str] = [line_items[0][2]]
+    for (_prev_y0, prev_y1, _prev_text), (y0, _y1, text) in zip(
+        line_items, line_items[1:], strict=False
+    ):
+        gap = float(y0 - prev_y1)
+        if gap >= paragraph_gap:
+            out.append("\n")
+            out.append(text)
+            continue
+
+        # Wrapped line: prefer space-join; handle simple hyphenation.
+        if out and out[-1].endswith("-") and text and text[:1].isalpha():
+            out[-1] = out[-1][:-1]
+            out.append(text)
+        else:
+            out.append(" ")
+            out.append(text)
+
+    return "".join(out).strip()
 
 
 def _median_or_default(values: list[float], *, default: float) -> float:
