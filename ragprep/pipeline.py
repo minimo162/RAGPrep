@@ -260,6 +260,11 @@ def pdf_to_html(
     fallback_dpi = settings.layout_render_dpi
     fallback_max_edge = settings.layout_render_max_edge
     if adaptive_enabled:
+        if (
+            settings.layout_render_auto_small_dpi == fallback_dpi
+            and settings.layout_render_auto_small_max_edge == fallback_max_edge
+        ):
+            adaptive_enabled = False
         primary_dpi = settings.layout_render_auto_small_dpi
         primary_max_edge = settings.layout_render_auto_small_max_edge
 
