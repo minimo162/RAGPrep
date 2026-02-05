@@ -48,7 +48,36 @@ def test_build_page_blocks_preserves_line_breaks_in_spans_join() -> None:
     )
     assert len(blocks) == 1
     assert isinstance(blocks[0], Paragraph)
-    assert blocks[0].text == "Line1\nLine2"
+    assert blocks[0].text == "Line1 Line2"
+
+
+def test_build_page_blocks_orders_two_columns_left_then_right() -> None:
+    spans = [
+        Span(x0=50, y0=100, x1=60, y1=110, text="L-top"),
+        Span(x0=50, y0=300, x1=60, y1=310, text="L-bottom"),
+        Span(x0=600, y0=100, x1=610, y1=110, text="R-top"),
+        Span(x0=600, y0=300, x1=610, y1=310, text="R-bottom"),
+    ]
+    layout_elements = [
+        LayoutElement(page_index=0, bbox=BBox(0.0, 0.05, 0.45, 0.20), label="text", score=0.9),
+        LayoutElement(page_index=0, bbox=BBox(0.55, 0.05, 1.0, 0.20), label="text", score=0.9),
+        LayoutElement(page_index=0, bbox=BBox(0.0, 0.25, 0.45, 0.40), label="text", score=0.9),
+        LayoutElement(page_index=0, bbox=BBox(0.55, 0.25, 1.0, 0.40), label="text", score=0.9),
+    ]
+
+    blocks = build_page_blocks(
+        spans=spans,
+        page_width=1000.0,
+        page_height=1000.0,
+        layout_elements=layout_elements,
+    )
+
+    assert [b.text for b in blocks if isinstance(b, Paragraph)] == [
+        "L-top",
+        "L-bottom",
+        "R-top",
+        "R-bottom",
+    ]
 
 
 def test_build_page_blocks_rejects_invalid_page_size() -> None:
