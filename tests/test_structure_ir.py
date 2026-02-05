@@ -3,7 +3,7 @@ from __future__ import annotations
 import pytest
 
 from ragprep.pdf_text import Span
-from ragprep.structure_ir import BBox, Heading, LayoutElement, Paragraph, build_page_blocks
+from ragprep.structure_ir import BBox, Heading, LayoutElement, Paragraph, Table, build_page_blocks
 
 
 def test_build_page_blocks_assigns_spans_to_layout_regions() -> None:
@@ -128,6 +128,31 @@ def test_build_page_blocks_promotes_large_font_short_text_to_heading() -> None:
     assert isinstance(blocks[0], Heading)
     assert blocks[0].level == 2
     assert blocks[0].text == "Section"
+
+
+def test_build_page_blocks_extracts_best_effort_table_grid() -> None:
+    spans = [
+        Span(x0=10, y0=10, x1=50, y1=20, text="A"),
+        Span(x0=200, y0=10, x1=240, y1=20, text="B"),
+        Span(x0=400, y0=10, x1=440, y1=20, text="C"),
+        Span(x0=10, y0=30, x1=50, y1=40, text="D"),
+        Span(x0=200, y0=30, x1=240, y1=40, text="E"),
+        Span(x0=400, y0=30, x1=440, y1=40, text="F"),
+    ]
+    layout_elements = [
+        LayoutElement(page_index=0, bbox=BBox(0.0, 0.0, 1.0, 1.0), label="table", score=0.9),
+    ]
+
+    blocks = build_page_blocks(
+        spans=spans,
+        page_width=1000.0,
+        page_height=1000.0,
+        layout_elements=layout_elements,
+    )
+
+    assert len(blocks) == 1
+    assert isinstance(blocks[0], Table)
+    assert blocks[0].grid == (("A", "B", "C"), ("D", "E", "F"))
 
 
 def test_build_page_blocks_rejects_invalid_page_size() -> None:

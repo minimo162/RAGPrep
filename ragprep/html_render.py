@@ -69,6 +69,8 @@ def _render_block(block: Block) -> str:
         text = _escape_with_breaks(block.text)
         return f"<p>{text}</p>"
     if isinstance(block, Table):
+        if block.grid:
+            return _render_table_grid(block.grid)
         text = _escape_with_breaks(block.text)
         return f'<pre data-kind="table">{text}</pre>'
     if isinstance(block, Figure):
@@ -83,4 +85,24 @@ def _render_block(block: Block) -> str:
 def _escape_with_breaks(text: str) -> str:
     escaped = escape(text, quote=True)
     return escaped.replace("\n", "<br />\n")
+
+
+def _render_table_grid(grid: tuple[tuple[str, ...], ...]) -> str:
+    rows = list(grid)
+    if not rows:
+        return '<pre data-kind="table"></pre>'
+
+    col_count = max((len(r) for r in rows), default=0)
+    if col_count <= 0:
+        return '<pre data-kind="table"></pre>'
+
+    parts: list[str] = ['<table data-kind="table"><tbody>']
+    for r in rows:
+        parts.append("<tr>")
+        padded = tuple(r) + ("",) * max(0, col_count - len(r))
+        for cell in padded:
+            parts.append(f"<td>{_escape_with_breaks(str(cell))}</td>")
+        parts.append("</tr>")
+    parts.append("</tbody></table>")
+    return "\n".join(parts)
 

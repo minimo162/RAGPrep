@@ -4,6 +4,7 @@ import statistics
 from dataclasses import dataclass
 
 from ragprep.pdf_text import Span
+from ragprep.table_grid import build_table_grid
 
 
 @dataclass(frozen=True)
@@ -43,6 +44,7 @@ class Paragraph:
 @dataclass(frozen=True)
 class Table:
     text: str
+    grid: tuple[tuple[str, ...], ...] | None = None
 
 
 @dataclass(frozen=True)
@@ -427,7 +429,57 @@ def _block_from_label(
         return Paragraph(text=text)
 
     if normalized == "table":
-        return Table(text=text)
+        return _table_from_spans(text=text, spans=spans)
     if normalized in {"figure", "image"}:
         return Figure(alt=text)
     return Unknown(text=text)
+
+
+def _table_from_spans(*, text: str, spans: list[Span]) -> Table:
+    # Best-effort: infer a grid from span positions. If uncertain, fall back to plain text.
+    from ragprep.pdf_text import Word
+
+    words = [
+        Word(
+            x0=float(s.x0),
+            y0=float(s.y0),
+            x1=float(s.x1),
+            y1=float(s.y1),
+            text=str(s.text),
+            block_no=0,
+            line_no=0,
+            word_no=0,
+        )
+        for s in spans
+        if s.text
+    ]
+
+    best_rows: tuple[tuple[str, ...], ...] | None = None
+    best_empty_ratio: float | None = None
+    best_conf = -1.0
+    best_k = 0
+    for k in range(2, 7):
+        result = build_table_grid(words, column_count=k)
+        if not result.ok or result.grid is None:
+            continue
+        rows = result.grid.rows
+        total = max(1, len(rows) * k)
+        empty = sum(1 for r in rows for c in r[:k] if not str(c).strip())
+        empty_ratio = empty / total
+        conf = float(result.confidence)
+
+        if best_empty_ratio is None or empty_ratio < best_empty_ratio - 1e-9:
+            best_empty_ratio = empty_ratio
+            best_conf = conf
+            best_k = k
+            best_rows = rows
+            continue
+
+        if best_empty_ratio is not None and abs(empty_ratio - best_empty_ratio) <= 1e-9:
+            if k > best_k or (k == best_k and conf > best_conf):
+                best_empty_ratio = empty_ratio
+                best_conf = conf
+                best_k = k
+                best_rows = rows
+
+    return Table(text=text, grid=best_rows)

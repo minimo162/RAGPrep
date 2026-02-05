@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from ragprep.html_render import render_document_html, wrap_html_document
-from ragprep.structure_ir import Document, Heading, Page, Paragraph, Unknown
+from ragprep.structure_ir import Document, Heading, Page, Paragraph, Table, Unknown
 
 
 def test_render_document_html_escapes_text_and_wraps_pages() -> None:
@@ -33,4 +33,22 @@ def test_wrap_html_document_produces_full_document() -> None:
     assert "<meta charset" in html
     assert "<div>ok</div>" in html
     assert "<title>T &amp; &quot;Q&quot;</title>" in html
+
+
+def test_render_document_html_renders_structured_table_grid() -> None:
+    doc = Document(
+        pages=(
+            Page(
+                page_number=1,
+                blocks=(
+                    Table(text="fallback", grid=(("A", "B"), ("C", "D"))),
+                ),
+            ),
+        )
+    )
+
+    html = render_document_html(doc)
+    assert '<table data-kind="table">' in html
+    assert "<td>A</td>" in html
+    assert "<td>D</td>" in html
 
