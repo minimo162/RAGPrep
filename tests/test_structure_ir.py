@@ -80,6 +80,56 @@ def test_build_page_blocks_orders_two_columns_left_then_right() -> None:
     ]
 
 
+def test_build_page_blocks_sets_heading_level_from_span_sizes() -> None:
+    spans = [
+        Span(x0=10, y0=10, x1=20, y1=20, text="BigTitle", size=20.0),
+        Span(x0=10, y0=200, x1=20, y1=210, text="Body1", size=10.0),
+        Span(x0=30, y0=200, x1=40, y1=210, text="Body2", size=10.0),
+        Span(x0=50, y0=200, x1=60, y1=210, text="Body3", size=10.0),
+        Span(x0=70, y0=200, x1=80, y1=210, text="Body4", size=10.0),
+        Span(x0=90, y0=200, x1=100, y1=210, text="Body5", size=10.0),
+    ]
+    layout_elements = [
+        LayoutElement(page_index=0, bbox=BBox(0.0, 0.0, 1.0, 0.15), label="heading", score=0.9),
+        LayoutElement(page_index=0, bbox=BBox(0.0, 0.15, 1.0, 1.0), label="text", score=0.9),
+    ]
+
+    blocks = build_page_blocks(
+        spans=spans,
+        page_width=1000.0,
+        page_height=1000.0,
+        layout_elements=layout_elements,
+    )
+
+    assert isinstance(blocks[0], Heading)
+    assert blocks[0].level == 1
+    assert blocks[0].text == "BigTitle"
+
+
+def test_build_page_blocks_promotes_large_font_short_text_to_heading() -> None:
+    spans = [
+        Span(x0=10, y0=10, x1=20, y1=20, text="Section", size=18.0),
+        Span(x0=10, y0=200, x1=20, y1=210, text="Body", size=10.0),
+        Span(x0=30, y0=200, x1=40, y1=210, text="Text", size=10.0),
+        Span(x0=50, y0=200, x1=60, y1=210, text="More", size=10.0),
+    ]
+    layout_elements = [
+        LayoutElement(page_index=0, bbox=BBox(0.0, 0.0, 1.0, 0.15), label="text", score=0.9),
+        LayoutElement(page_index=0, bbox=BBox(0.0, 0.15, 1.0, 1.0), label="text", score=0.9),
+    ]
+
+    blocks = build_page_blocks(
+        spans=spans,
+        page_width=1000.0,
+        page_height=1000.0,
+        layout_elements=layout_elements,
+    )
+
+    assert isinstance(blocks[0], Heading)
+    assert blocks[0].level == 2
+    assert blocks[0].text == "Section"
+
+
 def test_build_page_blocks_rejects_invalid_page_size() -> None:
     with pytest.raises(ValueError, match="page_width/page_height"):
         build_page_blocks(
