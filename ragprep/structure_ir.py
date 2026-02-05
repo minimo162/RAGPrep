@@ -160,6 +160,13 @@ def build_page_blocks(
         else:
             assignments[best_index].append(span)
 
+    span_sizes = [
+        float(s.size)
+        for s in spans
+        if isinstance(s.size, (int, float)) and s.size and s.size > 0
+    ]
+    page_median_size = _median_or_default(span_sizes, default=0.0) if span_sizes else 0.0
+
     blocks: list[Block] = []
     for i, elt in enumerate(elements_sorted):
         collected = assignments[i]
@@ -168,7 +175,14 @@ def build_page_blocks(
         text = _join_spans_text(collected)
         if not text:
             continue
-        blocks.append(_block_from_label(elt.label, text))
+        blocks.append(
+            _block_from_label(
+                elt.label,
+                text,
+                spans=collected,
+                page_median_span_size=page_median_size,
+            )
+        )
 
     if unassigned:
         text = _join_spans_text(unassigned)
@@ -356,12 +370,62 @@ def _join_spans_in_line(spans: list[Span]) -> str:
     return "".join(out).strip()
 
 
-def _block_from_label(label: str, text: str) -> Block:
+def _heading_level_from_spans(*, spans: list[Span], page_median_span_size: float) -> int:
+    if page_median_span_size <= 0:
+        return 1
+    sizes = [
+        float(s.size)
+        for s in spans
+        if isinstance(s.size, (int, float)) and s.size and s.size > 0
+    ]
+    if not sizes:
+        return 1
+    median = _median_or_default(sizes, default=page_median_span_size)
+    ratio = median / max(1e-6, float(page_median_span_size))
+    if ratio >= 1.60:
+        return 1
+    if ratio >= 1.35:
+        return 2
+    if ratio >= 1.20:
+        return 3
+    return 4
+
+
+def _block_from_label(
+    label: str,
+    text: str,
+    *,
+    spans: list[Span],
+    page_median_span_size: float,
+) -> Block:
     normalized = (label or "").strip().lower()
-    if normalized in {"title", "heading"}:
-        return Heading(level=1, text=text)
+
+    heading_labels = {"title", "heading", "header", "paragraph_title", "section_title"}
+    if normalized in heading_labels:
+        level = _heading_level_from_spans(spans=spans, page_median_span_size=page_median_span_size)
+        if normalized == "title":
+            level = 1
+        return Heading(level=level, text=text)
+
     if normalized in {"text", "paragraph"}:
+        # Best-effort: promote large-font short regions to headings when the layout label is
+        # ambiguous.
+        if (
+            page_median_span_size > 0
+            and _heading_level_from_spans(
+                spans=spans,
+                page_median_span_size=page_median_span_size,
+            )
+            <= 2
+            and len(text) <= 80
+        ):
+            level = _heading_level_from_spans(
+                spans=spans,
+                page_median_span_size=page_median_span_size,
+            )
+            return Heading(level=max(2, int(level)), text=text)
         return Paragraph(text=text)
+
     if normalized == "table":
         return Table(text=text)
     if normalized in {"figure", "image"}:
