@@ -137,9 +137,21 @@ def build_page_blocks(
     if page_width <= 0 or page_height <= 0:
         raise ValueError("page_width/page_height must be > 0")
 
-    elements_sorted = _order_layout_elements_for_reading(layout_elements)
+    elements_for_assignment = sorted(
+        layout_elements,
+        key=lambda e: (
+            e.bbox.area,
+            e.bbox.y0,
+            e.bbox.x0,
+            e.bbox.y1,
+            e.bbox.x1,
+            e.label,
+        ),
+    )
+    element_to_assignment_index = {id(e): i for i, e in enumerate(elements_for_assignment)}
+    ordered_for_reading = _order_layout_elements_for_reading(layout_elements)
 
-    assignments: dict[int, list[Span]] = {i: [] for i in range(len(elements_sorted))}
+    assignments: dict[int, list[Span]] = {i: [] for i in range(len(elements_for_assignment))}
     unassigned: list[Span] = []
 
     # Prefer smallest region that contains the span center.
@@ -149,7 +161,7 @@ def build_page_blocks(
 
         best_index: int | None = None
         best_area = 0.0
-        for i, elt in enumerate(elements_sorted):
+        for i, elt in enumerate(elements_for_assignment):
             if not elt.bbox.contains_point(cx, cy):
                 continue
             area = elt.bbox.area
@@ -170,8 +182,11 @@ def build_page_blocks(
     page_median_size = _median_or_default(span_sizes, default=0.0) if span_sizes else 0.0
 
     blocks: list[Block] = []
-    for i, elt in enumerate(elements_sorted):
-        collected = assignments[i]
+    for elt in ordered_for_reading:
+        assignment_index = element_to_assignment_index.get(id(elt))
+        if assignment_index is None:
+            continue
+        collected = assignments[assignment_index]
         if not collected:
             continue
         text = _join_spans_text(collected)
@@ -229,61 +244,172 @@ def _order_layout_elements_for_reading(elements: list[LayoutElement]) -> list[La
     - Otherwise fall back to (y0, x0) ordering.
     """
 
-    if not elements:
-        return []
+    return _xy_cut_order(elements, max_depth=10)
 
-    fallback = sorted(elements, key=lambda e: (e.bbox.y0, e.bbox.x0, e.bbox.y1, e.bbox.x1, e.label))
 
-    full_width: list[LayoutElement] = []
-    left: list[LayoutElement] = []
-    right: list[LayoutElement] = []
-    middle: list[LayoutElement] = []
+def _xy_cut_order(elements: list[LayoutElement], *, max_depth: int) -> list[LayoutElement]:
+    fallback = sorted(
+        elements,
+        key=lambda e: (e.bbox.y0, e.bbox.x0, e.bbox.y1, e.bbox.x1, e.label),
+    )
+    return _xy_cut_order_inner(fallback, depth=0, max_depth=max_depth)
 
-    for e in fallback:
-        width = max(0.0, e.bbox.x1 - e.bbox.x0)
-        if e.bbox.x0 <= 0.15 and e.bbox.x1 >= 0.85 and width >= 0.70:
-            full_width.append(e)
-        elif e.bbox.x1 <= 0.52:
-            left.append(e)
-        elif e.bbox.x0 >= 0.48:
-            right.append(e)
-        else:
-            middle.append(e)
 
-    # Only treat as two-column when both sides have multiple regions.
-    if len(left) < 2 or len(right) < 2:
-        return fallback
+def _xy_cut_order_inner(
+    elements: list[LayoutElement],
+    *,
+    depth: int,
+    max_depth: int,
+) -> list[LayoutElement]:
+    if len(elements) <= 1:
+        return list(elements)
+    if depth >= max_depth:
+        return _topo_order(elements)
 
-    columns_start_y0 = min((e.bbox.y0 for e in left + right), default=0.0)
-    columns_end_y1 = max((e.bbox.y1 for e in left + right), default=1.0)
+    split_y = _best_gap_split(elements, axis="y")
+    split_x = _best_gap_split(elements, axis="x")
 
-    top_full = [e for e in full_width if e.bbox.y1 <= columns_start_y0 + 1e-6]
-    bottom_full = [
-        e
-        for e in full_width
-        if e not in top_full and e.bbox.y0 >= columns_end_y1 - 1e-6
-    ]
-    mid_full = [e for e in full_width if e not in top_full and e not in bottom_full]
+    min_gap = 0.03
+    has_y = split_y is not None and split_y.gap >= min_gap
+    has_x = split_x is not None and split_x.gap >= min_gap
 
-    # Keep anything ambiguous in the fallback position by y0.
-    ordered: list[LayoutElement] = []
-    ordered.extend(sorted(top_full, key=lambda e: (e.bbox.y0, e.bbox.x0)))
-    ordered.extend(sorted(mid_full, key=lambda e: (e.bbox.y0, e.bbox.x0)))
-    ordered.extend(sorted(left, key=lambda e: (e.bbox.y0, e.bbox.x0)))
-    ordered.extend(sorted(right, key=lambda e: (e.bbox.y0, e.bbox.x0)))
-    ordered.extend(sorted(middle, key=lambda e: (e.bbox.y0, e.bbox.x0)))
-    ordered.extend(sorted(bottom_full, key=lambda e: (e.bbox.y0, e.bbox.x0)))
+    if not has_y and not has_x:
+        return _topo_order(elements)
 
-    # Dedupe while preserving order.
-    seen: set[int] = set()
-    out: list[LayoutElement] = []
-    for e in ordered:
-        key = id(e)
-        if key in seen:
-            continue
-        seen.add(key)
-        out.append(e)
-    return out if len(out) == len(fallback) else fallback
+    chosen = split_y
+    if has_x and (
+        not has_y
+        or (
+            split_x is not None
+            and split_y is not None
+            and split_x.gap > split_y.gap
+        )
+    ):
+        chosen = split_x
+
+    if chosen is None:
+        return _topo_order(elements)
+
+    a, b = chosen.groups
+    if not a or not b:
+        return _topo_order(elements)
+
+    first = _xy_cut_order_inner(a, depth=depth + 1, max_depth=max_depth)
+    second = _xy_cut_order_inner(b, depth=depth + 1, max_depth=max_depth)
+    return first + second
+
+
+@dataclass(frozen=True)
+class _GapSplit:
+    axis: str
+    gap: float
+    groups: tuple[list[LayoutElement], list[LayoutElement]]
+
+
+def _best_gap_split(elements: list[LayoutElement], *, axis: str) -> _GapSplit | None:
+    if axis not in {"x", "y"}:
+        raise ValueError("axis must be 'x' or 'y'")
+    if len(elements) <= 1:
+        return None
+
+    if axis == "x":
+        ordered = sorted(
+            elements,
+            key=lambda e: (e.bbox.x0, e.bbox.x1, e.bbox.y0, e.bbox.y1, e.label),
+        )
+        starts = [e.bbox.x0 for e in ordered]
+        ends = [e.bbox.x1 for e in ordered]
+    else:
+        ordered = sorted(
+            elements,
+            key=lambda e: (e.bbox.y0, e.bbox.y1, e.bbox.x0, e.bbox.x1, e.label),
+        )
+        starts = [e.bbox.y0 for e in ordered]
+        ends = [e.bbox.y1 for e in ordered]
+
+    best_gap = 0.0
+    best_i: int | None = None
+    running_end = float(ends[0])
+    for i in range(len(ordered) - 1):
+        running_end = max(running_end, float(ends[i]))
+        gap = float(starts[i + 1]) - running_end
+        if gap > best_gap:
+            best_gap = gap
+            best_i = i
+
+    if best_i is None or best_gap <= 0:
+        return None
+
+    left = ordered[: best_i + 1]
+    right = ordered[best_i + 1 :]
+    return _GapSplit(axis=axis, gap=float(best_gap), groups=(list(left), list(right)))
+
+
+def _topo_order(elements: list[LayoutElement]) -> list[LayoutElement]:
+    if len(elements) <= 1:
+        return list(elements)
+
+    nodes = list(elements)
+
+    def tie_key(e: LayoutElement) -> tuple[float, float, float, float, str]:
+        return (e.bbox.y0, e.bbox.x0, e.bbox.y1, e.bbox.x1, e.label)
+
+    n = len(nodes)
+    edges: list[set[int]] = [set() for _ in range(n)]
+    indeg = [0] * n
+
+    for i in range(n):
+        for j in range(n):
+            if i == j:
+                continue
+            if _precedes(nodes[i], nodes[j]):
+                if j not in edges[i]:
+                    edges[i].add(j)
+
+    for i in range(n):
+        for j in edges[i]:
+            indeg[j] += 1
+
+    ready = sorted([i for i in range(n) if indeg[i] == 0], key=lambda idx: tie_key(nodes[idx]))
+    out: list[int] = []
+    while ready:
+        idx = ready.pop(0)
+        out.append(idx)
+        for j in sorted(edges[idx]):
+            indeg[j] -= 1
+            if indeg[j] == 0:
+                ready.append(j)
+        ready.sort(key=lambda k: tie_key(nodes[k]))
+
+    if len(out) != n:
+        return sorted(nodes, key=tie_key)
+
+    return [nodes[i] for i in out]
+
+
+def _precedes(a: LayoutElement, b: LayoutElement) -> bool:
+    # Use overlap-aware precedence rules to create a partial order.
+    x_overlap = max(0.0, min(a.bbox.x1, b.bbox.x1) - max(a.bbox.x0, b.bbox.x0))
+    y_overlap = max(0.0, min(a.bbox.y1, b.bbox.y1) - max(a.bbox.y0, b.bbox.y0))
+    a_w = max(1e-6, a.bbox.x1 - a.bbox.x0)
+    b_w = max(1e-6, b.bbox.x1 - b.bbox.x0)
+    a_h = max(1e-6, a.bbox.y1 - a.bbox.y0)
+    b_h = max(1e-6, b.bbox.y1 - b.bbox.y0)
+
+    x_overlap_ratio = x_overlap / min(a_w, b_w)
+    y_overlap_ratio = y_overlap / min(a_h, b_h)
+
+    eps = 0.005
+
+    # Stacked blocks (same column): vertical precedence.
+    if x_overlap_ratio >= 0.15 and a.bbox.y1 <= b.bbox.y0 + eps:
+        return True
+
+    # Side-by-side blocks (same row band): left-to-right precedence.
+    if y_overlap_ratio >= 0.15 and a.bbox.x1 <= b.bbox.x0 + eps:
+        return True
+
+    return False
 
 
 def _join_spans_text(spans: list[Span]) -> str:
