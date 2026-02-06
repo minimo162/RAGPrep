@@ -98,3 +98,16 @@ def test_layout_mode_accepts_local_paddle(monkeypatch: pytest.MonkeyPatch) -> No
     monkeypatch.setenv("RAGPREP_LAYOUT_MODE", "local-paddle")
     settings = config.get_settings()
     assert settings.layout_mode == "local-paddle"
+
+
+def test_model_cache_dir_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("RAGPREP_MODEL_CACHE_DIR", raising=False)
+    settings = config.get_settings()
+    assert isinstance(settings.model_cache_dir, str)
+    assert settings.model_cache_dir.strip() != ""
+
+
+def test_model_cache_dir_can_be_overridden(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("RAGPREP_MODEL_CACHE_DIR", "  C:/tmp/ragprep-cache  ")
+    settings = config.get_settings()
+    assert settings.model_cache_dir == "C:/tmp/ragprep-cache"

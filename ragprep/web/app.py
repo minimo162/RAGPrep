@@ -10,7 +10,7 @@ from threading import Lock, Semaphore, Thread
 from typing import Any
 
 from fastapi import FastAPI, File, HTTPException, Request, UploadFile
-from fastapi.responses import HTMLResponse, PlainTextResponse
+from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.responses import Response
@@ -129,6 +129,13 @@ class JobStore:
             self._jobs[job_id] = updated
             return updated
 
+    def has_active(self) -> bool:
+        with self._lock:
+            return any(
+                j.status in {JobStatus.queued, JobStatus.running}
+                for j in self._jobs.values()
+            )
+
 
 jobs = JobStore()
 
@@ -139,6 +146,11 @@ _job_semaphore_size: int | None = None
 
 _prewarm_lock = Lock()
 _prewarm_started = False
+_prewarm_state_lock = Lock()
+_prewarm_enabled = False
+_prewarm_in_progress = False
+_prewarm_error: str | None = None
+_PREWARM_UNCHANGED = object()
 
 
 def _get_job_semaphore() -> Semaphore:
@@ -152,7 +164,33 @@ def _get_job_semaphore() -> Semaphore:
         return _job_semaphore
 
 
-def _prewarm_layout_backend() -> None:
+def _set_prewarm_state(
+    *,
+    enabled: bool | None = None,
+    in_progress: bool | None = None,
+    error: str | None | object = _PREWARM_UNCHANGED,
+) -> None:
+    global _prewarm_enabled, _prewarm_in_progress, _prewarm_error
+
+    with _prewarm_state_lock:
+        if enabled is not None:
+            _prewarm_enabled = enabled
+        if in_progress is not None:
+            _prewarm_in_progress = in_progress
+        if error is not _PREWARM_UNCHANGED:
+            _prewarm_error = error if isinstance(error, str) else None
+
+
+def _get_prewarm_state() -> dict[str, object]:
+    with _prewarm_state_lock:
+        return {
+            "prewarm_enabled": _prewarm_enabled,
+            "prewarm_in_progress": _prewarm_in_progress,
+            "prewarm_error": _prewarm_error,
+        }
+
+
+def _prewarm_layout_backend() -> str | None:
     settings = get_settings()
     try:
         from ragprep.layout.glm_doclayout import prewarm_layout_backend
@@ -160,6 +198,13 @@ def _prewarm_layout_backend() -> None:
         prewarm_layout_backend(settings=settings)
     except Exception as exc:  # noqa: BLE001
         logger.warning("Layout prewarm failed: %s", exc)
+        return str(exc)
+    return None
+
+
+def _run_prewarm() -> None:
+    error = _prewarm_layout_backend()
+    _set_prewarm_state(in_progress=False, error=error)
 
 
 def _ensure_startup_prewarm_started() -> None:
@@ -169,7 +214,7 @@ def _ensure_startup_prewarm_started() -> None:
         if _prewarm_started:
             return
         _prewarm_started = True
-    Thread(target=_prewarm_layout_backend, daemon=True, name="ragprep-prewarm").start()
+    Thread(target=_run_prewarm, daemon=True, name="ragprep-prewarm").start()
 
 
 def _run_job(job_id: str, pdf_bytes: bytes) -> None:
@@ -245,17 +290,33 @@ def _start_job(job_id: str, pdf_bytes: bytes) -> None:
 
 @app.on_event("startup")
 def startup() -> None:
-    if _should_prewarm_on_startup():
+    enabled = _should_prewarm_on_startup()
+    if enabled:
+        _set_prewarm_state(enabled=True, in_progress=True, error=None)
         _ensure_startup_prewarm_started()
+        return
+    _set_prewarm_state(enabled=False, in_progress=False, error=None)
 
 
 @app.get("/", response_class=HTMLResponse)
 def index(request: Request) -> Response:
+    ui_state = _get_prewarm_state()
+    ui_state["has_active_job"] = jobs.has_active()
     return templates.TemplateResponse(
         request,
         "index.html",
-        {"html_output": None, "error": None},
+        {"html_output": None, "error": None, "ui_state": ui_state},
     )
+
+
+@app.get("/ui/state")
+def ui_state() -> JSONResponse:
+    state = _get_prewarm_state()
+    state["has_active_job"] = jobs.has_active()
+    state["can_convert"] = (not bool(state["prewarm_in_progress"])) and (
+        not bool(state["has_active_job"])
+    )
+    return JSONResponse(state)
 
 
 @app.post("/convert", response_class=HTMLResponse)
@@ -266,6 +327,23 @@ async def convert(
     settings = get_settings()
     filename = file.filename or "upload"
     content = await file.read()
+    prewarm_state = _get_prewarm_state()
+
+    if bool(prewarm_state["prewarm_in_progress"]):
+        return templates.TemplateResponse(
+            request,
+            "_result.html",
+            {"html_output": None, "error": "Prewarm in progress. Please wait for completion."},
+            status_code=409,
+        )
+
+    if jobs.has_active():
+        return templates.TemplateResponse(
+            request,
+            "_result.html",
+            {"html_output": None, "error": "Conversion is already running. Please wait."},
+            status_code=409,
+        )
 
     if not content:
         return templates.TemplateResponse(

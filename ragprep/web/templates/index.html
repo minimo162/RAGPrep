@@ -50,6 +50,10 @@
         border-radius: 8px;
         cursor: pointer;
       }
+      button:disabled {
+        opacity: 0.55;
+        cursor: not-allowed;
+      }
       #result {
         margin-top: 16px;
         padding: 12px;
@@ -104,10 +108,80 @@
         color: var(--danger);
         font-weight: 600;
       }
+      .status {
+        margin-top: 8px;
+        min-height: 1.25em;
+      }
+      .status.pending {
+        color: #92400e;
+      }
+      .status.ready {
+        color: #065f46;
+      }
     </style>
     <script src="/static/htmx.min.js"></script>
     <script>
       (function () {
+        async function fetchUiState() {
+          const response = await fetch("/ui/state", { credentials: "same-origin" });
+          if (!response.ok) {
+            throw new Error(`ui state failed: HTTP ${response.status}`);
+          }
+          return response.json();
+        }
+
+        function setConvertEnabled(enabled) {
+          const button = document.getElementById("convert-button");
+          if (!(button instanceof HTMLButtonElement)) return;
+          button.disabled = !enabled;
+          button.setAttribute("aria-disabled", enabled ? "false" : "true");
+        }
+
+        function setConvertStatus(message, kind) {
+          const status = document.getElementById("convert-status");
+          if (!(status instanceof HTMLElement)) return;
+          status.textContent = message || "";
+          status.classList.remove("pending", "ready", "error");
+          if (kind) {
+            status.classList.add(kind);
+          }
+        }
+
+        function applyUiState(state) {
+          const prewarmInProgress = Boolean(state && state.prewarm_in_progress);
+          const hasActiveJob = Boolean(state && state.has_active_job);
+          const prewarmEnabled = Boolean(state && state.prewarm_enabled);
+          const prewarmError =
+            state && typeof state.prewarm_error === "string" ? state.prewarm_error.trim() : "";
+          const canConvert = !prewarmInProgress && !hasActiveJob;
+
+          if (prewarmInProgress) {
+            setConvertStatus("Prewarm in progress... please wait.", "pending");
+          } else if (hasActiveJob) {
+            setConvertStatus("Converting... please wait until current job finishes.", "pending");
+          } else if (prewarmError) {
+            setConvertStatus(`Prewarm failed: ${prewarmError}`, "error");
+          } else if (prewarmEnabled) {
+            setConvertStatus("Ready. Prewarm completed.", "ready");
+          } else {
+            setConvertStatus("Ready.", "ready");
+          }
+
+          setConvertEnabled(canConvert);
+        }
+
+        async function refreshUiState() {
+          try {
+            const state = await fetchUiState();
+            applyUiState(state);
+          } catch (_error) {
+            // Keep current UI state when polling fails transiently.
+          }
+        }
+
+        setInterval(refreshUiState, 1000);
+        window.addEventListener("load", refreshUiState);
+
         function setNotice(message, kind) {
           const notice = document.getElementById("download-notice");
           if (!(notice instanceof HTMLElement)) return;
@@ -201,6 +275,21 @@
             setNotice("", null);
           }
         });
+
+        document.body.addEventListener("htmx:beforeRequest", (event) => {
+          const detail = event && event.detail;
+          if (detail && detail.elt && detail.elt.id === "convert-form") {
+            setConvertEnabled(false);
+            setConvertStatus("Starting conversion...", "pending");
+          }
+        });
+
+        document.body.addEventListener("htmx:afterSwap", (event) => {
+          const detail = event && event.detail;
+          if (detail && detail.target && detail.target.id === "result") {
+            refreshUiState();
+          }
+        });
       })();
     </script>
   </head>
@@ -208,16 +297,36 @@
     <main class="container">
       <h1>PDF to HTML</h1>
       <p class="muted">Upload a PDF and wait for HTML conversion to finish.</p>
+      <p
+        id="convert-status"
+        class="muted status {% if ui_state.prewarm_in_progress or ui_state.has_active_job %}pending{% else %}ready{% endif %}"
+        aria-live="polite"
+      >
+        {% if ui_state.prewarm_in_progress %}
+          Prewarm in progress... please wait.
+        {% elif ui_state.has_active_job %}
+          Converting... please wait until current job finishes.
+        {% else %}
+          Ready.
+        {% endif %}
+      </p>
       <p id="download-notice" class="muted notice" aria-live="polite"></p>
 
       <form
+        id="convert-form"
         hx-post="/convert"
         hx-target="#result"
         hx-swap="innerHTML"
         enctype="multipart/form-data"
       >
         <input type="file" name="file" accept="application/pdf,.pdf" required />
-        <button type="submit">Convert</button>
+        <button
+          id="convert-button"
+          type="submit"
+          {% if ui_state.prewarm_in_progress or ui_state.has_active_job %}disabled aria-disabled="true"{% endif %}
+        >
+          Convert
+        </button>
       </form>
 
       <section id="result">{% include "_result.html" %}</section>

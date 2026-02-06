@@ -12,6 +12,7 @@ import httpx
 from PIL import Image
 
 from ragprep.config import Settings
+from ragprep.model_cache import configure_model_cache
 
 DEFAULT_TEXT_RECOGNITION_PROMPT = "Text Recognition:"
 
@@ -260,6 +261,8 @@ def _load_transformers_client(model_path: str) -> _TransformersClient:
 def _ocr_image_base64_via_transformers(image_base64: str, *, settings: Settings) -> str:
     if not image_base64:
         raise ValueError("image_base64 is empty")
+
+    configure_model_cache(settings)
 
     png_bytes = _decode_png_from_base64(image_base64)
 

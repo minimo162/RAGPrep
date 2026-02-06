@@ -218,6 +218,32 @@ def test_load_paddleocr_ppstructure_falls_back_to_v3(monkeypatch: pytest.MonkeyP
     assert loaded is _StubPPStructureV3
 
 
+def test_filter_supported_constructor_kwargs_drops_unsupported_names() -> None:
+    class StubEngine:
+        def __init__(self, *, device: str, layout: bool, ocr: bool) -> None:
+            _ = device, layout, ocr
+
+    kwargs = {
+        "device": "cpu",
+        "layout": True,
+        "ocr": False,
+        "show_log": False,
+        "table": False,
+    }
+    filtered = glm_doclayout._filter_supported_constructor_kwargs(StubEngine, kwargs)
+    assert filtered == {"device": "cpu", "layout": True, "ocr": False}
+
+
+def test_filter_supported_constructor_kwargs_keeps_kwargs_for_var_keyword() -> None:
+    class StubEngine:
+        def __init__(self, **kwargs: object) -> None:
+            _ = kwargs
+
+    kwargs = {"device": "cpu", "layout": True, "show_log": False}
+    filtered = glm_doclayout._filter_supported_constructor_kwargs(StubEngine, kwargs)
+    assert filtered == kwargs
+
+
 def test_get_paddleocr_engine_retries_on_unknown_show_log(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -473,11 +499,16 @@ def test_prewarm_layout_backend_initializes_local_engine(
     settings = get_settings()
     calls: list[str] = []
 
+    monkeypatch.setattr(
+        glm_doclayout,
+        "configure_model_cache",
+        lambda _settings: calls.append("cache"),
+    )
     monkeypatch.setattr(glm_doclayout, "_apply_paddle_safe_mode_env", lambda: calls.append("env"))
     monkeypatch.setattr(glm_doclayout, "_get_paddleocr_engine", lambda: calls.append("engine"))
 
     glm_doclayout.prewarm_layout_backend(settings=settings)
-    assert calls == ["env", "engine"]
+    assert calls == ["cache", "env", "engine"]
 
 
 def test_prewarm_layout_backend_is_noop_in_server_mode(

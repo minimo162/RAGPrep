@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import binascii
+import inspect
 import io
 import json
 import os
@@ -12,6 +13,7 @@ from typing import Any, cast
 import httpx
 
 from ragprep.config import Settings
+from ragprep.model_cache import configure_model_cache
 
 DEFAULT_LAYOUT_ANALYSIS_PROMPT = (
     "Document Layout Analysis (PP-DocLayout-V3): "
@@ -490,6 +492,34 @@ def _normalize_paddle_layout_output(raw: object) -> tuple[list[dict[str, object]
     )
 
 
+def _filter_supported_constructor_kwargs(
+    constructor: Any,
+    kwargs: dict[str, object],
+) -> dict[str, object]:
+    """
+    Best-effort filter of kwargs using constructor signature.
+
+    Some PaddleOCR versions reject unknown kwargs only at runtime, causing repeated expensive
+    retries. Filtering up-front reduces prewarm/init latency.
+    """
+
+    try:
+        signature = inspect.signature(constructor)
+    except (TypeError, ValueError):
+        return dict(kwargs)
+
+    parameters = list(signature.parameters.values())
+    if any(p.kind == inspect.Parameter.VAR_KEYWORD for p in parameters):
+        return dict(kwargs)
+
+    allowed_names = {
+        p.name
+        for p in parameters
+        if p.kind in {inspect.Parameter.POSITIONAL_OR_KEYWORD, inspect.Parameter.KEYWORD_ONLY}
+    }
+    return {k: v for k, v in kwargs.items() if k in allowed_names}
+
+
 @lru_cache(maxsize=1)
 def _get_paddleocr_engine() -> Any:
     PPStructure = _load_paddleocr_ppstructure()
@@ -507,7 +537,7 @@ def _get_paddleocr_engine() -> Any:
 
     # PaddleOCR pipelines vary across versions and sometimes validate kwargs strictly.
     # We try a preferred set of arguments and retry by removing only the reported unknown ones.
-    kwargs = dict(desired_kwargs)
+    kwargs = _filter_supported_constructor_kwargs(PPStructure, desired_kwargs)
     for _ in range(len(kwargs) + 1):
         try:
             return PPStructure(**kwargs)
@@ -591,6 +621,8 @@ def _analyze_layout_local_paddle(image_base64: str, *, settings: Settings) -> di
     if not payload:
         raise ValueError("image_base64 is empty")
     _validate_base64_payload(payload)
+
+    configure_model_cache(settings)
 
     # Fail-fast on missing optional dependencies.
     _apply_paddle_safe_mode_env()
@@ -679,6 +711,7 @@ def prewarm_layout_backend(*, settings: Settings) -> None:
 
     mode = (settings.layout_mode or "").strip().lower() or _GlmOcrMode.transformers
     if mode in {_GlmOcrMode.transformers, _GlmOcrMode.local_paddle}:
+        configure_model_cache(settings)
         _apply_paddle_safe_mode_env()
         _ = _get_paddleocr_engine()
         return

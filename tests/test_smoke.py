@@ -9,7 +9,9 @@ import ragprep.web.app as web_app
 from ragprep.web.app import app
 
 
-def test_root_renders_page() -> None:
+def test_root_renders_page(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("RAGPREP_WEB_PREWARM_ON_STARTUP", "0")
+    web_app._prewarm_started = False
     client = TestClient(app)
     response = client.get("/")
     assert response.status_code == 200
@@ -41,6 +43,8 @@ def _make_pdf_bytes(page_count: int) -> bytes:
 def test_convert_creates_job_and_downloads_markdown(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    monkeypatch.setenv("RAGPREP_WEB_PREWARM_ON_STARTUP", "0")
+    web_app._prewarm_started = False
     client = TestClient(app)
 
     pdf_bytes = _make_pdf_bytes(page_count=2)
@@ -105,7 +109,9 @@ def test_convert_creates_job_and_downloads_markdown(
     assert calls["n"] == 1
 
 
-def test_bad_pdf_job_reports_error() -> None:
+def test_bad_pdf_job_reports_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("RAGPREP_WEB_PREWARM_ON_STARTUP", "0")
+    web_app._prewarm_started = False
     client = TestClient(app)
     files = {"file": ("bad.pdf", b"not a pdf", "application/pdf")}
     response = client.post("/convert", files=files)
@@ -125,9 +131,53 @@ def test_bad_pdf_job_reports_error() -> None:
 
 
 def test_convert_rejects_large_upload(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("RAGPREP_WEB_PREWARM_ON_STARTUP", "0")
+    web_app._prewarm_started = False
     client = TestClient(app)
     monkeypatch.setenv("RAGPREP_MAX_UPLOAD_BYTES", "1")
     files = {"file": ("test.pdf", b"00", "application/pdf")}
     response = client.post("/convert", files=files)
     assert response.status_code == 413
     assert "File too large" in response.text
+
+
+def test_convert_rejected_while_prewarm_in_progress(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("RAGPREP_WEB_PREWARM_ON_STARTUP", "0")
+    web_app._prewarm_started = False
+    client = TestClient(app)
+    web_app._set_prewarm_state(enabled=True, in_progress=True, error=None)
+
+    files = {"file": ("test.pdf", _make_pdf_bytes(page_count=1), "application/pdf")}
+    response = client.post("/convert", files=files)
+
+    assert response.status_code == 409
+    assert "Prewarm in progress" in response.text
+
+    state = client.get("/ui/state")
+    assert state.status_code == 200
+    payload = state.json()
+    assert payload["prewarm_in_progress"] is True
+    assert payload["can_convert"] is False
+
+
+def test_convert_rejected_while_another_job_running(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("RAGPREP_WEB_PREWARM_ON_STARTUP", "0")
+    web_app._prewarm_started = False
+    client = TestClient(app)
+    web_app._set_prewarm_state(enabled=False, in_progress=False, error=None)
+    active = web_app.jobs.create(filename="active.pdf")
+    web_app.jobs.update(active.id, status=web_app.JobStatus.running)
+
+    files = {"file": ("test.pdf", _make_pdf_bytes(page_count=1), "application/pdf")}
+    response = client.post("/convert", files=files)
+
+    assert response.status_code == 409
+    assert "Conversion is already running" in response.text
+
+    state = client.get("/ui/state")
+    assert state.status_code == 200
+    payload = state.json()
+    assert payload["has_active_job"] is True
+    assert payload["can_convert"] is False
+
+    web_app.jobs.update(active.id, status=web_app.JobStatus.done)

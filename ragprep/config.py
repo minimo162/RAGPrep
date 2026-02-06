@@ -16,6 +16,7 @@ ENV_GLM_OCR_MODE: Final[str] = "RAGPREP_GLM_OCR_MODE"
 ENV_GLM_OCR_API_KEY: Final[str] = "RAGPREP_GLM_OCR_API_KEY"
 ENV_GLM_OCR_MAX_TOKENS: Final[str] = "RAGPREP_GLM_OCR_MAX_TOKENS"
 ENV_GLM_OCR_TIMEOUT_SECONDS: Final[str] = "RAGPREP_GLM_OCR_TIMEOUT_SECONDS"
+ENV_MODEL_CACHE_DIR: Final[str] = "RAGPREP_MODEL_CACHE_DIR"
 ENV_LAYOUT_MODE: Final[str] = "RAGPREP_LAYOUT_MODE"
 ENV_LAYOUT_BASE_URL: Final[str] = "RAGPREP_LAYOUT_BASE_URL"
 ENV_LAYOUT_MODEL: Final[str] = "RAGPREP_LAYOUT_MODEL"
@@ -59,6 +60,16 @@ DEFAULT_LAYOUT_RENDER_AUTO: Final[bool] = False
 DEFAULT_LAYOUT_RENDER_AUTO_SMALL_DPI: Final[int] = 250
 DEFAULT_LAYOUT_RENDER_AUTO_SMALL_MAX_EDGE: Final[int] = 1024
 
+_DEFAULT_CACHE_ROOT = (
+    os.getenv("LOCALAPPDATA")
+    or os.path.join(os.path.expanduser("~"), ".cache")
+)
+DEFAULT_MODEL_CACHE_DIR: Final[str] = os.path.join(
+    _DEFAULT_CACHE_ROOT,
+    "ragprep",
+    "model-cache",
+)
+
 
 @dataclass(frozen=True)
 class Settings:
@@ -74,6 +85,7 @@ class Settings:
     glm_ocr_api_key: str | None
     glm_ocr_max_tokens: int
     glm_ocr_timeout_seconds: int
+    model_cache_dir: str
     layout_mode: str
     layout_base_url: str
     layout_model: str
@@ -310,6 +322,7 @@ def get_settings() -> Settings:
         glm_ocr_timeout_seconds=_get_positive_int(
             ENV_GLM_OCR_TIMEOUT_SECONDS, DEFAULT_GLM_OCR_TIMEOUT_SECONDS
         ),
+        model_cache_dir=_get_trimmed_str(ENV_MODEL_CACHE_DIR, DEFAULT_MODEL_CACHE_DIR),
         layout_mode=_get_layout_mode(),
         layout_base_url=_get_layout_base_url(),
         layout_model=_get_layout_model(),

@@ -11,6 +11,7 @@ RAGPrep converts PDFs to **structured HTML** by combining:
 - Running-job partial output shows all processed pages so far (no last-N preview cap).
 - Optional startup prewarm to reduce first-request cold start for local layout backend.
 - `RAGPREP_LAYOUT_MODE` is defaulted to `local-paddle` (no env required for local mode).
+- UI shows prewarm/conversion state and disables `Convert` while prewarm/conversion is in progress.
 
 Outputs:
 - Web / Desktop: download `.html`
@@ -82,6 +83,7 @@ uv run python scripts/pdf_to_html.py --pdf .\\path\\to\\input.pdf --out .\\out\\
 - `RAGPREP_LAYOUT_MODEL`: model name (server mode; kept for parity in local mode)
 - `RAGPREP_LAYOUT_API_KEY`: bearer token (optional, server mode)
 - `RAGPREP_LAYOUT_TIMEOUT_SECONDS`: request timeout in seconds (server mode; default: `60`)
+- `RAGPREP_MODEL_CACHE_DIR`: shared local model cache directory used for Paddle/HuggingFace/Torch assets (default: OS cache dir under `ragprep/model-cache`)
 - `RAGPREP_LAYOUT_CONCURRENCY`: number of in-flight layout requests in server mode (default: `1`)
 - `RAGPREP_LAYOUT_RENDER_DPI`: DPI used for layout rendering (default: `250`)
 - `RAGPREP_LAYOUT_RENDER_MAX_EDGE`: max edge for layout rendering (default: `1024`)
@@ -97,8 +99,10 @@ Fast layout hint (server mode):
 ## Web settings
 
 - `RAGPREP_WEB_PREWARM_ON_STARTUP`: pre-initialize local layout backend at app startup (`1`/`0`, default: `1`)
+- Startup prewarm prepares cache directories and model artifacts in `RAGPREP_MODEL_CACHE_DIR`.
 - Partial output always accumulates all processed pages so far.
 - Legacy `RAGPREP_WEB_PARTIAL_PREVIEW_PAGES` is no longer used.
+- `Convert` button is locked during prewarm and while any conversion job is active.
 
 ## Download behavior
 
