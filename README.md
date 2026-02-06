@@ -1,13 +1,19 @@
 # RAGPrep
 
 RAGPrep converts PDFs to **structured HTML** by combining:
-- **Text layer extraction** (PyMuPDF): uses the PDF’s existing text layer (no OCR needed for text)
-- **Layout analysis (required)**: PP-DocLayout-V3 regions are used to structure the extracted text
+- **Text layer extraction** (PyMuPDF): uses the PDF's existing text layer (no OCR for text extraction).
+- **Layout analysis (required)**: PP-DocLayout-V3 regions are used to structure the extracted text.
+
+## Behavior highlights
+
+- Layout-aware output with improved natural reading order.
+- Web/Desktop `.html` download with in-app success/failure/cancel feedback.
+- Running-job partial output shows all processed pages so far (no last-N preview cap).
+- Optional startup prewarm to reduce first-request cold start for local layout backend.
 
 Outputs:
 - Web / Desktop: download `.html`
 - CLI: writes an `.html` file
-- Web/Desktop download button shows completion/failure status in-app
 
 ## Quickstart
 
@@ -21,12 +27,12 @@ uv sync --dev
 RAGPrep **requires layout analysis**. Choose one of the following backends.
 
 #### Option A: Local (no Docker) via PaddleOCR (recommended)
-Install the optional runtime:
+Install optional runtime:
 ```bash
 uv pip install paddlepaddle paddleocr "paddlex[ocr]"
 ```
 
-Set the layout mode:
+Set layout mode:
 ```powershell
 $env:RAGPREP_LAYOUT_MODE = "local-paddle"
 ```
@@ -35,7 +41,7 @@ export RAGPREP_LAYOUT_MODE=local-paddle
 ```
 
 #### Option B: Server (OpenAI-compatible `/v1/chat/completions`)
-Point RAGPrep at a running server (for example, GLM-OCR served behind an OpenAI-compatible API):
+Point RAGPrep to a running server:
 ```powershell
 $env:RAGPREP_LAYOUT_MODE = "server"
 $env:RAGPREP_LAYOUT_BASE_URL = "http://127.0.0.1:8080"
@@ -56,7 +62,7 @@ uv run uvicorn ragprep.web.app:app --reload
 ```
 Open `http://127.0.0.1:8000`.
 
-CLI (PDF → HTML):
+CLI (PDF -> HTML):
 ```bash
 uv run python scripts/pdf_to_html.py --pdf .\\path\\to\\input.pdf --out .\\out\\input.html --overwrite
 ```
@@ -71,31 +77,37 @@ uv run python scripts/pdf_to_html.py --pdf .\\path\\to\\input.pdf --out .\\out\\
 - `RAGPREP_LAYOUT_CONCURRENCY`: number of in-flight layout requests in server mode (default: `1`)
 - `RAGPREP_LAYOUT_RENDER_DPI`: DPI used for layout rendering (default: `250`)
 - `RAGPREP_LAYOUT_RENDER_MAX_EDGE`: max edge for layout rendering (default: `1024`)
-- `RAGPREP_LAYOUT_RENDER_AUTO`: enable small-first layout rendering with a single higher-res retry on empty results (server mode; default: `0`)
-- `RAGPREP_LAYOUT_RENDER_AUTO_SMALL_DPI`: DPI for the small-first pass (default: `250`)
-- `RAGPREP_LAYOUT_RENDER_AUTO_SMALL_MAX_EDGE`: max edge for the small-first pass (default: `1024`)
+- `RAGPREP_LAYOUT_RENDER_AUTO`: enable small-first layout rendering with one higher-res retry on empty results (server mode; default: `0`)
+- `RAGPREP_LAYOUT_RENDER_AUTO_SMALL_DPI`: DPI for small-first pass (default: `250`)
+- `RAGPREP_LAYOUT_RENDER_AUTO_SMALL_MAX_EDGE`: max edge for small-first pass (default: `1024`)
 - `RAGPREP_LAYOUT_RETRY_COUNT`: retry count for transient failures (server mode; default: `1`)
-- `RAGPREP_LAYOUT_RETRY_BACKOFF_SECONDS`: base backoff in seconds between retries (server mode; default: `0.0`)
+- `RAGPREP_LAYOUT_RETRY_BACKOFF_SECONDS`: base backoff seconds between retries (server mode; default: `0.0`)
 
-Fast layout (server mode):
+Fast layout hint (server mode):
 - Try `RAGPREP_LAYOUT_CONCURRENCY=2` and `RAGPREP_LAYOUT_RENDER_AUTO=1` first.
 
 ## Web settings
 
-- Partial output now accumulates all processed pages (no last-N cap).
-- `RAGPREP_WEB_PREWARM_ON_STARTUP`: pre-initialize local layout backend on app startup (`1`/`0`, default: `1`)
+- `RAGPREP_WEB_PREWARM_ON_STARTUP`: pre-initialize local layout backend at app startup (`1`/`0`, default: `1`)
+- Partial output always accumulates all processed pages so far.
+- Legacy `RAGPREP_WEB_PARTIAL_PREVIEW_PAGES` is no longer used.
+
+## Download behavior
+
+- Browser mode: `Download .html` triggers file download and shows status in the page.
+- Desktop mode (pywebview): tries saving to Downloads first, then falls back to save dialog.
 
 ## Troubleshooting (layout server)
 
 If you see `Layout analysis request timed out`:
-- Confirm the server at `RAGPREP_LAYOUT_BASE_URL` is reachable and supports `POST /v1/chat/completions`.
-- Try increasing `RAGPREP_LAYOUT_TIMEOUT_SECONDS` (or reducing PDF pages / image size limits).
-- If you don't need a server backend, switch to `RAGPREP_LAYOUT_MODE=local-paddle`.
+- Confirm `RAGPREP_LAYOUT_BASE_URL` is reachable and supports `POST /v1/chat/completions`.
+- Increase `RAGPREP_LAYOUT_TIMEOUT_SECONDS` (or reduce PDF pages / image size).
+- If server backend is not required, switch to `RAGPREP_LAYOUT_MODE=local-paddle`.
 
 ## Troubleshooting (local paddle)
 
 If local layout fails with a Paddle runtime error mentioning `ConvertPirAttribute2RuntimeAttribute` or
-`onednn_instruction.cc`, try disabling OneDNN/MKLDNN and PIR API flags and restart:
+`onednn_instruction.cc`, disable OneDNN/MKLDNN and PIR API flags, then restart:
 
 PowerShell:
 ```powershell
@@ -109,7 +121,7 @@ export FLAGS_use_mkldnn=0
 export FLAGS_enable_pir_api=0
 ```
 
-Or set a single switch and restart:
+Or set one switch and restart:
 ```bash
 export RAGPREP_LAYOUT_PADDLE_SAFE_MODE=1
 ```
