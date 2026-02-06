@@ -7,6 +7,7 @@ RAGPrep converts PDFs to **structured HTML** by combining:
 ## Behavior highlights
 
 - Layout-aware output with improved natural reading order.
+- Table rendering supports merge-aware cell attributes (`colspan`/`rowspan`) when detected.
 - Web/Desktop `.html` download with in-app success/failure/cancel feedback.
 - Running-job partial output shows all processed pages so far (no last-N preview cap).
 - Optional startup prewarm to reduce first-request cold start for local layout backend.
@@ -99,7 +100,13 @@ Fast layout hint (server mode):
 ## Web settings
 
 - `RAGPREP_WEB_PREWARM_ON_STARTUP`: pre-initialize local layout backend at app startup (`1`/`0`, default: `1`)
+- `RAGPREP_WEB_PREWARM_EXECUTOR`: prewarm backend executor (`thread` or `process`).
+  - default: `process` when `RAGPREP_DESKTOP_MODE=1`, otherwise `thread`
+- `RAGPREP_WEB_PREWARM_TIMEOUT_SECONDS`: timeout for process-based prewarm stage2 (default: `120`)
+- `RAGPREP_WEB_PREWARM_START_DELAY_SECONDS`: delay before prewarm starts (default: `0.35`)
+- `RAGPREP_DESKTOP_MODE`: desktop launcher marker (`1` enables desktop-optimized defaults)
 - Startup prewarm prepares cache directories and model artifacts in `RAGPREP_MODEL_CACHE_DIR`.
+- Startup prewarm runs in two phases: `stage1` (cache prep) -> `stage2` (layout engine load).
 - Partial output always accumulates all processed pages so far.
 - Legacy `RAGPREP_WEB_PARTIAL_PREVIEW_PAGES` is no longer used.
 - `Convert` button is locked during prewarm and while any conversion job is active.

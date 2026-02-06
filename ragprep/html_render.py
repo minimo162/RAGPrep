@@ -2,7 +2,17 @@ from __future__ import annotations
 
 from html import escape
 
-from ragprep.structure_ir import Block, Document, Figure, Heading, Page, Paragraph, Table, Unknown
+from ragprep.structure_ir import (
+    Block,
+    Document,
+    Figure,
+    Heading,
+    Page,
+    Paragraph,
+    Table,
+    TableCell,
+    Unknown,
+)
 
 
 def render_document_html(document: Document) -> str:
@@ -70,6 +80,8 @@ def _render_block(block: Block) -> str:
         return f"<p>{text}</p>"
     if isinstance(block, Table):
         if block.grid:
+            if block.cells:
+                return _render_table_cells(block.grid, block.cells)
             return _render_table_grid(block.grid)
         text = _escape_with_breaks(block.text)
         return f'<pre data-kind="table">{text}</pre>'
@@ -103,6 +115,75 @@ def _render_table_grid(grid: tuple[tuple[str, ...], ...]) -> str:
         for cell in padded:
             parts.append(f"<td>{_escape_with_breaks(str(cell))}</td>")
         parts.append("</tr>")
+    parts.append("</tbody></table>")
+    return "\n".join(parts)
+
+
+def _render_table_cells(
+    grid: tuple[tuple[str, ...], ...],
+    cells: tuple[TableCell, ...],
+) -> str:
+    rows = list(grid)
+    if not rows:
+        return '<pre data-kind="table"></pre>'
+
+    row_count = len(rows)
+    col_count = max((len(r) for r in rows), default=0)
+    if col_count <= 0:
+        return '<pre data-kind="table"></pre>'
+
+    starts: dict[tuple[int, int], TableCell] = {}
+    for cell in cells:
+        r = int(cell.row)
+        c = int(cell.col)
+        if r < 0 or c < 0 or r >= row_count or c >= col_count:
+            continue
+        starts[(r, c)] = cell
+
+    parts: list[str] = ['<table data-kind="table"><tbody>']
+    skip_by_row: dict[int, set[int]] = {}
+    for r in range(row_count):
+        parts.append("<tr>")
+        skip_cols: set[int] = set()
+        c = 0
+        while c < col_count:
+            if c in skip_cols or c in skip_by_row.get(r, set()):
+                c += 1
+                continue
+
+            start = starts.get((r, c))
+            if start is None:
+                value = rows[r][c] if c < len(rows[r]) else ""
+                parts.append(f"<td>{_escape_with_breaks(str(value))}</td>")
+                c += 1
+                continue
+
+            colspan = max(1, int(start.colspan))
+            rowspan = max(1, int(start.rowspan))
+            attrs: list[str] = []
+            if colspan > 1:
+                attrs.append(f' colspan="{colspan}"')
+            if rowspan > 1:
+                attrs.append(f' rowspan="{rowspan}"')
+            attr_text = "".join(attrs)
+
+            value = str(start.text)
+            if not value and c < len(rows[r]):
+                value = str(rows[r][c])
+            parts.append(f"<td{attr_text}>{_escape_with_breaks(value)}</td>")
+
+            for covered_col in range(c + 1, min(col_count, c + colspan)):
+                skip_cols.add(covered_col)
+            if rowspan > 1:
+                max_row = min(row_count, r + rowspan)
+                max_col = min(col_count, c + colspan)
+                for covered_row in range(r + 1, max_row):
+                    row_skip = skip_by_row.setdefault(covered_row, set())
+                    for covered_col in range(c, max_col):
+                        row_skip.add(covered_col)
+            c += max(1, colspan)
+        parts.append("</tr>")
+
     parts.append("</tbody></table>")
     return "\n".join(parts)
 

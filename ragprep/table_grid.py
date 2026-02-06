@@ -9,6 +9,15 @@ from ragprep.pdf_text import Word
 
 
 @dataclass(frozen=True)
+class TableCell:
+    row: int
+    col: int
+    text: str
+    colspan: int = 1
+    rowspan: int = 1
+
+
+@dataclass(frozen=True)
 class TableGrid:
     column_count: int
     column_centers: tuple[float, ...]
@@ -16,6 +25,7 @@ class TableGrid:
     row_bin: float
     row_keys: tuple[int, ...]
     rows: tuple[tuple[str, ...], ...]
+    cells: tuple[TableCell, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -77,15 +87,18 @@ def build_table_grid(words: list[Word], *, column_count: int) -> TableGridResult
     cutoffs = tuple((centers[i] + centers[i + 1]) / 2.0 for i in range(len(centers) - 1))
     space_gap = max(2.0, median_height * 0.2)
 
-    grid_rows: list[tuple[str, ...]] = []
-    for row_words in sorted_rows:
-        cols: list[list[Word]] = [[] for _ in range(column_count)]
-        for w in row_words:
-            x_center = (w.x0 + w.x1) / 2.0
-            col = bisect_right(cutoffs, x_center)
-            cols[col].append(w)
-        row_cells = tuple(_join_words(cell_words, space_gap=space_gap) for cell_words in cols)
-        grid_rows.append(row_cells)
+    grid_rows, cells = _build_dense_rows_and_cells(
+        sorted_rows=sorted_rows,
+        column_count=column_count,
+        cutoffs=cutoffs,
+        gap_threshold=gap_threshold,
+        space_gap=space_gap,
+    )
+    cells_with_rowspan = _apply_vertical_rowspan(
+        cells=cells,
+        rows=grid_rows,
+        column_count=column_count,
+    )
 
     confidence = min(1.0, min_sep / max(1.0, median_width * 3.0))
     return TableGridResult(
@@ -96,6 +109,7 @@ def build_table_grid(words: list[Word], *, column_count: int) -> TableGridResult
             row_bin=row_bin,
             row_keys=sorted_row_keys,
             rows=tuple(grid_rows),
+            cells=tuple(cells_with_rowspan),
         ),
         confidence=confidence,
         reason=None,
@@ -218,3 +232,128 @@ def _join_words(words: list[Word], *, space_gap: float) -> str:
         out.append(w.text)
         prev = w
     return "".join(out).strip()
+
+
+def _build_dense_rows_and_cells(
+    *,
+    sorted_rows: list[list[Word]],
+    column_count: int,
+    cutoffs: tuple[float, ...],
+    gap_threshold: float,
+    space_gap: float,
+) -> tuple[list[tuple[str, ...]], list[TableCell]]:
+    dense_rows: list[tuple[str, ...]] = []
+    out_cells: list[TableCell] = []
+
+    for row_index, row_words in enumerate(sorted_rows):
+        dense = [""] * column_count
+        occupied = [False] * column_count
+        groups = _group_words_by_x_gap(row_words, gap_threshold=gap_threshold)
+        for group in groups:
+            if not group:
+                continue
+            text = _join_words(group, space_gap=space_gap)
+            if not text:
+                continue
+
+            group_x0 = min(w.x0 for w in group)
+            group_x1 = max(w.x1 for w in group)
+            start_col = _col_from_x(cutoffs, group_x0)
+            end_col = _col_from_x(cutoffs, group_x1)
+            if end_col < start_col:
+                end_col = start_col
+
+            if any(occupied[c] for c in range(start_col, end_col + 1)):
+                center_col = _col_from_x(cutoffs, (group_x0 + group_x1) / 2.0)
+                start_col = center_col
+                end_col = center_col
+
+            start_col = max(0, min(column_count - 1, start_col))
+            end_col = max(0, min(column_count - 1, end_col))
+
+            colspan = max(1, end_col - start_col + 1)
+            dense[start_col] = text
+            for c in range(start_col, end_col + 1):
+                occupied[c] = True
+
+            out_cells.append(
+                TableCell(
+                    row=row_index,
+                    col=start_col,
+                    text=text,
+                    colspan=colspan,
+                    rowspan=1,
+                )
+            )
+
+        dense_rows.append(tuple(dense))
+
+    return dense_rows, out_cells
+
+
+def _apply_vertical_rowspan(
+    *,
+    cells: list[TableCell],
+    rows: list[tuple[str, ...]],
+    column_count: int,
+) -> list[TableCell]:
+    if not cells:
+        return []
+    starts_by_row: dict[int, list[TableCell]] = {}
+    for cell in cells:
+        starts_by_row.setdefault(cell.row, []).append(cell)
+    for row_cells in starts_by_row.values():
+        row_cells.sort(key=lambda c: (c.col, c.colspan, c.text))
+
+    total_rows = len(rows)
+    out: list[TableCell] = []
+    for cell in sorted(cells, key=lambda c: (c.row, c.col, c.colspan, c.text)):
+        rowspan = 1
+        start_col = int(cell.col)
+        end_col = min(column_count - 1, start_col + max(1, int(cell.colspan)) - 1)
+        for next_row in range(cell.row + 1, total_rows):
+            row_values = rows[next_row]
+            row_has_any = any(str(v).strip() for v in row_values)
+            if not row_has_any:
+                break
+
+            has_start_in_span = False
+            for started in starts_by_row.get(next_row, []):
+                started_start = int(started.col)
+                started_end = min(
+                    column_count - 1,
+                    started_start + max(1, int(started.colspan)) - 1,
+                )
+                if started_end < start_col or started_start > end_col:
+                    continue
+                has_start_in_span = True
+                break
+            if has_start_in_span:
+                break
+
+            span_empty = True
+            for c in range(start_col, end_col + 1):
+                if c >= len(row_values):
+                    continue
+                if str(row_values[c]).strip():
+                    span_empty = False
+                    break
+            if not span_empty:
+                break
+
+            rowspan += 1
+
+        out.append(
+            TableCell(
+                row=cell.row,
+                col=cell.col,
+                text=cell.text,
+                colspan=cell.colspan,
+                rowspan=rowspan,
+            )
+        )
+    return out
+
+
+def _col_from_x(cutoffs: tuple[float, ...], x: float) -> int:
+    return int(bisect_right(cutoffs, float(x)))

@@ -123,7 +123,103 @@ def test_should_prewarm_on_startup_defaults_to_true(monkeypatch: pytest.MonkeyPa
     assert webapp._should_prewarm_on_startup() is True
 
 
+def test_prewarm_start_delay_reads_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("RAGPREP_WEB_PREWARM_START_DELAY_SECONDS", raising=False)
+    assert webapp._prewarm_start_delay_seconds() == pytest.approx(0.35)
+
+    monkeypatch.setenv("RAGPREP_WEB_PREWARM_START_DELAY_SECONDS", "1.25")
+    assert webapp._prewarm_start_delay_seconds() == pytest.approx(1.25)
+
+
+def test_prewarm_timeout_reads_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("RAGPREP_WEB_PREWARM_TIMEOUT_SECONDS", raising=False)
+    assert webapp._prewarm_timeout_seconds() == pytest.approx(120.0)
+
+    monkeypatch.setenv("RAGPREP_WEB_PREWARM_TIMEOUT_SECONDS", "9.5")
+    assert webapp._prewarm_timeout_seconds() == pytest.approx(9.5)
+
+
+def test_resolve_prewarm_executor_prefers_desktop_process(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("RAGPREP_WEB_PREWARM_EXECUTOR", raising=False)
+    monkeypatch.setenv("RAGPREP_DESKTOP_MODE", "1")
+    assert webapp._resolve_prewarm_executor() == "process"
+
+    monkeypatch.setenv("RAGPREP_WEB_PREWARM_EXECUTOR", "thread")
+    assert webapp._resolve_prewarm_executor() == "thread"
+
+
+def test_ui_state_includes_recommended_poll_interval(monkeypatch: pytest.MonkeyPatch) -> None:
+    client = TestClient(app)
+
+    monkeypatch.setattr(webapp.jobs, "has_active", lambda: False)
+    webapp._set_prewarm_state(
+        enabled=True,
+        in_progress=True,
+        phase="stage1",
+        executor="process",
+        error=None,
+    )
+    busy = client.get("/ui/state").json()
+    assert busy["recommended_poll_interval_ms"] == 1000
+    assert busy["prewarm_phase"] == "stage1"
+    assert busy["prewarm_executor"] == "process"
+
+    webapp._set_prewarm_state(
+        enabled=True,
+        in_progress=False,
+        phase="done",
+        executor="thread",
+        error=None,
+    )
+    idle = client.get("/ui/state").json()
+    assert idle["recommended_poll_interval_ms"] == 10000
+    assert idle["prewarm_phase"] == "done"
+    assert idle["prewarm_executor"] == "thread"
+
+
+def test_prewarm_layout_backend_in_process_times_out(monkeypatch: pytest.MonkeyPatch) -> None:
+    class _StubQueue:
+        def get_nowait(self) -> dict[str, object]:
+            raise RuntimeError("empty")
+
+        def close(self) -> None:
+            return None
+
+    class _StubProcess:
+        def __init__(self, **_kwargs: object) -> None:
+            self.exitcode = None
+            self._alive = True
+
+        def start(self) -> None:
+            return None
+
+        def join(self, _timeout: float | None = None) -> None:
+            return None
+
+        def is_alive(self) -> bool:
+            return self._alive
+
+        def terminate(self) -> None:
+            self._alive = False
+
+    class _StubContext:
+        def Queue(self, maxsize: int = 0) -> _StubQueue:
+            _ = maxsize
+            return _StubQueue()
+
+        def Process(self, **kwargs: object) -> _StubProcess:
+            _ = kwargs
+            return _StubProcess()
+
+    monkeypatch.setattr(webapp.mp, "get_context", lambda _name: _StubContext())
+    error = webapp._prewarm_layout_backend_in_process(timeout_seconds=0.01)
+    assert isinstance(error, str)
+    assert "timed out" in error
+
+
 def test_ensure_startup_prewarm_started_runs_once(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("RAGPREP_WEB_PREWARM_EXECUTOR", "thread")
+    monkeypatch.setenv("RAGPREP_DESKTOP_MODE", "0")
     calls: list[str] = []
 
     def _fake_prewarm() -> None:

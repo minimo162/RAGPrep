@@ -4,7 +4,7 @@ from typing import cast
 
 import pytest
 
-from ragprep.pdf_text import _extract_words
+from ragprep.pdf_text import Word, _extract_words
 from ragprep.table_grid import build_table_grid
 
 
@@ -96,3 +96,40 @@ def test_build_table_grid_fails_when_columns_not_separable() -> None:
     assert result.grid is None
     assert result.reason in {"columns_not_separated", "kmeans_failed", "insufficient_anchors"}
     assert result.confidence == pytest.approx(0.0, abs=1e-9) or 0.0 <= result.confidence <= 1.0
+
+
+def test_build_table_grid_emits_colspan_for_wide_header_cell() -> None:
+    words = [
+        Word(x0=10, y0=10, x1=210, y1=20, text="MergedHeader", block_no=0, line_no=0, word_no=0),
+        Word(x0=310, y0=10, x1=350, y1=20, text="C", block_no=0, line_no=0, word_no=1),
+        Word(x0=10, y0=30, x1=40, y1=40, text="A1", block_no=0, line_no=1, word_no=0),
+        Word(x0=150, y0=30, x1=180, y1=40, text="B1", block_no=0, line_no=1, word_no=1),
+        Word(x0=310, y0=30, x1=340, y1=40, text="C1", block_no=0, line_no=1, word_no=2),
+        Word(x0=10, y0=50, x1=40, y1=60, text="A2", block_no=0, line_no=2, word_no=0),
+        Word(x0=150, y0=50, x1=180, y1=60, text="B2", block_no=0, line_no=2, word_no=1),
+        Word(x0=310, y0=50, x1=340, y1=60, text="C2", block_no=0, line_no=2, word_no=2),
+    ]
+
+    result = build_table_grid(words, column_count=3)
+    assert result.ok, result.reason
+    assert result.grid is not None
+    assert result.grid.rows[0][0] == "MergedHeader"
+    header_cells = [c for c in result.grid.cells if c.row == 0 and c.col == 0]
+    assert header_cells
+    assert header_cells[0].colspan >= 2
+
+
+def test_build_table_grid_keeps_missing_middle_cell_as_empty() -> None:
+    words = [
+        Word(x0=10, y0=10, x1=40, y1=20, text="A", block_no=0, line_no=0, word_no=0),
+        Word(x0=150, y0=10, x1=180, y1=20, text="B", block_no=0, line_no=0, word_no=1),
+        Word(x0=310, y0=10, x1=340, y1=20, text="C", block_no=0, line_no=0, word_no=2),
+        Word(x0=10, y0=30, x1=40, y1=40, text="D", block_no=0, line_no=1, word_no=0),
+        Word(x0=310, y0=30, x1=340, y1=40, text="F", block_no=0, line_no=1, word_no=1),
+    ]
+
+    result = build_table_grid(words, column_count=3)
+    assert result.ok, result.reason
+    assert result.grid is not None
+    assert result.grid.rows[0] == ("A", "B", "C")
+    assert result.grid.rows[1] == ("D", "", "F")

@@ -12,6 +12,7 @@ from ragprep.pdf_text import (
     extract_pymupdf_page_sizes,
     extract_pymupdf_page_spans,
     extract_pymupdf_page_texts,
+    extract_pymupdf_page_words,
     normalize_extracted_text,
     tokenize_by_char_class,
 )
@@ -84,6 +85,20 @@ def test_extract_pymupdf_page_spans_returns_spans_per_page() -> None:
         assert span.x0 < span.x1
         assert span.y0 < span.y1
         assert span.text.strip() == span.text
+
+
+def test_extract_pymupdf_page_words_returns_words_per_page() -> None:
+    pdf_bytes = _make_pdf_bytes_with_text([["Hello 1", "World 1"], ["Hello 2"]])
+    pages = extract_pymupdf_page_words(pdf_bytes)
+    assert len(pages) == 2
+    assert any("Hello" in w.text for w in pages[0])
+    assert any("World" in w.text for w in pages[0])
+    assert any("Hello" in w.text for w in pages[1])
+    for words in pages:
+        for word in words:
+            assert word.x0 < word.x1
+            assert word.y0 < word.y1
+            assert word.text.strip() == word.text
 
 
 def test_extract_pymupdf_page_sizes_returns_page_sizes() -> None:

@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import logging
+import multiprocessing as mp
 import os
+import time
 import uuid
 from dataclasses import dataclass, replace
 from enum import Enum
@@ -31,7 +33,17 @@ logger = logging.getLogger(__name__)
 
 _PARTIAL_PAGE_SEPARATOR = "\n<!-- ragprep:partial-page -->\n"
 ENV_WEB_PREWARM_ON_STARTUP = "RAGPREP_WEB_PREWARM_ON_STARTUP"
+ENV_WEB_PREWARM_START_DELAY_SECONDS = "RAGPREP_WEB_PREWARM_START_DELAY_SECONDS"
+ENV_WEB_PREWARM_EXECUTOR = "RAGPREP_WEB_PREWARM_EXECUTOR"
+ENV_WEB_PREWARM_TIMEOUT_SECONDS = "RAGPREP_WEB_PREWARM_TIMEOUT_SECONDS"
+ENV_DESKTOP_MODE = "RAGPREP_DESKTOP_MODE"
 DEFAULT_WEB_PREWARM_ON_STARTUP = True
+DEFAULT_WEB_PREWARM_START_DELAY_SECONDS = 0.35
+DEFAULT_WEB_PREWARM_EXECUTOR = "thread"
+DEFAULT_WEB_PREWARM_TIMEOUT_SECONDS = 120.0
+DEFAULT_WEB_PREWARM_STAGE2_DELAY_SECONDS = 0.20
+_UI_POLL_BUSY_MS = 1000
+_UI_POLL_IDLE_MS = 10000
 
 
 def _get_bool_env(name: str, *, default: bool) -> bool:
@@ -48,6 +60,47 @@ def _get_bool_env(name: str, *, default: bool) -> bool:
 
 def _should_prewarm_on_startup() -> bool:
     return _get_bool_env(ENV_WEB_PREWARM_ON_STARTUP, default=DEFAULT_WEB_PREWARM_ON_STARTUP)
+
+
+def _get_nonnegative_float_env(name: str, *, default: float) -> float:
+    raw = os.getenv(name)
+    if raw is None or not raw.strip():
+        return default
+    try:
+        value = float(raw.strip())
+    except ValueError:
+        return default
+    if value < 0:
+        return default
+    return value
+
+
+def _prewarm_start_delay_seconds() -> float:
+    return _get_nonnegative_float_env(
+        ENV_WEB_PREWARM_START_DELAY_SECONDS,
+        default=DEFAULT_WEB_PREWARM_START_DELAY_SECONDS,
+    )
+
+
+def _prewarm_timeout_seconds() -> float:
+    timeout = _get_nonnegative_float_env(
+        ENV_WEB_PREWARM_TIMEOUT_SECONDS,
+        default=DEFAULT_WEB_PREWARM_TIMEOUT_SECONDS,
+    )
+    return max(1.0, float(timeout))
+
+
+def _is_desktop_mode() -> bool:
+    return _get_bool_env(ENV_DESKTOP_MODE, default=False)
+
+
+def _resolve_prewarm_executor() -> str:
+    raw = os.getenv(ENV_WEB_PREWARM_EXECUTOR)
+    if isinstance(raw, str) and raw.strip().lower() in {"thread", "process"}:
+        return raw.strip().lower()
+    if _is_desktop_mode():
+        return "process"
+    return DEFAULT_WEB_PREWARM_EXECUTOR
 
 
 class JobStatus(str, Enum):
@@ -150,6 +203,8 @@ _prewarm_state_lock = Lock()
 _prewarm_enabled = False
 _prewarm_in_progress = False
 _prewarm_error: str | None = None
+_prewarm_phase = "idle"
+_prewarm_executor = DEFAULT_WEB_PREWARM_EXECUTOR
 _PREWARM_UNCHANGED = object()
 
 
@@ -168,15 +223,23 @@ def _set_prewarm_state(
     *,
     enabled: bool | None = None,
     in_progress: bool | None = None,
+    phase: str | None = None,
+    executor: str | None = None,
     error: str | None | object = _PREWARM_UNCHANGED,
 ) -> None:
-    global _prewarm_enabled, _prewarm_in_progress, _prewarm_error
+    global _prewarm_enabled, _prewarm_in_progress, _prewarm_error, _prewarm_phase, _prewarm_executor
 
     with _prewarm_state_lock:
         if enabled is not None:
             _prewarm_enabled = enabled
         if in_progress is not None:
             _prewarm_in_progress = in_progress
+        if phase is not None:
+            _prewarm_phase = str(phase).strip() or _prewarm_phase
+        if executor is not None:
+            normalized_executor = str(executor).strip().lower()
+            if normalized_executor in {"thread", "process"}:
+                _prewarm_executor = normalized_executor
         if error is not _PREWARM_UNCHANGED:
             _prewarm_error = error if isinstance(error, str) else None
 
@@ -187,6 +250,8 @@ def _get_prewarm_state() -> dict[str, object]:
             "prewarm_enabled": _prewarm_enabled,
             "prewarm_in_progress": _prewarm_in_progress,
             "prewarm_error": _prewarm_error,
+            "prewarm_phase": _prewarm_phase,
+            "prewarm_executor": _prewarm_executor,
         }
 
 
@@ -202,19 +267,124 @@ def _prewarm_layout_backend() -> str | None:
     return None
 
 
-def _run_prewarm() -> None:
-    error = _prewarm_layout_backend()
-    _set_prewarm_state(in_progress=False, error=error)
+def _prewarm_stage1_cache() -> str | None:
+    settings = get_settings()
+    try:
+        from ragprep.model_cache import configure_model_cache
+
+        configure_model_cache(settings)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Prewarm stage1 (cache) failed: %s", exc)
+        return str(exc)
+    return None
 
 
-def _ensure_startup_prewarm_started() -> None:
+def _prewarm_process_target(queue: Any) -> None:
+    try:
+        from ragprep.layout.glm_doclayout import prewarm_layout_backend
+        from ragprep.model_cache import configure_model_cache
+
+        settings = get_settings()
+        configure_model_cache(settings)
+        prewarm_layout_backend(settings=settings)
+        queue.put({"ok": True, "error": None})
+    except Exception as exc:  # noqa: BLE001
+        queue.put({"ok": False, "error": str(exc)})
+
+
+def _prewarm_layout_backend_in_process(*, timeout_seconds: float) -> str | None:
+    try:
+        ctx = mp.get_context("spawn")
+        queue: Any = ctx.Queue(maxsize=1)
+        process = ctx.Process(target=_prewarm_process_target, args=(queue,), daemon=True)
+        process.start()
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Prewarm process start failed. Falling back to thread execution: %s", exc)
+        return _prewarm_layout_backend()
+
+    process.join(timeout_seconds)
+    if process.is_alive():
+        process.terminate()
+        process.join(3.0)
+        return f"Prewarm timed out after {timeout_seconds:.1f}s."
+
+    payload: dict[str, object] | None = None
+    try:
+        payload_obj = queue.get_nowait()
+        if isinstance(payload_obj, dict):
+            payload = payload_obj
+    except Exception:  # noqa: BLE001
+        payload = None
+    finally:
+        try:
+            queue.close()
+        except Exception:  # noqa: BLE001
+            pass
+
+    if payload is None:
+        if process.exitcode and process.exitcode != 0:
+            return f"Prewarm process exited unexpectedly (exitcode={process.exitcode})."
+        return None
+    if bool(payload.get("ok")):
+        return None
+    err = payload.get("error")
+    return str(err) if isinstance(err, str) and err.strip() else "Prewarm process failed."
+
+
+def _run_prewarm(*, executor: str, timeout_seconds: float) -> None:
+    _set_prewarm_state(phase="stage1", in_progress=True, executor=executor, error=None)
+    stage1_error = _prewarm_stage1_cache()
+    if stage1_error is not None:
+        _set_prewarm_state(phase="error", in_progress=False, error=stage1_error)
+        return
+
+    if DEFAULT_WEB_PREWARM_STAGE2_DELAY_SECONDS > 0:
+        time.sleep(DEFAULT_WEB_PREWARM_STAGE2_DELAY_SECONDS)
+
+    _set_prewarm_state(phase="stage2", in_progress=True, executor=executor, error=None)
+    if executor == "process":
+        error = _prewarm_layout_backend_in_process(timeout_seconds=timeout_seconds)
+    else:
+        error = _prewarm_layout_backend()
+
+    if error is not None:
+        _set_prewarm_state(phase="error", in_progress=False, error=error)
+        return
+    _set_prewarm_state(phase="done", in_progress=False, error=None)
+
+
+def _ensure_startup_prewarm_started(
+    *,
+    delay_seconds: float = 0.0,
+    executor: str | None = None,
+    timeout_seconds: float | None = None,
+) -> None:
     global _prewarm_started
 
     with _prewarm_lock:
         if _prewarm_started:
             return
         _prewarm_started = True
-    Thread(target=_run_prewarm, daemon=True, name="ragprep-prewarm").start()
+    delay = max(0.0, float(delay_seconds))
+    chosen_executor = executor if executor in {"thread", "process"} else _resolve_prewarm_executor()
+    chosen_timeout = (
+        float(timeout_seconds)
+        if isinstance(timeout_seconds, (int, float))
+        else _prewarm_timeout_seconds()
+    )
+
+    def _target() -> None:
+        if delay > 0:
+            time.sleep(delay)
+        _run_prewarm(executor=chosen_executor, timeout_seconds=chosen_timeout)
+
+    Thread(target=_target, daemon=True, name="ragprep-prewarm").start()
+
+
+def _recommended_ui_poll_interval_ms(*, prewarm_in_progress: bool, has_active_job: bool) -> int:
+    if prewarm_in_progress or has_active_job:
+        return _UI_POLL_BUSY_MS
+    return _UI_POLL_IDLE_MS
 
 
 def _run_job(job_id: str, pdf_bytes: bytes) -> None:
@@ -292,16 +462,39 @@ def _start_job(job_id: str, pdf_bytes: bytes) -> None:
 def startup() -> None:
     enabled = _should_prewarm_on_startup()
     if enabled:
-        _set_prewarm_state(enabled=True, in_progress=True, error=None)
-        _ensure_startup_prewarm_started()
+        executor = _resolve_prewarm_executor()
+        _set_prewarm_state(
+            enabled=True,
+            in_progress=True,
+            phase="queued",
+            executor=executor,
+            error=None,
+        )
+        _ensure_startup_prewarm_started(
+            delay_seconds=_prewarm_start_delay_seconds(),
+            executor=executor,
+            timeout_seconds=_prewarm_timeout_seconds(),
+        )
         return
-    _set_prewarm_state(enabled=False, in_progress=False, error=None)
+    _set_prewarm_state(
+        enabled=False,
+        in_progress=False,
+        phase="disabled",
+        executor=_resolve_prewarm_executor(),
+        error=None,
+    )
 
 
 @app.get("/", response_class=HTMLResponse)
 def index(request: Request) -> Response:
     ui_state = _get_prewarm_state()
-    ui_state["has_active_job"] = jobs.has_active()
+    has_active_job = jobs.has_active()
+    prewarm_in_progress = bool(ui_state.get("prewarm_in_progress"))
+    ui_state["has_active_job"] = has_active_job
+    ui_state["recommended_poll_interval_ms"] = _recommended_ui_poll_interval_ms(
+        prewarm_in_progress=prewarm_in_progress,
+        has_active_job=has_active_job,
+    )
     return templates.TemplateResponse(
         request,
         "index.html",
@@ -312,9 +505,13 @@ def index(request: Request) -> Response:
 @app.get("/ui/state")
 def ui_state() -> JSONResponse:
     state = _get_prewarm_state()
-    state["has_active_job"] = jobs.has_active()
-    state["can_convert"] = (not bool(state["prewarm_in_progress"])) and (
-        not bool(state["has_active_job"])
+    has_active_job = jobs.has_active()
+    prewarm_in_progress = bool(state.get("prewarm_in_progress"))
+    state["has_active_job"] = has_active_job
+    state["can_convert"] = (not prewarm_in_progress) and (not has_active_job)
+    state["recommended_poll_interval_ms"] = _recommended_ui_poll_interval_ms(
+        prewarm_in_progress=prewarm_in_progress,
+        has_active_job=has_active_job,
     )
     return JSONResponse(state)
 

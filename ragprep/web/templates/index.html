@@ -122,6 +122,30 @@
     <script src="/static/htmx.min.js"></script>
     <script>
       (function () {
+        const defaultPollIntervalMs = Number(
+          "{{ ui_state.recommended_poll_interval_ms | default(10000, true) }}"
+        );
+        let pollIntervalMs =
+          Number.isFinite(defaultPollIntervalMs) && defaultPollIntervalMs >= 1000
+            ? defaultPollIntervalMs
+            : 10000;
+        let pollTimer = null;
+        let pollRequestInFlight = false;
+
+        function normalizePollIntervalMs(value) {
+          const numeric = Number(value);
+          if (!Number.isFinite(numeric)) return null;
+          if (numeric < 1000) return 1000;
+          return Math.floor(numeric);
+        }
+
+        function scheduleNextUiStatePoll() {
+          if (pollTimer) {
+            clearTimeout(pollTimer);
+          }
+          pollTimer = setTimeout(refreshUiState, pollIntervalMs);
+        }
+
         async function fetchUiState() {
           const response = await fetch("/ui/state", { credentials: "same-origin" });
           if (!response.ok) {
@@ -151,12 +175,30 @@
           const prewarmInProgress = Boolean(state && state.prewarm_in_progress);
           const hasActiveJob = Boolean(state && state.has_active_job);
           const prewarmEnabled = Boolean(state && state.prewarm_enabled);
+          const prewarmPhase =
+            state && typeof state.prewarm_phase === "string" ? state.prewarm_phase.trim() : "";
+          const prewarmExecutor =
+            state && typeof state.prewarm_executor === "string"
+              ? state.prewarm_executor.trim()
+              : "";
           const prewarmError =
             state && typeof state.prewarm_error === "string" ? state.prewarm_error.trim() : "";
           const canConvert = !prewarmInProgress && !hasActiveJob;
 
           if (prewarmInProgress) {
-            setConvertStatus("Prewarm in progress... please wait.", "pending");
+            if (prewarmPhase === "queued") {
+              setConvertStatus("Prewarm queued... preparing startup.", "pending");
+            } else if (prewarmPhase === "stage1") {
+              setConvertStatus("Prewarm stage1: preparing model cache...", "pending");
+            } else if (prewarmPhase === "stage2") {
+              const executorLabel = prewarmExecutor || "thread";
+              setConvertStatus(
+                `Prewarm stage2 (${executorLabel}): loading layout engine...`,
+                "pending"
+              );
+            } else {
+              setConvertStatus("Prewarm in progress... please wait.", "pending");
+            }
           } else if (hasActiveJob) {
             setConvertStatus("Converting... please wait until current job finishes.", "pending");
           } else if (prewarmError) {
@@ -168,19 +210,36 @@
           }
 
           setConvertEnabled(canConvert);
+
+          const suggested = normalizePollIntervalMs(
+            state && state.recommended_poll_interval_ms
+          );
+          if (suggested !== null) {
+            pollIntervalMs = suggested;
+          }
         }
 
         async function refreshUiState() {
+          if (pollRequestInFlight) return;
+          pollRequestInFlight = true;
           try {
             const state = await fetchUiState();
             applyUiState(state);
           } catch (_error) {
             // Keep current UI state when polling fails transiently.
+            pollIntervalMs = Math.min(30000, Math.max(1000, pollIntervalMs * 2));
+          } finally {
+            pollRequestInFlight = false;
+            scheduleNextUiStatePoll();
           }
         }
 
-        setInterval(refreshUiState, 1000);
         window.addEventListener("load", refreshUiState);
+        document.addEventListener("visibilitychange", () => {
+          if (!document.hidden) {
+            refreshUiState();
+          }
+        });
 
         function setNotice(message, kind) {
           const notice = document.getElementById("download-notice");
@@ -205,11 +264,16 @@
           return basicMatch && basicMatch[1] ? basicMatch[1] : null;
         }
 
-        async function downloadViaBrowser(url) {
+        async function fetchDownloadResponse(url) {
           const response = await fetch(url, { credentials: "same-origin" });
           if (!response.ok) {
             throw new Error(`download failed: HTTP ${response.status}`);
           }
+          return response;
+        }
+
+        async function downloadViaBrowser(url) {
+          const response = await fetchDownloadResponse(url);
           const blob = await response.blob();
           const contentDisposition = response.headers.get("content-disposition");
           const fileName = parseFilename(contentDisposition) || "download.html";
@@ -228,6 +292,31 @@
           return fileName;
         }
 
+        async function downloadViaDesktopBridge(url, jobId) {
+          if (
+            !window.pywebview ||
+            !window.pywebview.api ||
+            typeof window.pywebview.api.save_html_text !== "function"
+          ) {
+            throw new Error("desktop save bridge is not available");
+          }
+
+          const response = await fetchDownloadResponse(url);
+          const contentDisposition = response.headers.get("content-disposition");
+          const fileName = parseFilename(contentDisposition) || "download.html";
+          const htmlText = await response.text();
+          const payload = await window.pywebview.api.save_html_text(jobId, fileName, htmlText);
+          if (!payload || payload.status === "cancelled") {
+            return { status: "cancelled", savedName: null };
+          }
+          if (payload.status !== "ok") {
+            const message = payload.message || payload.status || "unknown error";
+            throw new Error(`download failed: ${message}`);
+          }
+          const savedName = payload.filename || payload.path || fileName;
+          return { status: "ok", savedName };
+        }
+
         window.ragprepHandleHtmlDownload = async function (event, jobId) {
           const target = event && event.currentTarget;
           const anchor = target instanceof HTMLAnchorElement ? target : null;
@@ -238,6 +327,20 @@
           setNotice("Downloading HTML...", null);
 
           try {
+            if (
+              window.pywebview &&
+              window.pywebview.api &&
+              typeof window.pywebview.api.save_html_text === "function"
+            ) {
+              const payload = await downloadViaDesktopBridge(href, jobId);
+              if (payload.status === "cancelled") {
+                setNotice("Download cancelled.", null);
+                return false;
+              }
+              setNotice(`Download completed: ${payload.savedName || "HTML file"}`, "success");
+              return false;
+            }
+
             if (
               window.pywebview &&
               window.pywebview.api &&
@@ -303,9 +406,21 @@
         aria-live="polite"
       >
         {% if ui_state.prewarm_in_progress %}
-          Prewarm in progress... please wait.
+          {% if ui_state.prewarm_phase == "queued" %}
+            Prewarm queued... preparing startup.
+          {% elif ui_state.prewarm_phase == "stage1" %}
+            Prewarm stage1: preparing model cache...
+          {% elif ui_state.prewarm_phase == "stage2" %}
+            Prewarm stage2 ({{ ui_state.prewarm_executor or "thread" }}): loading layout engine...
+          {% else %}
+            Prewarm in progress... please wait.
+          {% endif %}
         {% elif ui_state.has_active_job %}
           Converting... please wait until current job finishes.
+        {% elif ui_state.prewarm_error %}
+          Prewarm failed: {{ ui_state.prewarm_error }}
+        {% elif ui_state.prewarm_enabled and ui_state.prewarm_phase == "done" %}
+          Ready. Prewarm completed.
         {% else %}
           Ready.
         {% endif %}

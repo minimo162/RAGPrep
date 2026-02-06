@@ -96,6 +96,8 @@ def test_wait_for_health_disables_env_proxies(monkeypatch: pytest.MonkeyPatch) -
 
 
 def test_desktop_launcher_calls_webview_and_stops_server(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("RAGPREP_DESKTOP_MODE", raising=False)
+
     class StubServer:
         last_instance: StubServer | None = None
 
@@ -128,6 +130,8 @@ def test_desktop_launcher_calls_webview_and_stops_server(monkeypatch: pytest.Mon
 
     result = desktop.main([])
     assert result == 0
+    assert desktop.os.getenv("RAGPREP_DESKTOP_MODE") == "1"
+    desktop.os.environ.pop("RAGPREP_DESKTOP_MODE", None)
 
     assert calls["title"] == "RAGPrep"
     assert calls["url"] == "http://127.0.0.1:8000/"
@@ -269,4 +273,53 @@ def test_save_html_accepts_relative_download_url(
 
     assert captured["url"] == "http://127.0.0.1:8000/download/job123.html"
     assert result["status"] == "ok"
+
+
+def test_save_html_text_writes_to_downloads(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    downloads_dir = tmp_path / "Downloads"
+    downloads_dir.mkdir(parents=True, exist_ok=True)
+
+    class WebviewStub:
+        SAVE_DIALOG = object()
+
+        def create_file_dialog(self, *args: object, **kwargs: object) -> None:
+            raise AssertionError("save dialog should not be called when downloads is available")
+
+    monkeypatch.setattr(desktop, "_resolve_downloads_dir", lambda: downloads_dir)
+
+    api = desktop._DesktopApi(base_url="http://127.0.0.1:8000", webview=WebviewStub())
+    result = api.save_html_text("job123", "report.html", "<section>ok</section>")
+
+    saved_path = downloads_dir / "report.html"
+    assert result["status"] == "ok"
+    assert result["path"] == str(saved_path)
+    assert saved_path.exists()
+    assert saved_path.read_text(encoding="utf-8") == "<section>ok</section>"
+
+
+def test_save_html_text_normalizes_filename(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    downloads_dir = tmp_path / "Downloads"
+    downloads_dir.mkdir(parents=True, exist_ok=True)
+
+    class WebviewStub:
+        SAVE_DIALOG = object()
+
+        def create_file_dialog(self, *args: object, **kwargs: object) -> None:
+            raise AssertionError("save dialog should not be called when downloads is available")
+
+    monkeypatch.setattr(desktop, "_resolve_downloads_dir", lambda: downloads_dir)
+
+    api = desktop._DesktopApi(base_url="http://127.0.0.1:8000", webview=WebviewStub())
+    result = api.save_html_text("job123", "report", "<section>ok</section>")
+
+    saved_path = downloads_dir / "report.html"
+    assert result["status"] == "ok"
+    assert result["path"] == str(saved_path)
+    assert saved_path.exists()
 

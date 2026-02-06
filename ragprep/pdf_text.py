@@ -407,6 +407,48 @@ def extract_pymupdf_page_spans(pdf_bytes: bytes) -> list[list[Span]]:
     return pages
 
 
+def extract_pymupdf_page_words(pdf_bytes: bytes) -> list[list[Word]]:
+    """
+    Extract per-page words (with coordinates) from the PDF text layer via PyMuPDF.
+
+    Returns one list per page, preserving page order.
+    """
+
+    if not pdf_bytes:
+        raise ValueError("pdf_bytes is empty")
+
+    settings = get_settings()
+    if len(pdf_bytes) > settings.max_upload_bytes:
+        raise ValueError(
+            f"PDF too large ({len(pdf_bytes)} bytes), max_bytes={settings.max_upload_bytes}"
+        )
+
+    fitz = _import_fitz()
+    try:
+        doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+    except Exception as exc:  # noqa: BLE001
+        raise ValueError("Invalid PDF data") from exc
+
+    try:
+        page_count = int(doc.page_count)
+    except Exception as exc:  # noqa: BLE001
+        doc.close()
+        raise RuntimeError("Failed to read PDF page count") from exc
+    if page_count > settings.max_pages:
+        doc.close()
+        raise ValueError(f"PDF has {page_count} pages, max_pages={settings.max_pages}")
+
+    pages: list[list[Word]] = []
+    with doc:
+        for i in range(page_count):
+            page = doc.load_page(i)
+            words = _extract_words(page)
+            words.sort(key=lambda w: (w.y0, w.x0, w.y1, w.x1, w.block_no, w.line_no, w.word_no))
+            pages.append(words)
+
+    return pages
+
+
 def _extract_words(page: Any) -> list[Word]:
     words_raw = page.get_text("words") or []
     words: list[Word] = []

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from ragprep.pdf_text import Span
+from ragprep.pdf_text import Span, Word
 from ragprep.structure_ir import BBox, Heading, LayoutElement, Paragraph, Table, build_page_blocks
 
 
@@ -261,3 +261,106 @@ def test_build_page_blocks_rejects_invalid_page_size() -> None:
             page_height=1.0,
             layout_elements=[],
         )
+
+
+def test_build_page_blocks_assigns_span_with_overlap_when_center_misses() -> None:
+    spans = [
+        Span(x0=195, y0=110, x1=215, y1=130, text="InsideByOverlap"),
+        Span(x0=780, y0=110, x1=840, y1=130, text="UnassignedTail"),
+    ]
+    layout_elements = [
+        LayoutElement(page_index=0, bbox=BBox(0.10, 0.10, 0.20, 0.20), label="text", score=0.9),
+    ]
+
+    blocks = build_page_blocks(
+        spans=spans,
+        page_width=1000.0,
+        page_height=1000.0,
+        layout_elements=layout_elements,
+    )
+
+    assert len(blocks) == 2
+    assert isinstance(blocks[0], Paragraph)
+    assert blocks[0].text == "InsideByOverlap"
+    assert isinstance(blocks[1], Paragraph)
+    assert blocks[1].text == "UnassignedTail"
+
+
+def test_build_page_blocks_extracts_table_grid_with_missing_cells() -> None:
+    spans = [
+        Span(x0=10, y0=10, x1=50, y1=20, text="A"),
+        Span(x0=200, y0=10, x1=240, y1=20, text="B"),
+        Span(x0=400, y0=10, x1=440, y1=20, text="C"),
+        Span(x0=10, y0=30, x1=50, y1=40, text="1"),
+        Span(x0=400, y0=30, x1=440, y1=40, text="3"),
+    ]
+    layout_elements = [
+        LayoutElement(page_index=0, bbox=BBox(0.0, 0.0, 1.0, 1.0), label="table", score=0.9),
+    ]
+
+    blocks = build_page_blocks(
+        spans=spans,
+        page_width=1000.0,
+        page_height=1000.0,
+        layout_elements=layout_elements,
+    )
+
+    assert len(blocks) == 1
+    assert isinstance(blocks[0], Table)
+    assert blocks[0].grid == (("A", "B", "C"), ("1", "", "3"))
+
+
+def test_build_page_blocks_uses_page_words_for_merge_aware_table_cells() -> None:
+    spans = [
+        Span(x0=10, y0=10, x1=350, y1=20, text="MergedHeader C"),
+        Span(x0=10, y0=30, x1=40, y1=40, text="A1"),
+        Span(x0=150, y0=30, x1=180, y1=40, text="B1"),
+        Span(x0=310, y0=30, x1=340, y1=40, text="C1"),
+    ]
+    page_words = [
+        Word(x0=10, y0=10, x1=210, y1=20, text="MergedHeader", block_no=0, line_no=0, word_no=0),
+        Word(x0=310, y0=10, x1=350, y1=20, text="C", block_no=0, line_no=0, word_no=1),
+        Word(x0=10, y0=30, x1=40, y1=40, text="A1", block_no=0, line_no=1, word_no=0),
+        Word(x0=150, y0=30, x1=180, y1=40, text="B1", block_no=0, line_no=1, word_no=1),
+        Word(x0=310, y0=30, x1=340, y1=40, text="C1", block_no=0, line_no=1, word_no=2),
+    ]
+    layout_elements = [
+        LayoutElement(page_index=0, bbox=BBox(0.0, 0.0, 1.0, 1.0), label="table", score=0.9),
+    ]
+
+    blocks = build_page_blocks(
+        spans=spans,
+        page_words=page_words,
+        page_width=1000.0,
+        page_height=1000.0,
+        layout_elements=layout_elements,
+    )
+
+    assert len(blocks) == 1
+    assert isinstance(blocks[0], Table)
+    assert blocks[0].cells is not None
+    assert any(cell.row == 0 and cell.col == 0 and cell.colspan >= 2 for cell in blocks[0].cells)
+
+
+def test_build_page_blocks_orders_free_layout_boxes_in_band_sequence() -> None:
+    spans = [
+        Span(x0=80, y0=80, x1=120, y1=90, text="A"),
+        Span(x0=260, y0=90, x1=300, y1=100, text="B"),
+        Span(x0=430, y0=100, x1=470, y1=110, text="C"),
+        Span(x0=320, y0=170, x1=360, y1=180, text="D"),
+    ]
+    layout_elements = [
+        LayoutElement(page_index=0, bbox=BBox(0.05, 0.06, 0.25, 0.16), label="text", score=0.9),
+        LayoutElement(page_index=0, bbox=BBox(0.22, 0.08, 0.42, 0.15), label="text", score=0.9),
+        LayoutElement(page_index=0, bbox=BBox(0.39, 0.09, 0.59, 0.19), label="text", score=0.9),
+        LayoutElement(page_index=0, bbox=BBox(0.30, 0.16, 0.50, 0.26), label="text", score=0.9),
+    ]
+
+    blocks = build_page_blocks(
+        spans=spans,
+        page_width=1000.0,
+        page_height=1000.0,
+        layout_elements=layout_elements,
+    )
+
+    assert [b.text for b in blocks if isinstance(b, Paragraph)] == ["A", "B", "C", "D"]

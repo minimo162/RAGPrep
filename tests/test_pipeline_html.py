@@ -8,8 +8,12 @@ from threading import Barrier, BrokenBarrierError, Lock
 import pytest
 from PIL import Image
 
-from ragprep.pdf_text import Span
+from ragprep.pdf_text import Span, Word
 from ragprep.pipeline import PdfToHtmlProgress, ProgressPhase, pdf_to_html
+
+
+def _empty_words_for(spans_by_page: list[list[Span]]) -> list[list[Word]]:
+    return [[] for _ in spans_by_page]
 
 
 def test_pdf_to_html_reports_progress_and_renders_html(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -30,6 +34,10 @@ def test_pdf_to_html_reports_progress_and_renders_html(monkeypatch: pytest.Monke
         [Span(x0=0, y0=150, x1=10, y1=160, text="Body")],
     ]
     monkeypatch.setattr("ragprep.pdf_text.extract_pymupdf_page_spans", lambda _pdf: spans_by_page)
+    monkeypatch.setattr(
+        "ragprep.pdf_text.extract_pymupdf_page_words",
+        lambda _pdf: _empty_words_for(spans_by_page),
+    )
     monkeypatch.setattr(
         "ragprep.pdf_text.extract_pymupdf_page_sizes",
         lambda _pdf: [(1000.0, 1000.0), (1000.0, 1000.0)],
@@ -95,6 +103,10 @@ def test_pdf_to_html_pipelines_layout_requests_in_server_mode(
     ]
     monkeypatch.setattr("ragprep.pdf_text.extract_pymupdf_page_spans", lambda _pdf: spans_by_page)
     monkeypatch.setattr(
+        "ragprep.pdf_text.extract_pymupdf_page_words",
+        lambda _pdf: _empty_words_for(spans_by_page),
+    )
+    monkeypatch.setattr(
         "ragprep.pdf_text.extract_pymupdf_page_sizes",
         lambda _pdf: [(1000.0, 1000.0), (1000.0, 1000.0), (1000.0, 1000.0)],
     )
@@ -147,6 +159,7 @@ def test_pdf_to_html_requires_layout_analysis(monkeypatch: pytest.MonkeyPatch) -
         "ragprep.pdf_text.extract_pymupdf_page_spans",
         lambda _pdf: [[Span(x0=0, y0=0, x1=10, y1=10, text="X")]],
     )
+    monkeypatch.setattr("ragprep.pdf_text.extract_pymupdf_page_words", lambda _pdf: [[]])
     monkeypatch.setattr(
         "ragprep.pdf_text.extract_pymupdf_page_sizes",
         lambda _pdf: [(1000.0, 1000.0)],
@@ -192,6 +205,7 @@ def test_pdf_to_html_uses_layout_render_settings(monkeypatch: pytest.MonkeyPatch
         "ragprep.pdf_text.extract_pymupdf_page_spans",
         lambda _pdf: [[Span(x0=0, y0=0, x1=10, y1=10, text="X")]],
     )
+    monkeypatch.setattr("ragprep.pdf_text.extract_pymupdf_page_words", lambda _pdf: [[]])
     monkeypatch.setattr(
         "ragprep.pdf_text.extract_pymupdf_page_sizes",
         lambda _pdf: [(1000.0, 1000.0)],
@@ -246,6 +260,7 @@ def test_pdf_to_html_layout_render_defaults_are_fixed(monkeypatch: pytest.Monkey
         "ragprep.pdf_text.extract_pymupdf_page_spans",
         lambda _pdf: [[Span(x0=0, y0=0, x1=10, y1=10, text="X")]],
     )
+    monkeypatch.setattr("ragprep.pdf_text.extract_pymupdf_page_words", lambda _pdf: [[]])
     monkeypatch.setattr(
         "ragprep.pdf_text.extract_pymupdf_page_sizes",
         lambda _pdf: [(1000.0, 1000.0)],
@@ -319,6 +334,7 @@ def test_pdf_to_html_adaptive_layout_rerenders_on_empty_elements(
         "ragprep.pdf_text.extract_pymupdf_page_spans",
         lambda _pdf: [[Span(x0=0, y0=0, x1=10, y1=10, text="X")]],
     )
+    monkeypatch.setattr("ragprep.pdf_text.extract_pymupdf_page_words", lambda _pdf: [[]])
     monkeypatch.setattr(
         "ragprep.pdf_text.extract_pymupdf_page_sizes",
         lambda _pdf: [(1000.0, 1000.0)],

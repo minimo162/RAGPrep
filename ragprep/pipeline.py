@@ -247,10 +247,15 @@ def pdf_to_html(
     from ragprep.html_render import render_document_html, render_page_html, wrap_html_document
     from ragprep.layout.glm_doclayout import analyze_layout_image_base64
     from ragprep.pdf_render import iter_pdf_images, render_pdf_page_image
-    from ragprep.pdf_text import extract_pymupdf_page_sizes, extract_pymupdf_page_spans
+    from ragprep.pdf_text import (
+        extract_pymupdf_page_sizes,
+        extract_pymupdf_page_spans,
+        extract_pymupdf_page_words,
+    )
     from ragprep.structure_ir import Document, Page, build_page_blocks, layout_element_from_raw
 
     spans_by_page = extract_pymupdf_page_spans(pdf_bytes)
+    words_by_page = extract_pymupdf_page_words(pdf_bytes)
     page_sizes = extract_pymupdf_page_sizes(pdf_bytes)
 
     layout_mode = (settings.layout_mode or "").strip().lower()
@@ -276,7 +281,11 @@ def pdf_to_html(
         max_bytes=settings.max_upload_bytes,
     )
 
-    if len(spans_by_page) != int(total_pages) or len(page_sizes) != int(total_pages):
+    if (
+        len(spans_by_page) != int(total_pages)
+        or len(words_by_page) != int(total_pages)
+        or len(page_sizes) != int(total_pages)
+    ):
         raise RuntimeError("Page count mismatch between render and text extraction.")
 
     _notify_html_progress(
@@ -316,6 +325,7 @@ def pdf_to_html(
         page_w, page_h = page_sizes[page_number - 1]
         blocks = build_page_blocks(
             spans=spans_by_page[page_number - 1],
+            page_words=words_by_page[page_number - 1],
             page_width=page_w,
             page_height=page_h,
             layout_elements=layout_elements,

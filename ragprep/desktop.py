@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 import re
 import sys
 import threading
@@ -73,6 +74,31 @@ def _filename_from_content_disposition(content_disposition: str) -> str | None:
         return Path(name.replace("\r", "").replace("\n", "")).name
 
     return None
+
+
+def _sanitize_download_filename(
+    filename: str | None,
+    *,
+    fallback: str,
+    required_suffix: str | None = None,
+) -> str:
+    candidate = ""
+    if isinstance(filename, str):
+        candidate = filename.strip()
+    if candidate:
+        candidate = Path(candidate.replace("\r", "").replace("\n", "")).name
+    if not candidate:
+        candidate = Path(fallback).name
+
+    if required_suffix is not None:
+        suffix = required_suffix.strip().lstrip(".").lower()
+        if suffix:
+            normalized_suffix = f".{suffix}"
+            if not candidate.lower().endswith(normalized_suffix):
+                stem = Path(candidate).stem or Path(fallback).stem or "download"
+                candidate = f"{stem}{normalized_suffix}"
+
+    return candidate
 
 
 def _windows_known_folder_downloads() -> Path | None:
@@ -162,6 +188,56 @@ class _DesktopApi:
             return candidate
         return urljoin(f"{self._base_url}/", candidate.lstrip("/"))
 
+    def _save_payload_to_download_target(
+        self,
+        *,
+        payload: bytes,
+        filename: str,
+        file_types: list[tuple[str, str]],
+    ) -> dict[str, str]:
+        downloads_error: Exception | None = None
+        downloads_dir = _resolve_downloads_dir()
+        if downloads_dir is not None:
+            try:
+                target_path = _unique_download_path(downloads_dir, filename)
+                target_path.write_bytes(payload)
+                return {
+                    "status": "ok",
+                    "path": str(target_path),
+                    "filename": target_path.name,
+                }
+            except Exception as exc:  # noqa: BLE001
+                downloads_error = exc
+
+        try:
+            selection = self._webview.create_file_dialog(
+                self._webview.SAVE_DIALOG,
+                save_filename=filename,
+                file_types=file_types,
+            )
+        except Exception as exc:  # noqa: BLE001
+            if downloads_error is not None:
+                return {
+                    "status": "error",
+                    "message": (
+                        "downloads save failed: "
+                        f"{downloads_error}; save dialog failed: {exc}"
+                    ),
+                }
+            return {"status": "error", "message": f"save dialog failed: {exc}"}
+
+        if not selection:
+            return {"status": "cancelled"}
+
+        selected_path = selection[0] if isinstance(selection, (list, tuple)) else selection
+        try:
+            with open(str(selected_path), "wb") as handle:
+                handle.write(payload)
+        except Exception as exc:  # noqa: BLE001
+            return {"status": "error", "message": f"write failed: {exc}"}
+
+        return {"status": "ok", "path": str(selected_path), "filename": filename}
+
     def save_json(self, job_id: str, download_url: str | None = None) -> dict[str, str]:
         url = self._resolve_download_url(download_url, default_path=f"/download/{job_id}.json")
         request = Request(url, headers={"User-Agent": "ragprep-desktop"})
@@ -212,49 +288,30 @@ class _DesktopApi:
             return {"status": "error", "message": f"download failed: {exc}"}
 
         filename = _filename_from_content_disposition(content_disposition) or f"{job_id}.html"
+        return self._save_payload_to_download_target(
+            payload=html_bytes,
+            filename=filename,
+            file_types=[("HTML (*.html)", "*.html"), ("All files (*.*)", "*.*")],
+        )
 
-        downloads_error: Exception | None = None
-        downloads_dir = _resolve_downloads_dir()
-        if downloads_dir is not None:
-            try:
-                target_path = _unique_download_path(downloads_dir, filename)
-                target_path.write_bytes(html_bytes)
-                return {
-                    "status": "ok",
-                    "path": str(target_path),
-                    "filename": target_path.name,
-                }
-            except Exception as exc:  # noqa: BLE001
-                downloads_error = exc
-
-        try:
-            selection = self._webview.create_file_dialog(
-                self._webview.SAVE_DIALOG,
-                save_filename=filename,
-                file_types=[("HTML (*.html)", "*.html"), ("All files (*.*)", "*.*")],
-            )
-        except Exception as exc:  # noqa: BLE001
-            if downloads_error is not None:
-                return {
-                    "status": "error",
-                    "message": (
-                        "downloads save failed: "
-                        f"{downloads_error}; save dialog failed: {exc}"
-                    ),
-                }
-            return {"status": "error", "message": f"save dialog failed: {exc}"}
-
-        if not selection:
-            return {"status": "cancelled"}
-
-        selected_path = selection[0] if isinstance(selection, (list, tuple)) else selection
-        try:
-            with open(str(selected_path), "wb") as handle:
-                handle.write(html_bytes)
-        except Exception as exc:  # noqa: BLE001
-            return {"status": "error", "message": f"write failed: {exc}"}
-
-        return {"status": "ok", "path": str(selected_path), "filename": filename}
+    def save_html_text(
+        self,
+        job_id: str,
+        filename: str | None = None,
+        html_text: str | None = None,
+    ) -> dict[str, str]:
+        safe_filename = _sanitize_download_filename(
+            filename,
+            fallback=f"{job_id}.html",
+            required_suffix="html",
+        )
+        text = html_text if isinstance(html_text, str) else ""
+        html_bytes = text.encode("utf-8")
+        return self._save_payload_to_download_target(
+            payload=html_bytes,
+            filename=safe_filename,
+            file_types=[("HTML (*.html)", "*.html"), ("All files (*.*)", "*.*")],
+        )
 
     def save_markdown(self, job_id: str, download_url: str | None = None) -> dict[str, str]:
         url = self._resolve_download_url(download_url, default_path=f"/download/{job_id}.md")
@@ -326,6 +383,9 @@ def main(argv: list[str] | None = None) -> int:
         help="Seconds to wait for server readiness (default: 20)",
     )
     args = parser.parse_args(argv)
+
+    # Mark desktop launcher mode so web app can choose desktop-optimized startup behavior.
+    os.environ.setdefault("RAGPREP_DESKTOP_MODE", "1")
 
     config = uvicorn.Config(
         app,
