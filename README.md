@@ -10,6 +10,7 @@ RAGPrep converts PDFs to **structured HTML** by combining:
 - Web/Desktop `.html` download with in-app success/failure/cancel feedback.
 - Running-job partial output shows all processed pages so far (no last-N preview cap).
 - Optional startup prewarm to reduce first-request cold start for local layout backend.
+- `RAGPREP_LAYOUT_MODE` is defaulted to `local-paddle` (no env required for local mode).
 
 Outputs:
 - Web / Desktop: download `.html`
@@ -22,9 +23,16 @@ Outputs:
 uv sync --dev
 ```
 
-### 2) Enable layout analysis (required)
+### 2) Layout mode (default is already enabled)
 
-RAGPrep **requires layout analysis**. Choose one of the following backends.
+RAGPrep **requires layout analysis**. By default, it runs with:
+
+```text
+RAGPREP_LAYOUT_MODE=local-paddle
+RAGPREP_WEB_PREWARM_ON_STARTUP=1
+```
+
+Set env vars only when you want to override this behavior.
 
 #### Option A: Local (no Docker) via PaddleOCR (recommended)
 Install optional runtime:

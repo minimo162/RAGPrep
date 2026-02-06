@@ -118,6 +118,11 @@ def test_should_prewarm_on_startup_reads_env(monkeypatch: pytest.MonkeyPatch) ->
     assert webapp._should_prewarm_on_startup() is True
 
 
+def test_should_prewarm_on_startup_defaults_to_true(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("RAGPREP_WEB_PREWARM_ON_STARTUP", raising=False)
+    assert webapp._should_prewarm_on_startup() is True
+
+
 def test_ensure_startup_prewarm_started_runs_once(monkeypatch: pytest.MonkeyPatch) -> None:
     calls: list[str] = []
 

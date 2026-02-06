@@ -45,7 +45,7 @@ SUPPORTED_GLM_OCR_MODES: Final[tuple[str, ...]] = ("transformers", "server")
 SUPPORTED_LAYOUT_MODES: Final[tuple[str, ...]] = ("transformers", "server", "local-paddle")
 DEFAULT_GLM_OCR_MAX_TOKENS: Final[int] = 8192
 DEFAULT_GLM_OCR_TIMEOUT_SECONDS: Final[int] = 60
-DEFAULT_LAYOUT_MODE: Final[str] = ""
+DEFAULT_LAYOUT_MODE: Final[str] = "local-paddle"
 DEFAULT_LAYOUT_BASE_URL: Final[str] = DEFAULT_GLM_OCR_BASE_URL
 DEFAULT_LAYOUT_MODEL: Final[str] = DEFAULT_GLM_OCR_MODEL
 DEFAULT_LAYOUT_MAX_TOKENS: Final[int] = DEFAULT_GLM_OCR_MAX_TOKENS
@@ -182,12 +182,9 @@ def _get_glm_ocr_mode() -> str:
 
 def _get_layout_mode() -> str:
     raw = os.getenv(ENV_LAYOUT_MODE)
-    if raw is None:
-        # Backward compatible: default to GLM OCR mode, so existing setups keep working.
-        return _get_glm_ocr_mode()
+    if raw is None or not raw.strip():
+        return DEFAULT_LAYOUT_MODE
     value = raw.strip().lower()
-    if not value:
-        return _get_glm_ocr_mode()
     if value not in SUPPORTED_LAYOUT_MODES:
         raise ValueError(
             f"{ENV_LAYOUT_MODE} must be one of {', '.join(SUPPORTED_LAYOUT_MODES)}, got: {raw!r}"
