@@ -53,7 +53,7 @@ def _wait_for_health(*, health_url: str, timeout_s: float) -> bool:
 
 
 _FILENAME_STAR_RE: Final[re.Pattern[str]] = re.compile(
-    r"filename\\*=UTF-8''(?P<name>[^;]+)",
+    r"filename\*\s*=\s*UTF-8''(?P<name>[^;]+)",
     re.IGNORECASE,
 )
 _FILENAME_RE: Final[re.Pattern[str]] = re.compile(

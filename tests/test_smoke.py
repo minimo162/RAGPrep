@@ -109,6 +109,49 @@ def test_convert_creates_job_and_downloads_markdown(
     assert calls["n"] == 1
 
 
+def test_download_html_supports_unicode_filename(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("RAGPREP_WEB_PREWARM_ON_STARTUP", "0")
+    web_app._prewarm_started = False
+    client = TestClient(app)
+
+    pdf_bytes = _make_pdf_bytes(page_count=1)
+
+    def fake_to_html(
+        _bytes: bytes,
+        *,
+        full_document: bool = True,
+        on_progress: object | None = None,
+        on_page: Callable[[int, str], None] | None = None,
+        _page_output_dir: object | None = None,
+    ) -> str:
+        _ = full_document
+        _ = on_progress
+        if on_page is not None:
+            on_page(1, '<section data-page="1">page1</section>')
+        return '<section data-page="1">page1</section>'
+
+    monkeypatch.setattr(web_app, "pdf_to_html", fake_to_html)
+
+    files = {"file": ("report【1】.pdf", pdf_bytes, "application/pdf")}
+    response = client.post("/convert", files=files)
+    assert response.status_code == 200
+    job_id = _extract_job_id(response.text)
+
+    for _ in range(20):
+        result = client.get(f"/jobs/{job_id}/result")
+        if result.status_code == 200:
+            break
+        assert result.status_code == 409
+    else:
+        pytest.fail("job did not complete")
+
+    download_html = client.get(f"/download/{job_id}.html")
+    assert download_html.status_code == 200
+    content_disposition = download_html.headers["content-disposition"]
+    assert 'filename="report_1.html"' in content_disposition
+    assert "filename*=UTF-8''report%E3%80%901%E3%80%91.html" in content_disposition
+
+
 def test_bad_pdf_job_reports_error(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("RAGPREP_WEB_PREWARM_ON_STARTUP", "0")
     web_app._prewarm_started = False

@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 import multiprocessing as mp
 import os
+import re
 import time
 import uuid
 from dataclasses import dataclass, replace
@@ -10,6 +11,7 @@ from enum import Enum
 from pathlib import Path
 from threading import Lock, Semaphore, Thread
 from typing import Any
+from urllib.parse import quote
 
 from fastapi import FastAPI, File, HTTPException, Request, UploadFile
 from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse
@@ -616,6 +618,43 @@ def _download_filename_from_upload(upload_filename: str, *, suffix: str) -> str:
     stem = _safe_download_stem(upload_filename)
     return f"{stem}.{suffix}"
 
+
+_ASCII_DOWNLOAD_KEEP_RE = re.compile(r"[A-Za-z0-9._-]")
+
+
+def _ascii_download_stem(upload_filename: str) -> str:
+    stem = _safe_download_stem(upload_filename)
+    chars: list[str] = []
+    last_was_underscore = False
+    for char in stem:
+        if char.isascii() and _ASCII_DOWNLOAD_KEEP_RE.fullmatch(char):
+            chars.append(char)
+            last_was_underscore = False
+            continue
+        if not last_was_underscore:
+            chars.append("_")
+            last_was_underscore = True
+
+    ascii_stem = "".join(chars).strip("._-")
+    if not ascii_stem:
+        return "download"
+    return ascii_stem
+
+
+def _ascii_download_filename_from_upload(upload_filename: str, *, suffix: str) -> str:
+    return f"{_ascii_download_stem(upload_filename)}.{suffix}"
+
+
+def _build_download_content_disposition(upload_filename: str, *, suffix: str) -> str:
+    download_filename = _download_filename_from_upload(upload_filename, suffix=suffix)
+    encoded_filename = quote(download_filename)
+    if encoded_filename == download_filename:
+        return f'attachment; filename="{download_filename}"'
+
+    ascii_filename = _ascii_download_filename_from_upload(upload_filename, suffix=suffix)
+    return f'attachment; filename="{ascii_filename}"; filename*=UTF-8\'\'{encoded_filename}'
+
+
 def _html_fragment_from_job(job: Job) -> str:
     if job.html_output:
         return job.html_output.strip()
@@ -635,8 +674,8 @@ def download_html(job_id: str) -> HTMLResponse:
     fragment = _html_fragment_from_job(job)
     html = wrap_html_document(fragment, title=_safe_download_stem(job.filename))
 
-    download_filename = _download_filename_from_upload(job.filename, suffix="html")
-    headers = {"Content-Disposition": f'attachment; filename="{download_filename}"'}
+    content_disposition = _build_download_content_disposition(job.filename, suffix="html")
+    headers = {"Content-Disposition": content_disposition}
     return HTMLResponse(html, media_type="text/html; charset=utf-8", headers=headers)
 
 

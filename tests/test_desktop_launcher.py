@@ -95,6 +95,19 @@ def test_wait_for_health_disables_env_proxies(monkeypatch: pytest.MonkeyPatch) -
     assert captured["trust_env"] is False
 
 
+def test_filename_from_content_disposition_decodes_filename_star() -> None:
+    header = "attachment; filename*=UTF-8''report%E3%80%901%E3%80%91.html"
+    assert desktop._filename_from_content_disposition(header) == "report【1】.html"
+
+
+def test_filename_from_content_disposition_prefers_filename_star() -> None:
+    header = (
+        "attachment; filename=\"report_1_.html\"; "
+        "filename*=UTF-8''report%E3%80%901%E3%80%91.html"
+    )
+    assert desktop._filename_from_content_disposition(header) == "report【1】.html"
+
+
 def test_desktop_launcher_calls_webview_and_stops_server(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("RAGPREP_DESKTOP_MODE", raising=False)
 
