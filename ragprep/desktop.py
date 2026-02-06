@@ -7,7 +7,7 @@ import threading
 import time
 from pathlib import Path
 from typing import Any, Final
-from urllib.parse import unquote
+from urllib.parse import unquote, urljoin
 from urllib.request import Request, urlopen
 
 import httpx
@@ -152,8 +152,18 @@ class _DesktopApi:
         self._base_url = base_url.rstrip("/")
         self._webview = webview
 
+    def _resolve_download_url(self, download_url: str | None, *, default_path: str) -> str:
+        if not download_url:
+            return f"{self._base_url}{default_path}"
+        candidate = download_url.strip()
+        if not candidate:
+            return f"{self._base_url}{default_path}"
+        if candidate.startswith(("http://", "https://")):
+            return candidate
+        return urljoin(f"{self._base_url}/", candidate.lstrip("/"))
+
     def save_json(self, job_id: str, download_url: str | None = None) -> dict[str, str]:
-        url = download_url or f"{self._base_url}/download/{job_id}.json"
+        url = self._resolve_download_url(download_url, default_path=f"/download/{job_id}.json")
         request = Request(url, headers={"User-Agent": "ragprep-desktop"})
 
         try:
@@ -189,7 +199,7 @@ class _DesktopApi:
         return {"status": "ok", "path": str(selected_path), "filename": filename}
 
     def save_html(self, job_id: str, download_url: str | None = None) -> dict[str, str]:
-        url = download_url or f"{self._base_url}/download/{job_id}.html"
+        url = self._resolve_download_url(download_url, default_path=f"/download/{job_id}.html")
         request = Request(url, headers={"User-Agent": "ragprep-desktop"})
 
         try:
@@ -247,7 +257,7 @@ class _DesktopApi:
         return {"status": "ok", "path": str(selected_path), "filename": filename}
 
     def save_markdown(self, job_id: str, download_url: str | None = None) -> dict[str, str]:
-        url = download_url or f"{self._base_url}/download/{job_id}.md"
+        url = self._resolve_download_url(download_url, default_path=f"/download/{job_id}.md")
         request = Request(url, headers={"User-Agent": "ragprep-desktop"})
 
         try:

@@ -148,6 +148,36 @@ def test_build_page_blocks_uses_topo_order_when_no_clear_gaps() -> None:
     assert [b.text for b in blocks if isinstance(b, Paragraph)] == ["LEFT", "RIGHT"]
 
 
+def test_build_page_blocks_prefers_column_major_in_ambiguous_two_columns() -> None:
+    spans = [
+        Span(x0=50, y0=100, x1=60, y1=110, text="L-top"),
+        Span(x0=50, y0=300, x1=60, y1=310, text="L-bottom"),
+        Span(x0=600, y0=100, x1=610, y1=110, text="R-top"),
+        Span(x0=600, y0=300, x1=610, y1=310, text="R-bottom"),
+    ]
+    # Columns slightly overlap in x, so gap-based split is ambiguous.
+    layout_elements = [
+        LayoutElement(page_index=0, bbox=BBox(0.00, 0.05, 0.56, 0.20), label="text", score=0.9),
+        LayoutElement(page_index=0, bbox=BBox(0.00, 0.25, 0.56, 0.40), label="text", score=0.9),
+        LayoutElement(page_index=0, bbox=BBox(0.44, 0.05, 1.00, 0.20), label="text", score=0.9),
+        LayoutElement(page_index=0, bbox=BBox(0.44, 0.25, 1.00, 0.40), label="text", score=0.9),
+    ]
+
+    blocks = build_page_blocks(
+        spans=spans,
+        page_width=1000.0,
+        page_height=1000.0,
+        layout_elements=layout_elements,
+    )
+
+    assert [b.text for b in blocks if isinstance(b, Paragraph)] == [
+        "L-top",
+        "L-bottom",
+        "R-top",
+        "R-bottom",
+    ]
+
+
 def test_build_page_blocks_sets_heading_level_from_span_sizes() -> None:
     spans = [
         Span(x0=10, y0=10, x1=20, y1=20, text="BigTitle", size=20.0),

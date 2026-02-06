@@ -669,6 +669,27 @@ def _analyze_layout_local_paddle(image_base64: str, *, settings: Settings) -> di
     }
 
 
+def prewarm_layout_backend(*, settings: Settings) -> None:
+    """
+    Eagerly initialize layout backend resources to reduce first-request cold start.
+
+    - local-paddle / transformers: initialize and cache PaddleOCR PPStructure engine.
+    - server: no local heavy resources to initialize.
+    """
+
+    mode = (settings.layout_mode or "").strip().lower() or _GlmOcrMode.transformers
+    if mode in {_GlmOcrMode.transformers, _GlmOcrMode.local_paddle}:
+        _apply_paddle_safe_mode_env()
+        _ = _get_paddleocr_engine()
+        return
+    if mode == _GlmOcrMode.server:
+        return
+    raise RuntimeError(
+        "Layout analysis requires RAGPREP_LAYOUT_MODE=server or "
+        "RAGPREP_LAYOUT_MODE=local-paddle."
+    )
+
+
 def analyze_layout_image_base64(image_base64: str, *, settings: Settings) -> dict[str, object]:
     """
     Request layout analysis for a single page image.

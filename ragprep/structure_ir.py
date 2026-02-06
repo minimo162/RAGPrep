@@ -266,6 +266,13 @@ def _xy_cut_order_inner(
     if depth >= max_depth:
         return _topo_order(elements)
 
+    center_split = _column_center_split(elements)
+    if center_split is not None:
+        left_group, right_group = center_split
+        first = _xy_cut_order_inner(left_group, depth=depth + 1, max_depth=max_depth)
+        second = _xy_cut_order_inner(right_group, depth=depth + 1, max_depth=max_depth)
+        return first + second
+
     split_y = _best_gap_split(elements, axis="y")
     split_x = _best_gap_split(elements, axis="x")
 
@@ -297,6 +304,49 @@ def _xy_cut_order_inner(
     first = _xy_cut_order_inner(a, depth=depth + 1, max_depth=max_depth)
     second = _xy_cut_order_inner(b, depth=depth + 1, max_depth=max_depth)
     return first + second
+
+
+def _column_center_split(
+    elements: list[LayoutElement],
+) -> tuple[list[LayoutElement], list[LayoutElement]] | None:
+    if len(elements) < 4:
+        return None
+
+    widths = [max(0.0, e.bbox.x1 - e.bbox.x0) for e in elements]
+    if any(w >= 0.8 for w in widths):
+        # Full-width blocks should be handled by gap-based splitting.
+        return None
+
+    centers = sorted((e.bbox.x0 + e.bbox.x1) / 2.0 for e in elements)
+    mid = len(centers) // 2
+    if len(centers) % 2 == 0:
+        split = (centers[mid - 1] + centers[mid]) / 2.0
+    else:
+        split = centers[mid]
+
+    left = [e for e in elements if ((e.bbox.x0 + e.bbox.x1) / 2.0) <= split]
+    right = [e for e in elements if ((e.bbox.x0 + e.bbox.x1) / 2.0) > split]
+    if len(left) < 2 or len(right) < 2:
+        return None
+
+    left_centers = sorted((e.bbox.x0 + e.bbox.x1) / 2.0 for e in left)
+    right_centers = sorted((e.bbox.x0 + e.bbox.x1) / 2.0 for e in right)
+    separation = right_centers[0] - left_centers[-1]
+    if separation <= 0.05:
+        return None
+
+    left_y0 = min(e.bbox.y0 for e in left)
+    left_y1 = max(e.bbox.y1 for e in left)
+    right_y0 = min(e.bbox.y0 for e in right)
+    right_y1 = max(e.bbox.y1 for e in right)
+    overlap = max(0.0, min(left_y1, right_y1) - max(left_y0, right_y0))
+    left_span = max(1e-6, left_y1 - left_y0)
+    right_span = max(1e-6, right_y1 - right_y0)
+    overlap_ratio = overlap / min(left_span, right_span)
+    if overlap_ratio < 0.5:
+        return None
+
+    return left, right
 
 
 @dataclass(frozen=True)
@@ -350,8 +400,11 @@ def _topo_order(elements: list[LayoutElement]) -> list[LayoutElement]:
         return list(elements)
 
     nodes = list(elements)
+    prefer_column_major = _prefer_column_major_tie_break(nodes)
 
     def tie_key(e: LayoutElement) -> tuple[float, float, float, float, str]:
+        if prefer_column_major:
+            return (e.bbox.x0, e.bbox.y0, e.bbox.y1, e.bbox.x1, e.label)
         return (e.bbox.y0, e.bbox.x0, e.bbox.y1, e.bbox.x1, e.label)
 
     n = len(nodes)
@@ -385,6 +438,35 @@ def _topo_order(elements: list[LayoutElement]) -> list[LayoutElement]:
         return sorted(nodes, key=tie_key)
 
     return [nodes[i] for i in out]
+
+
+def _prefer_column_major_tie_break(elements: list[LayoutElement]) -> bool:
+    if len(elements) < 4:
+        return False
+
+    centers = sorted((e.bbox.x0 + e.bbox.x1) / 2.0 for e in elements)
+    mid = len(centers) // 2
+    if len(centers) % 2 == 0:
+        split = (centers[mid - 1] + centers[mid]) / 2.0
+    else:
+        split = centers[mid]
+    left = [e for e in elements if ((e.bbox.x0 + e.bbox.x1) / 2.0) <= split]
+    right = [e for e in elements if ((e.bbox.x0 + e.bbox.x1) / 2.0) > split]
+    if len(left) < 2 or len(right) < 2:
+        return False
+
+    def _y_bounds(group: list[LayoutElement]) -> tuple[float, float]:
+        return min(e.bbox.y0 for e in group), max(e.bbox.y1 for e in group)
+
+    left_y0, left_y1 = _y_bounds(left)
+    right_y0, right_y1 = _y_bounds(right)
+    overlap = max(0.0, min(left_y1, right_y1) - max(left_y0, right_y0))
+    left_span = max(1e-6, left_y1 - left_y0)
+    right_span = max(1e-6, right_y1 - right_y0)
+    overlap_ratio = overlap / min(left_span, right_span)
+
+    # Prefer column-major tie-break when both sides span similar vertical bands.
+    return overlap_ratio >= 0.5
 
 
 def _precedes(a: LayoutElement, b: LayoutElement) -> bool:

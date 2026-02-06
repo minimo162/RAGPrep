@@ -22,13 +22,9 @@
     {% if job.partial_html %}
       <div class="partial-output">
         <p class="muted">
-          Partial output preview (showing {{ job.partial_preview_pages }} page(s); latest page {{ job.partial_pages }})
+          Processed output so far (up to page {{ job.partial_pages }})
         </p>
-        <div
-          class="html-output streaming-output"
-          data-streaming-output="partial"
-          style="max-height: 320px"
-        >
+        <div class="html-output" data-streaming-output="partial">
           {{ job.partial_html | safe }}
         </div>
       </div>

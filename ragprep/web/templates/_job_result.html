@@ -5,7 +5,10 @@
       <a
         class="link"
         href="/download/{{ job.id }}.html"
-        onclick="if (window.pywebview && window.pywebview.api && window.pywebview.api.save_html) { const result = window.pywebview.api.save_html('{{ job.id }}', this.href); if (result && typeof result.then === 'function') { result.then((payload) => { if (payload && payload.status && payload.status !== 'ok') { console.warn('save_html result', payload); } }).catch((error) => { console.error('save_html failed', error); }); } return false; }"
+        data-download-kind="html"
+        data-job-id="{{ job.id }}"
+        download
+        onclick="return window.ragprepHandleHtmlDownload ? window.ragprepHandleHtmlDownload(event, '{{ job.id }}') : true;"
         >Download .html</a
       >
     </div>

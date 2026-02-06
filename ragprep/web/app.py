@@ -29,20 +29,25 @@ app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
 logger = logging.getLogger(__name__)
 
-ENV_WEB_PARTIAL_PREVIEW_PAGES = "RAGPREP_WEB_PARTIAL_PREVIEW_PAGES"
-DEFAULT_WEB_PARTIAL_PREVIEW_PAGES = 3
 _PARTIAL_PAGE_SEPARATOR = "\n<!-- ragprep:partial-page -->\n"
+ENV_WEB_PREWARM_ON_STARTUP = "RAGPREP_WEB_PREWARM_ON_STARTUP"
+DEFAULT_WEB_PREWARM_ON_STARTUP = True
 
 
-def _get_web_partial_preview_pages() -> int:
-    raw = os.getenv(ENV_WEB_PARTIAL_PREVIEW_PAGES)
+def _get_bool_env(name: str, *, default: bool) -> bool:
+    raw = os.getenv(name)
     if raw is None or not raw.strip():
-        return DEFAULT_WEB_PARTIAL_PREVIEW_PAGES
-    try:
-        value = int(raw.strip())
-    except ValueError:
-        return DEFAULT_WEB_PARTIAL_PREVIEW_PAGES
-    return max(1, value)
+        return default
+    value = raw.strip().lower()
+    if value in {"1", "true", "yes", "on"}:
+        return True
+    if value in {"0", "false", "no", "off"}:
+        return False
+    return default
+
+
+def _should_prewarm_on_startup() -> bool:
+    return _get_bool_env(ENV_WEB_PREWARM_ON_STARTUP, default=DEFAULT_WEB_PREWARM_ON_STARTUP)
 
 
 class JobStatus(str, Enum):
@@ -110,16 +115,16 @@ class JobStore:
             )
             blocks.append(page_block)
 
-            limit = _get_web_partial_preview_pages()
-            preview_blocks = blocks[-limit:]
-            partial_html = _PARTIAL_PAGE_SEPARATOR.join(preview_blocks).strip()
+            partial_html = _PARTIAL_PAGE_SEPARATOR.join(blocks).strip()
+            partial_pages = max(existing.partial_pages, int(page_index))
 
             updated = replace(
                 existing,
                 version=int(existing.version) + 1,
                 partial_html=partial_html,
-                partial_pages=max(existing.partial_pages, int(page_index)),
-                partial_preview_pages=len(preview_blocks),
+                partial_pages=partial_pages,
+                # Keep this for template compatibility; now reflects total accumulated pages.
+                partial_preview_pages=partial_pages,
             )
             self._jobs[job_id] = updated
             return updated
@@ -132,6 +137,9 @@ _job_semaphore_lock = Lock()
 _job_semaphore: Semaphore | None = None
 _job_semaphore_size: int | None = None
 
+_prewarm_lock = Lock()
+_prewarm_started = False
+
 
 def _get_job_semaphore() -> Semaphore:
     global _job_semaphore, _job_semaphore_size
@@ -142,6 +150,26 @@ def _get_job_semaphore() -> Semaphore:
             _job_semaphore = Semaphore(size)
             _job_semaphore_size = size
         return _job_semaphore
+
+
+def _prewarm_layout_backend() -> None:
+    settings = get_settings()
+    try:
+        from ragprep.layout.glm_doclayout import prewarm_layout_backend
+
+        prewarm_layout_backend(settings=settings)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Layout prewarm failed: %s", exc)
+
+
+def _ensure_startup_prewarm_started() -> None:
+    global _prewarm_started
+
+    with _prewarm_lock:
+        if _prewarm_started:
+            return
+        _prewarm_started = True
+    Thread(target=_prewarm_layout_backend, daemon=True, name="ragprep-prewarm").start()
 
 
 def _run_job(job_id: str, pdf_bytes: bytes) -> None:
@@ -213,6 +241,12 @@ def _run_job(job_id: str, pdf_bytes: bytes) -> None:
 def _start_job(job_id: str, pdf_bytes: bytes) -> None:
     # Avoid tying long-running sync work to the request lifecycle/threadpool.
     Thread(target=_run_job, args=(job_id, pdf_bytes), daemon=True).start()
+
+
+@app.on_event("startup")
+def startup() -> None:
+    if _should_prewarm_on_startup():
+        _ensure_startup_prewarm_started()
 
 
 @app.get("/", response_class=HTMLResponse)

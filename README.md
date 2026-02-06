@@ -7,6 +7,7 @@ RAGPrep converts PDFs to **structured HTML** by combining:
 Outputs:
 - Web / Desktop: download `.html`
 - CLI: writes an `.html` file
+- Web/Desktop download button shows completion/failure status in-app
 
 ## Quickstart
 
@@ -81,7 +82,8 @@ Fast layout (server mode):
 
 ## Web settings
 
-- `RAGPREP_WEB_PARTIAL_PREVIEW_PAGES`: limit streaming “partial output” preview to the last N pages (default: `3`)
+- Partial output now accumulates all processed pages (no last-N cap).
+- `RAGPREP_WEB_PREWARM_ON_STARTUP`: pre-initialize local layout backend on app startup (`1`/`0`, default: `1`)
 
 ## Troubleshooting (layout server)
 

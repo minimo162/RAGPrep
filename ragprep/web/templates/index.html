@@ -83,10 +83,6 @@
         border-radius: 8px;
         overflow: auto;
       }
-      pre.streaming-output {
-        max-height: 320px;
-        overflow: auto;
-      }
       .toolbar {
         display: flex;
         align-items: center;
@@ -97,83 +93,112 @@
         color: var(--fg);
         text-decoration: underline;
       }
+      .notice {
+        margin-top: 8px;
+        min-height: 1.25em;
+      }
+      .notice.success {
+        color: #065f46;
+      }
+      .notice.error {
+        color: var(--danger);
+        font-weight: 600;
+      }
     </style>
     <script src="/static/htmx.min.js"></script>
     <script>
       (function () {
-        const scrollState = new Map();
-        const tolerancePx = 8;
-
-        function getJobElement(elt) {
-          if (!(elt instanceof HTMLElement)) return null;
-          return elt.closest("[data-job-id]");
+        function setNotice(message, kind) {
+          const notice = document.getElementById("download-notice");
+          if (!(notice instanceof HTMLElement)) return;
+          notice.textContent = message || "";
+          notice.classList.remove("success", "error");
+          if (kind === "success") notice.classList.add("success");
+          if (kind === "error") notice.classList.add("error");
         }
 
-        function getStreamingOutput(jobElt) {
-          if (!(jobElt instanceof HTMLElement)) return null;
-          return jobElt.querySelector('[data-streaming-output="partial"]');
-        }
-
-        function getJobId(jobElt) {
-          if (!(jobElt instanceof HTMLElement)) return null;
-          return jobElt.getAttribute("data-job-id");
-        }
-
-        function findJobById(jobId) {
-          if (!jobId) return null;
-          const selector = `[data-job-id="${jobId}"]`;
-          const candidate = document.querySelector(selector);
-          return candidate instanceof HTMLElement ? candidate : null;
-        }
-
-        function capture(jobElt) {
-          const jobId = jobElt.getAttribute("data-job-id");
-          if (!jobId) return;
-          const pre = getStreamingOutput(jobElt);
-          if (!(pre instanceof HTMLElement)) {
-            scrollState.delete(jobId);
-            return;
+        function parseFilename(contentDisposition) {
+          if (!contentDisposition || typeof contentDisposition !== "string") return null;
+          const starMatch = contentDisposition.match(/filename\*=UTF-8''([^;]+)/i);
+          if (starMatch && starMatch[1]) {
+            try {
+              return decodeURIComponent(starMatch[1]);
+            } catch (_error) {
+              return starMatch[1];
+            }
           }
-
-          const scrollTop = pre.scrollTop;
-          const scrollHeight = pre.scrollHeight;
-          const clientHeight = pre.clientHeight;
-          const maxScrollTop = Math.max(0, scrollHeight - clientHeight);
-          const distanceFromBottom = Math.max(0, scrollHeight - (scrollTop + clientHeight));
-          const atBottom = distanceFromBottom <= tolerancePx || scrollTop >= maxScrollTop - tolerancePx;
-
-          scrollState.set(jobId, { atBottom, scrollTop });
+          const basicMatch = contentDisposition.match(/filename="?([^";]+)"?/i);
+          return basicMatch && basicMatch[1] ? basicMatch[1] : null;
         }
 
-        function restore(jobId, fallbackElt) {
-          const jobElt = findJobById(jobId) || getJobElement(fallbackElt);
-          if (!jobElt) return;
-          const pre = getStreamingOutput(jobElt);
-          const state = jobId ? scrollState.get(jobId) : null;
-          if (!(pre instanceof HTMLElement) || !state) return;
+        async function downloadViaBrowser(url) {
+          const response = await fetch(url, { credentials: "same-origin" });
+          if (!response.ok) {
+            throw new Error(`download failed: HTTP ${response.status}`);
+          }
+          const blob = await response.blob();
+          const contentDisposition = response.headers.get("content-disposition");
+          const fileName = parseFilename(contentDisposition) || "download.html";
 
-          const maxScrollTop = Math.max(0, pre.scrollHeight - pre.clientHeight);
-          if (state.atBottom) {
-            pre.scrollTop = maxScrollTop;
-            return;
+          const blobUrl = URL.createObjectURL(blob);
+          try {
+            const anchor = document.createElement("a");
+            anchor.href = blobUrl;
+            anchor.download = fileName;
+            document.body.appendChild(anchor);
+            anchor.click();
+            anchor.remove();
+          } finally {
+            URL.revokeObjectURL(blobUrl);
           }
-          if (typeof state.scrollTop === "number") {
-            pre.scrollTop = Math.min(state.scrollTop, maxScrollTop);
-          }
+          return fileName;
         }
+
+        window.ragprepHandleHtmlDownload = async function (event, jobId) {
+          const target = event && event.currentTarget;
+          const anchor = target instanceof HTMLAnchorElement ? target : null;
+          if (!anchor) return true;
+          event.preventDefault();
+
+          const href = anchor.href;
+          setNotice("Downloading HTML...", null);
+
+          try {
+            if (
+              window.pywebview &&
+              window.pywebview.api &&
+              typeof window.pywebview.api.save_html === "function"
+            ) {
+              const payload = await window.pywebview.api.save_html(jobId, href);
+              if (!payload || payload.status === "cancelled") {
+                setNotice("Download cancelled.", null);
+                return false;
+              }
+              if (payload.status !== "ok") {
+                setNotice(
+                  `Download failed: ${payload.message || payload.status || "unknown error"}`,
+                  "error"
+                );
+                return false;
+              }
+              const savedName = payload.filename || payload.path || "HTML file";
+              setNotice(`Download completed: ${savedName}`, "success");
+              return false;
+            }
+
+            const fileName = await downloadViaBrowser(href);
+            setNotice(`Download completed: ${fileName}`, "success");
+          } catch (error) {
+            const message = error && error.message ? error.message : String(error);
+            setNotice(`Download failed: ${message}`, "error");
+          }
+          return false;
+        };
 
         document.body.addEventListener("htmx:beforeSwap", (event) => {
-          const jobElt = getJobElement(event.detail && event.detail.elt);
-          if (jobElt && jobElt.matches("[data-job-id]")) {
-            capture(jobElt);
-          }
-        });
-
-        document.body.addEventListener("htmx:afterSwap", (event) => {
-          const jobElt = getJobElement(event.detail && event.detail.elt);
-          const jobId = getJobId(jobElt);
-          if (jobId) {
-            restore(jobId, event.detail && event.detail.elt);
+          const detail = event && event.detail;
+          if (detail && detail.target && detail.target.id === "result") {
+            setNotice("", null);
           }
         });
       })();
@@ -183,6 +208,7 @@
     <main class="container">
       <h1>PDF to HTML</h1>
       <p class="muted">Upload a PDF and wait for HTML conversion to finish.</p>
+      <p id="download-notice" class="muted notice" aria-live="polite"></p>
 
       <form
         hx-post="/convert"

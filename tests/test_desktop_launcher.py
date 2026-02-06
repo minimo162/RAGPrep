@@ -237,3 +237,36 @@ def test_save_html_renames_on_collision(
     assert renamed_path.exists()
     assert renamed_path.read_bytes() == b"new"
 
+
+def test_save_html_accepts_relative_download_url(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    downloads_dir = tmp_path / "Downloads"
+    downloads_dir.mkdir(parents=True, exist_ok=True)
+    captured: dict[str, object] = {}
+
+    def _fake_urlopen(request: object, timeout: float = 0.0) -> _FakeResponse:
+        _ = timeout
+        captured["url"] = getattr(request, "full_url", None)
+        return _FakeResponse(
+            status=200,
+            body=b"ok",
+            headers={"Content-Disposition": 'attachment; filename="report.html"'},
+        )
+
+    class WebviewStub:
+        SAVE_DIALOG = object()
+
+        def create_file_dialog(self, *args: object, **kwargs: object) -> None:
+            raise AssertionError("save dialog should not be called when downloads is available")
+
+    monkeypatch.setattr(desktop, "urlopen", _fake_urlopen)
+    monkeypatch.setattr(desktop, "_resolve_downloads_dir", lambda: downloads_dir)
+
+    api = desktop._DesktopApi(base_url="http://127.0.0.1:8000", webview=WebviewStub())
+    result = api.save_html("job123", "/download/job123.html")
+
+    assert captured["url"] == "http://127.0.0.1:8000/download/job123.html"
+    assert result["status"] == "ok"
+

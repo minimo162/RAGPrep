@@ -464,3 +464,34 @@ def test_glm_doclayout_extracts_json_from_surrounding_text(monkeypatch: pytest.M
     assert isinstance(elements, list)
     assert isinstance(elements[0], dict)
     assert elements[0]["page_index"] == 0
+
+
+def test_prewarm_layout_backend_initializes_local_engine(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("RAGPREP_LAYOUT_MODE", "local-paddle")
+    settings = get_settings()
+    calls: list[str] = []
+
+    monkeypatch.setattr(glm_doclayout, "_apply_paddle_safe_mode_env", lambda: calls.append("env"))
+    monkeypatch.setattr(glm_doclayout, "_get_paddleocr_engine", lambda: calls.append("engine"))
+
+    glm_doclayout.prewarm_layout_backend(settings=settings)
+    assert calls == ["env", "engine"]
+
+
+def test_prewarm_layout_backend_is_noop_in_server_mode(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("RAGPREP_LAYOUT_MODE", "server")
+    settings = get_settings()
+    called = {"engine": False}
+
+    def _fail() -> None:
+        called["engine"] = True
+        raise AssertionError("engine should not be initialized for server mode")
+
+    monkeypatch.setattr(glm_doclayout, "_get_paddleocr_engine", _fail)
+
+    glm_doclayout.prewarm_layout_backend(settings=settings)
+    assert called["engine"] is False

@@ -88,7 +88,7 @@ def test_convert_creates_job_and_downloads_markdown(
     assert f"/download/{job_id}.json" not in result.text
     assert f"/download/{job_id}.html" in result.text
     assert "save_json" not in result.text
-    assert "save_html" in result.text
+    assert "ragprepHandleHtmlDownload" in result.text
 
     download_html = client.get(f"/download/{job_id}.html")
     assert download_html.status_code == 200
