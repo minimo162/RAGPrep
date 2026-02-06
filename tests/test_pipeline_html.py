@@ -282,7 +282,7 @@ def test_pdf_to_html_layout_render_defaults_are_fixed(monkeypatch: pytest.Monkey
     html = pdf_to_html(b"%PDF", full_document=False)
     assert "X" in html
     assert captured["dpi"] == 250
-    assert captured["max_edge"] == 1024
+    assert captured["max_edge"] == 768
 
 
 def test_pdf_to_html_adaptive_layout_rerenders_on_empty_elements(

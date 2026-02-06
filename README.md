@@ -87,15 +87,17 @@ uv run python scripts/pdf_to_html.py --pdf .\\path\\to\\input.pdf --out .\\out\\
 - `RAGPREP_MODEL_CACHE_DIR`: shared local model cache directory used for Paddle/HuggingFace/Torch assets (default: OS cache dir under `ragprep/model-cache`)
 - `RAGPREP_LAYOUT_CONCURRENCY`: number of in-flight layout requests in server mode (default: `1`)
 - `RAGPREP_LAYOUT_RENDER_DPI`: DPI used for layout rendering (default: `250`)
-- `RAGPREP_LAYOUT_RENDER_MAX_EDGE`: max edge for layout rendering (default: `1024`)
+- `RAGPREP_LAYOUT_RENDER_MAX_EDGE`: max edge for layout rendering (default: `768`)
 - `RAGPREP_LAYOUT_RENDER_AUTO`: enable small-first layout rendering with one higher-res retry on empty results (server mode; default: `0`)
 - `RAGPREP_LAYOUT_RENDER_AUTO_SMALL_DPI`: DPI for small-first pass (default: `250`)
-- `RAGPREP_LAYOUT_RENDER_AUTO_SMALL_MAX_EDGE`: max edge for small-first pass (default: `1024`)
+- `RAGPREP_LAYOUT_RENDER_AUTO_SMALL_MAX_EDGE`: max edge for small-first pass (default: `768`)
 - `RAGPREP_LAYOUT_RETRY_COUNT`: retry count for transient failures (server mode; default: `1`)
 - `RAGPREP_LAYOUT_RETRY_BACKOFF_SECONDS`: base backoff seconds between retries (server mode; default: `0.0`)
 
 Fast layout hint (server mode):
 - Try `RAGPREP_LAYOUT_CONCURRENCY=2` and `RAGPREP_LAYOUT_RENDER_AUTO=1` first.
+- Start with `RAGPREP_LAYOUT_RENDER_MAX_EDGE=768` for layout-only workloads.
+- Very small `max_edge` values (for example `640`) can be slower depending on backend/device; if quality or speed regresses, try `1024`.
 
 ## Web settings
 

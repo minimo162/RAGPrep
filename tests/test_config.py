@@ -100,6 +100,19 @@ def test_layout_mode_accepts_local_paddle(monkeypatch: pytest.MonkeyPatch) -> No
     assert settings.layout_mode == "local-paddle"
 
 
+def test_layout_render_defaults_are_stable(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("RAGPREP_LAYOUT_RENDER_DPI", raising=False)
+    monkeypatch.delenv("RAGPREP_LAYOUT_RENDER_MAX_EDGE", raising=False)
+    monkeypatch.delenv("RAGPREP_LAYOUT_RENDER_AUTO_SMALL_DPI", raising=False)
+    monkeypatch.delenv("RAGPREP_LAYOUT_RENDER_AUTO_SMALL_MAX_EDGE", raising=False)
+
+    settings = config.get_settings()
+    assert settings.layout_render_dpi == 250
+    assert settings.layout_render_max_edge == 768
+    assert settings.layout_render_auto_small_dpi == 250
+    assert settings.layout_render_auto_small_max_edge == 768
+
+
 def test_model_cache_dir_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("RAGPREP_MODEL_CACHE_DIR", raising=False)
     settings = config.get_settings()
