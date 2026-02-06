@@ -26,6 +26,8 @@ class TableGrid:
     row_keys: tuple[int, ...]
     rows: tuple[tuple[str, ...], ...]
     cells: tuple[TableCell, ...] = ()
+    collision_count: int = 0
+    group_count: int = 0
 
 
 @dataclass(frozen=True)
@@ -76,7 +78,11 @@ def build_table_grid(words: list[Word], *, column_count: int) -> TableGridResult
 
     centers = tuple(sorted(centers_list))
     min_sep = _min_adjacent_separation(centers)
-    min_sep_threshold = max(8.0, median_width * 1.5)
+    min_x0 = min(float(w.x0) for w in words)
+    max_x1 = max(float(w.x1) for w in words)
+    table_span = max(1e-6, max_x1 - min_x0)
+    expected_col_width = table_span / max(1.0, float(column_count))
+    min_sep_threshold = max(6.0, min(median_width * 1.5, expected_col_width * 0.65))
     if min_sep < min_sep_threshold:
         return TableGridResult(
             grid=None,
@@ -87,7 +93,7 @@ def build_table_grid(words: list[Word], *, column_count: int) -> TableGridResult
     cutoffs = tuple((centers[i] + centers[i + 1]) / 2.0 for i in range(len(centers) - 1))
     space_gap = max(2.0, median_height * 0.2)
 
-    grid_rows, cells = _build_dense_rows_and_cells(
+    grid_rows, cells, collision_count, group_count = _build_dense_rows_and_cells(
         sorted_rows=sorted_rows,
         column_count=column_count,
         cutoffs=cutoffs,
@@ -110,6 +116,8 @@ def build_table_grid(words: list[Word], *, column_count: int) -> TableGridResult
             row_keys=sorted_row_keys,
             rows=tuple(grid_rows),
             cells=tuple(cells_with_rowspan),
+            collision_count=int(collision_count),
+            group_count=int(group_count),
         ),
         confidence=confidence,
         reason=None,
@@ -241,13 +249,16 @@ def _build_dense_rows_and_cells(
     cutoffs: tuple[float, ...],
     gap_threshold: float,
     space_gap: float,
-) -> tuple[list[tuple[str, ...]], list[TableCell]]:
+) -> tuple[list[tuple[str, ...]], list[TableCell], int, int]:
     dense_rows: list[tuple[str, ...]] = []
     out_cells: list[TableCell] = []
+    collision_count = 0
+    group_count = 0
 
     for row_index, row_words in enumerate(sorted_rows):
         dense = [""] * column_count
         occupied = [False] * column_count
+        row_cell_index_by_col: dict[int, int] = {}
         groups = _group_words_by_x_gap(row_words, gap_threshold=gap_threshold)
         for group in groups:
             if not group:
@@ -255,6 +266,7 @@ def _build_dense_rows_and_cells(
             text = _join_words(group, space_gap=space_gap)
             if not text:
                 continue
+            group_count += 1
 
             group_x0 = min(w.x0 for w in group)
             group_x1 = max(w.x1 for w in group)
@@ -263,13 +275,56 @@ def _build_dense_rows_and_cells(
             if end_col < start_col:
                 end_col = start_col
 
-            if any(occupied[c] for c in range(start_col, end_col + 1)):
-                center_col = _col_from_x(cutoffs, (group_x0 + group_x1) / 2.0)
-                start_col = center_col
-                end_col = center_col
-
             start_col = max(0, min(column_count - 1, start_col))
             end_col = max(0, min(column_count - 1, end_col))
+            center_col = _col_from_x(cutoffs, (group_x0 + group_x1) / 2.0)
+            center_col = max(0, min(column_count - 1, center_col))
+
+            has_collision = any(occupied[c] for c in range(start_col, end_col + 1))
+            if has_collision:
+                replacement_col = _nearest_unoccupied_column(
+                    occupied=occupied,
+                    preferred_col=center_col,
+                )
+                if replacement_col is not None:
+                    collision_count += 1
+                    start_col = replacement_col
+                    end_col = replacement_col
+                else:
+                    collision_count += 1
+                    merge_col = _pick_merge_column(
+                        occupied=occupied,
+                        start_col=start_col,
+                        end_col=end_col,
+                        preferred_col=center_col,
+                    )
+                    existing = dense[merge_col].strip()
+                    merged_text = text if not existing else f"{existing} / {text}"
+                    dense[merge_col] = merged_text
+                    occupied[merge_col] = True
+
+                    existing_index = row_cell_index_by_col.get(merge_col)
+                    if existing_index is not None:
+                        existing_cell = out_cells[existing_index]
+                        out_cells[existing_index] = TableCell(
+                            row=existing_cell.row,
+                            col=existing_cell.col,
+                            text=merged_text,
+                            colspan=existing_cell.colspan,
+                            rowspan=existing_cell.rowspan,
+                        )
+                    else:
+                        out_cells.append(
+                            TableCell(
+                                row=row_index,
+                                col=merge_col,
+                                text=merged_text,
+                                colspan=1,
+                                rowspan=1,
+                            )
+                        )
+                        row_cell_index_by_col[merge_col] = len(out_cells) - 1
+                    continue
 
             colspan = max(1, end_col - start_col + 1)
             dense[start_col] = text
@@ -285,10 +340,38 @@ def _build_dense_rows_and_cells(
                     rowspan=1,
                 )
             )
+            cell_index = len(out_cells) - 1
+            for c in range(start_col, end_col + 1):
+                row_cell_index_by_col[c] = cell_index
 
         dense_rows.append(tuple(dense))
 
-    return dense_rows, out_cells
+    return dense_rows, out_cells, collision_count, group_count
+
+
+def _nearest_unoccupied_column(*, occupied: list[bool], preferred_col: int) -> int | None:
+    candidates = [i for i, is_occupied in enumerate(occupied) if not is_occupied]
+    if not candidates:
+        return None
+    return min(candidates, key=lambda col: (abs(col - preferred_col), col))
+
+
+def _pick_merge_column(
+    *,
+    occupied: list[bool],
+    start_col: int,
+    end_col: int,
+    preferred_col: int,
+) -> int:
+    span_occupied = [c for c in range(start_col, end_col + 1) if occupied[c]]
+    if span_occupied:
+        return min(span_occupied, key=lambda col: (abs(col - preferred_col), col))
+
+    occupied_cols = [i for i, is_occupied in enumerate(occupied) if is_occupied]
+    if occupied_cols:
+        return min(occupied_cols, key=lambda col: (abs(col - preferred_col), col))
+
+    return preferred_col
 
 
 def _apply_vertical_rowspan(

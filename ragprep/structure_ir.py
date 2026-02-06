@@ -1010,11 +1010,12 @@ def _table_from_spans(
 
     candidates = _candidate_table_column_counts(candidate_words)
     if not candidates:
-        candidates = tuple(range(2, 7))
+        candidates = tuple(range(2, 11))
     column_target = _estimate_table_column_target(candidate_words)
 
     best_rows: tuple[tuple[str, ...], ...] | None = None
     best_cells: tuple[TableCell, ...] | None = None
+    best_collision_ratio = float("inf")
     best_score = -1.0
     best_filled = -1
     best_conf = -1.0
@@ -1035,6 +1036,10 @@ def _table_from_spans(
                 sparse_rows += 1
         sparse_ratio = (sparse_rows / max(1, len(rows))) if rows else 1.0
         conf = float(result.confidence)
+        collision_ratio = float(result.grid.collision_count) / max(
+            1.0,
+            float(result.grid.group_count),
+        )
         target_alignment = 0.0
         if column_target is not None:
             target_alignment = max(
@@ -1048,19 +1053,26 @@ def _table_from_spans(
             + (target_alignment * 0.25)
         )
 
-        if (
-            score > best_score + 1e-9
-            or (
-                abs(score - best_score) <= 1e-9
-                and (filled > best_filled or (filled == best_filled and conf > best_conf))
-            )
-            or (
-                abs(score - best_score) <= 1e-9
-                and filled == best_filled
-                and abs(conf - best_conf) <= 1e-9
-                and k > best_k
+        if collision_ratio < best_collision_ratio - 1e-9 or (
+            abs(collision_ratio - best_collision_ratio) <= 1e-9
+            and (
+                score > best_score + 1e-9
+                or (
+                    abs(score - best_score) <= 1e-9
+                    and (
+                        filled > best_filled
+                        or (
+                            filled == best_filled
+                            and (
+                                conf > best_conf + 1e-9
+                                or (abs(conf - best_conf) <= 1e-9 and k > best_k)
+                            )
+                        )
+                    )
+                )
             )
         ):
+            best_collision_ratio = collision_ratio
             best_score = score
             best_filled = filled
             best_conf = conf
@@ -1083,12 +1095,12 @@ def _table_from_spans(
 def _candidate_table_column_counts(words: list[Word]) -> tuple[int, ...]:
     observed_counts = _observed_column_group_counts(words)
     if not observed_counts:
-        return (2, 3, 4, 5, 6)
+        return (2, 3, 4, 5, 6, 7, 8, 9, 10)
 
     median_count = int(round(_median_or_default([float(c) for c in observed_counts], default=2.0)))
     candidates: set[int] = set()
     for count in observed_counts:
-        if 2 <= count <= 8:
+        if 2 <= count <= 10:
             candidates.add(count)
 
     for count in (
@@ -1098,11 +1110,11 @@ def _candidate_table_column_counts(words: list[Word]) -> tuple[int, ...]:
         median_count + 1,
         max(observed_counts),
     ):
-        if 2 <= count <= 8:
+        if 2 <= count <= 10:
             candidates.add(int(count))
 
     if not candidates:
-        return (2, 3, 4, 5, 6)
+        return (2, 3, 4, 5, 6, 7, 8, 9, 10)
 
     return tuple(sorted(candidates))
 
@@ -1121,7 +1133,7 @@ def _estimate_table_column_target(words: list[Word]) -> int | None:
     )[0]
     if best_count < 2:
         return None
-    return min(8, int(best_count))
+    return min(10, int(best_count))
 
 
 def _observed_column_group_counts(words: list[Word]) -> list[int]:
@@ -1143,12 +1155,21 @@ def _observed_column_group_counts(words: list[Word]) -> list[int]:
     if not rows:
         return []
 
-    gap_threshold = max(10.0, median_h * 1.15, median_w * 0.60)
+    tight_gap_threshold = max(6.0, median_h * 0.60, median_w * 0.22)
+    normal_gap_threshold = max(8.0, median_h * 0.90, median_w * 0.40)
+    loose_gap_threshold = max(10.0, median_h * 1.15, median_w * 0.60)
     observed_counts: list[int] = []
     for row_words in rows.values():
-        count = _count_groups_by_x_gap(row_words, gap_threshold=gap_threshold)
-        if count >= 2:
-            observed_counts.append(count)
+        row_counts: set[int] = set()
+        for gap_threshold in (
+            tight_gap_threshold,
+            normal_gap_threshold,
+            loose_gap_threshold,
+        ):
+            count = _count_groups_by_x_gap(row_words, gap_threshold=gap_threshold)
+            if count >= 2:
+                row_counts.add(count)
+        observed_counts.extend(sorted(row_counts))
 
     return observed_counts
 

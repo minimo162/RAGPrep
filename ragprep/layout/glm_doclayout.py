@@ -6,7 +6,10 @@ import inspect
 import io
 import json
 import os
+import subprocess
 import time
+import warnings
+from contextlib import contextmanager
 from functools import lru_cache
 from typing import Any, cast
 
@@ -208,6 +211,54 @@ def _sanitize_layout_content(content: str) -> str:
     return _extract_first_json_object(unfenced)
 
 
+def _is_ccache_probe_command(command: object) -> bool:
+    if isinstance(command, (list, tuple)) and len(command) >= 2:
+        executable = str(command[0]).strip().lower()
+        target = str(command[1]).strip().lower()
+        return executable in {"where", "which"} and target == "ccache"
+
+    if isinstance(command, str):
+        normalized = " ".join(command.strip().lower().split())
+        return normalized in {"where ccache", "which ccache"}
+
+    return False
+
+
+@contextmanager
+def _suppress_paddle_ccache_probe_noise() -> Any:
+    """
+    Suppress known non-fatal ccache probe noise emitted during Paddle import.
+
+    On Windows, `where ccache` writes a localized "not found" message to stderr.
+    Paddle also emits a `UserWarning` when ccache is absent. Both are informational;
+    local layout inference works without ccache.
+    """
+
+    original_check_output = subprocess.check_output
+
+    def _quiet_check_output(*popenargs: object, **kwargs: object) -> object:
+        command = kwargs.get("args")
+        if command is None and popenargs:
+            command = popenargs[0]
+        if _is_ccache_probe_command(command):
+            patched_kwargs = dict(kwargs)
+            patched_kwargs.setdefault("stderr", subprocess.DEVNULL)
+            return original_check_output(*popenargs, **patched_kwargs)
+        return original_check_output(*popenargs, **kwargs)
+
+    subprocess.check_output = _quiet_check_output
+    try:
+        with warnings.catch_warnings():
+            warnings.filterwarnings(
+                "ignore",
+                message=r"No ccache found\..*",
+                category=UserWarning,
+            )
+            yield
+    finally:
+        subprocess.check_output = original_check_output
+
+
 def _parse_layout_result(content: str) -> tuple[str, tuple[dict[str, object], ...]]:
     sanitized = _sanitize_layout_content(content)
     try:
@@ -234,29 +285,30 @@ def _parse_layout_result(content: str) -> tuple[str, tuple[dict[str, object], ..
 
 
 def _load_paddleocr_ppstructure() -> Any:
-    try:
-        from paddleocr import PPStructure
-
-        return PPStructure
-    except ImportError:
-        # Some PaddleOCR versions expose PPStructureV3 instead of PPStructure.
+    with _suppress_paddle_ccache_probe_noise():
         try:
-            from paddleocr import PPStructureV3
+            from paddleocr import PPStructure
 
-            return PPStructureV3
+            return PPStructure
+        except ImportError:
+            # Some PaddleOCR versions expose PPStructureV3 instead of PPStructure.
+            try:
+                from paddleocr import PPStructureV3
+
+                return PPStructureV3
+            except Exception as exc:  # noqa: BLE001
+                raise RuntimeError(
+                    "Local layout analysis requires PaddleOCR with PPStructure/PPStructureV3 "
+                    "available. Install PaddleOCR (CPU) and try again, or use "
+                    "RAGPREP_LAYOUT_MODE=server. Suggested install: uv pip install paddlepaddle "
+                    "paddleocr"
+                ) from exc
         except Exception as exc:  # noqa: BLE001
             raise RuntimeError(
-                "Local layout analysis requires PaddleOCR with PPStructure/PPStructureV3 "
-                "available. Install PaddleOCR (CPU) and try again, or use "
-                "RAGPREP_LAYOUT_MODE=server. Suggested install: uv pip install paddlepaddle "
-                "paddleocr"
+                "Local layout analysis requires optional dependencies. "
+                "Install PaddleOCR (CPU) and try again, or use RAGPREP_LAYOUT_MODE=server. "
+                "Suggested install: uv pip install paddlepaddle paddleocr"
             ) from exc
-    except Exception as exc:  # noqa: BLE001
-        raise RuntimeError(
-            "Local layout analysis requires optional dependencies. "
-            "Install PaddleOCR (CPU) and try again, or use RAGPREP_LAYOUT_MODE=server. "
-            "Suggested install: uv pip install paddlepaddle paddleocr"
-        ) from exc
 
 
 def _try_get_dist_version(dist_name: str) -> str | None:

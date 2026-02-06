@@ -6,6 +6,31 @@ from ragprep.pdf_text import Span, Word
 from ragprep.structure_ir import BBox, Heading, LayoutElement, Paragraph, Table, build_page_blocks
 
 
+def _make_tight_five_column_table_data(rows: int = 4) -> tuple[list[Span], list[Word]]:
+    spans: list[Span] = []
+    words: list[Word] = []
+    x_starts = (10.0, 65.0, 120.0, 175.0, 230.0)
+    for row_index in range(rows):
+        y0 = 10.0 + (row_index * 20.0)
+        y1 = y0 + 10.0
+        for col_index, x0 in enumerate(x_starts):
+            text = f"R{row_index}C{col_index}"
+            spans.append(Span(x0=x0, y0=y0, x1=x0 + 24.0, y1=y1, text=text))
+            words.append(
+                Word(
+                    x0=x0,
+                    y0=y0,
+                    x1=x0 + 24.0,
+                    y1=y1,
+                    text=text,
+                    block_no=0,
+                    line_no=row_index,
+                    word_no=col_index,
+                )
+            )
+    return spans, words
+
+
 def test_build_page_blocks_assigns_spans_to_layout_regions() -> None:
     spans = [
         Span(x0=10, y0=10, x1=20, y1=20, text="Hello"),
@@ -308,6 +333,55 @@ def test_build_page_blocks_extracts_table_grid_with_missing_cells() -> None:
     assert len(blocks) == 1
     assert isinstance(blocks[0], Table)
     assert blocks[0].grid == (("A", "B", "C"), ("1", "", "3"))
+
+
+def test_build_page_blocks_prefers_multi_column_grid_for_tight_five_columns() -> None:
+    spans, page_words = _make_tight_five_column_table_data(rows=4)
+    layout_elements = [
+        LayoutElement(page_index=0, bbox=BBox(0.0, 0.0, 1.0, 1.0), label="table", score=0.9),
+    ]
+
+    blocks = build_page_blocks(
+        spans=spans,
+        page_words=page_words,
+        page_width=1000.0,
+        page_height=1000.0,
+        layout_elements=layout_elements,
+    )
+
+    assert len(blocks) == 1
+    assert isinstance(blocks[0], Table)
+    assert blocks[0].grid is not None
+    assert len(blocks[0].grid) == 4
+    assert len(blocks[0].grid[0]) == 5
+    assert blocks[0].grid[0] == ("R0C0", "R0C1", "R0C2", "R0C3", "R0C4")
+
+
+def test_build_page_blocks_preserves_tokens_when_forced_two_column_merge(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    spans, page_words = _make_tight_five_column_table_data(rows=4)
+    layout_elements = [
+        LayoutElement(page_index=0, bbox=BBox(0.0, 0.0, 1.0, 1.0), label="table", score=0.9),
+    ]
+    monkeypatch.setattr("ragprep.structure_ir._candidate_table_column_counts", lambda _words: (2,))
+
+    blocks = build_page_blocks(
+        spans=spans,
+        page_words=page_words,
+        page_width=1000.0,
+        page_height=1000.0,
+        layout_elements=layout_elements,
+    )
+
+    assert len(blocks) == 1
+    assert isinstance(blocks[0], Table)
+    assert blocks[0].grid is not None
+    flattened = " ".join(" ".join(row) for row in blocks[0].grid)
+    for row_index in range(4):
+        for col_index in range(5):
+            assert f"R{row_index}C{col_index}" in flattened
+    assert "/" in flattened
 
 
 def test_build_page_blocks_uses_page_words_for_merge_aware_table_cells() -> None:

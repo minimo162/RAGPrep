@@ -4,7 +4,10 @@ import base64
 import builtins
 import json
 import os
+import subprocess
 import sys
+import warnings
+from contextlib import contextmanager
 from types import ModuleType
 from typing import Any, cast
 
@@ -216,6 +219,66 @@ def test_load_paddleocr_ppstructure_falls_back_to_v3(monkeypatch: pytest.MonkeyP
 
     loaded = glm_doclayout._load_paddleocr_ppstructure()
     assert loaded is _StubPPStructureV3
+
+
+def test_suppress_paddle_ccache_probe_noise_silences_ccache_probe(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured: dict[str, object] = {}
+
+    def _fake_check_output(*popenargs: object, **kwargs: object) -> object:
+        captured["kwargs"] = dict(kwargs)
+        raise subprocess.CalledProcessError(
+            returncode=1,
+            cmd=popenargs[0] if popenargs else kwargs.get("args"),
+        )
+
+    monkeypatch.setattr(subprocess, "check_output", _fake_check_output)
+
+    with warnings.catch_warnings(record=True) as records:
+        warnings.simplefilter("always")
+        with glm_doclayout._suppress_paddle_ccache_probe_noise():
+            with pytest.raises(subprocess.CalledProcessError):
+                subprocess.check_output(["where", "ccache"])
+            warnings.warn(
+                "No ccache found. Please be aware that recompiling all source files may be "
+                "required. You can download and install ccache from: x",
+                UserWarning,
+            )
+            warnings.warn("other warning", UserWarning)
+
+    assert captured
+    kwargs = cast(dict[str, object], captured["kwargs"])
+    assert kwargs.get("stderr") is subprocess.DEVNULL
+    assert not any("No ccache found" in str(entry.message) for entry in records)
+    assert any("other warning" in str(entry.message) for entry in records)
+
+
+def test_load_paddleocr_ppstructure_uses_ccache_noise_suppression(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class _StubPPStructureV3:
+        def __init__(self, **_kwargs: object) -> None:
+            return
+
+    stub = ModuleType("paddleocr")
+    stub.PPStructureV3 = _StubPPStructureV3  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "paddleocr", stub)
+
+    calls: list[str] = []
+
+    @contextmanager
+    def _fake_suppressor() -> Any:
+        calls.append("enter")
+        try:
+            yield
+        finally:
+            calls.append("exit")
+
+    monkeypatch.setattr(glm_doclayout, "_suppress_paddle_ccache_probe_noise", _fake_suppressor)
+    glm_doclayout._get_paddleocr_engine.cache_clear()
+
+    loaded = glm_doclayout._load_paddleocr_ppstructure()
+    assert loaded is _StubPPStructureV3
+    assert calls == ["enter", "exit"]
 
 
 def test_filter_supported_constructor_kwargs_drops_unsupported_names() -> None:

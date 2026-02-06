@@ -52,6 +52,28 @@ def _make_pdf_bytes_single_column(rows: int = 8) -> bytes:
     return cast(bytes, doc.tobytes())
 
 
+def _make_tight_five_column_words(rows: int = 4) -> list[Word]:
+    words: list[Word] = []
+    x_starts = (10.0, 65.0, 120.0, 175.0, 230.0)
+    for row_index in range(rows):
+        y0 = 10.0 + (row_index * 20.0)
+        y1 = y0 + 10.0
+        for col_index, x0 in enumerate(x_starts):
+            words.append(
+                Word(
+                    x0=x0,
+                    y0=y0,
+                    x1=x0 + 24.0,
+                    y1=y1,
+                    text=f"R{row_index}C{col_index}",
+                    block_no=0,
+                    line_no=row_index,
+                    word_no=col_index,
+                )
+            )
+    return words
+
+
 def test_build_table_grid_builds_cells_for_aligned_columns() -> None:
     import fitz
 
@@ -133,3 +155,29 @@ def test_build_table_grid_keeps_missing_middle_cell_as_empty() -> None:
     assert result.grid is not None
     assert result.grid.rows[0] == ("A", "B", "C")
     assert result.grid.rows[1] == ("D", "", "F")
+
+
+def test_build_table_grid_detects_tight_five_columns() -> None:
+    words = _make_tight_five_column_words(rows=4)
+
+    result = build_table_grid(words, column_count=5)
+    assert result.ok, result.reason
+    assert result.grid is not None
+    assert result.grid.rows[0] == ("R0C0", "R0C1", "R0C2", "R0C3", "R0C4")
+    assert result.grid.collision_count == 0
+    assert result.grid.group_count == 20
+
+
+def test_build_table_grid_preserves_text_when_collapsing_to_two_columns() -> None:
+    words = _make_tight_five_column_words(rows=4)
+
+    result = build_table_grid(words, column_count=2)
+    assert result.ok, result.reason
+    assert result.grid is not None
+    assert result.grid.collision_count > 0
+
+    flattened = " ".join(" ".join(row) for row in result.grid.rows)
+    for row_index in range(4):
+        for col_index in range(5):
+            assert f"R{row_index}C{col_index}" in flattened
+    assert "/" in flattened
