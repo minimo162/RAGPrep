@@ -221,14 +221,16 @@ def test_load_paddleocr_ppstructure_falls_back_to_v3(monkeypatch: pytest.MonkeyP
     assert loaded is _StubPPStructureV3
 
 
-def test_suppress_paddle_ccache_probe_noise_silences_ccache_probe(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_suppress_paddle_ccache_probe_noise_silences_ccache_probe(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     captured: dict[str, object] = {}
 
     def _fake_check_output(*popenargs: object, **kwargs: object) -> object:
         captured["kwargs"] = dict(kwargs)
         raise subprocess.CalledProcessError(
             returncode=1,
-            cmd=popenargs[0] if popenargs else kwargs.get("args"),
+            cmd="where ccache",
         )
 
     monkeypatch.setattr(subprocess, "check_output", _fake_check_output)
@@ -242,8 +244,9 @@ def test_suppress_paddle_ccache_probe_noise_silences_ccache_probe(monkeypatch: p
                 "No ccache found. Please be aware that recompiling all source files may be "
                 "required. You can download and install ccache from: x",
                 UserWarning,
+                stacklevel=2,
             )
-            warnings.warn("other warning", UserWarning)
+            warnings.warn("other warning", UserWarning, stacklevel=2)
 
     assert captured
     kwargs = cast(dict[str, object], captured["kwargs"])

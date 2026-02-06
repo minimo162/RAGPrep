@@ -9,6 +9,7 @@ import os
 import subprocess
 import time
 import warnings
+from collections.abc import Callable
 from contextlib import contextmanager
 from functools import lru_cache
 from typing import Any, cast
@@ -234,9 +235,9 @@ def _suppress_paddle_ccache_probe_noise() -> Any:
     local layout inference works without ccache.
     """
 
-    original_check_output = subprocess.check_output
+    original_check_output = cast(Callable[..., Any], subprocess.check_output)
 
-    def _quiet_check_output(*popenargs: object, **kwargs: object) -> object:
+    def _quiet_check_output(*popenargs: Any, **kwargs: Any) -> Any:
         command = kwargs.get("args")
         if command is None and popenargs:
             command = popenargs[0]
@@ -246,7 +247,7 @@ def _suppress_paddle_ccache_probe_noise() -> Any:
             return original_check_output(*popenargs, **patched_kwargs)
         return original_check_output(*popenargs, **kwargs)
 
-    subprocess.check_output = _quiet_check_output
+    subprocess.check_output = cast(Any, _quiet_check_output)
     try:
         with warnings.catch_warnings():
             warnings.filterwarnings(
@@ -256,7 +257,7 @@ def _suppress_paddle_ccache_probe_noise() -> Any:
             )
             yield
     finally:
-        subprocess.check_output = original_check_output
+        subprocess.check_output = cast(Any, original_check_output)
 
 
 def _parse_layout_result(content: str) -> tuple[str, tuple[dict[str, object], ...]]:
