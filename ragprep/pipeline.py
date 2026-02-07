@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 from collections.abc import Callable
 from concurrent.futures import Future, ThreadPoolExecutor
@@ -223,10 +223,11 @@ def pdf_to_html(
     """
     Convert a PDF (bytes) into HTML.
 
-    Current strategy:
+    Strategy:
     - Extract text layer spans via PyMuPDF.
-    - Run layout analysis per rendered page image (PP-DocLayout-V3 contract).
-    - Assign spans to layout regions and render a structured HTML output.
+    - For `local-fast`, infer layout directly from spans (no image rendering).
+    - For `server`/`local-paddle`, run image-based layout analysis.
+    - Assign spans to layout regions and render structured HTML.
     """
 
     if not pdf_bytes:
@@ -245,8 +246,6 @@ def pdf_to_html(
         raise ValueError("Invalid PDF data")
 
     from ragprep.html_render import render_document_html, render_page_html, wrap_html_document
-    from ragprep.layout.glm_doclayout import analyze_layout_image_base64
-    from ragprep.pdf_render import iter_pdf_images, render_pdf_page_image
     from ragprep.pdf_text import (
         extract_pymupdf_page_sizes,
         extract_pymupdf_page_spans,
@@ -257,49 +256,29 @@ def pdf_to_html(
     spans_by_page = extract_pymupdf_page_spans(pdf_bytes)
     words_by_page = extract_pymupdf_page_words(pdf_bytes)
     page_sizes = extract_pymupdf_page_sizes(pdf_bytes)
+    total_pages = int(len(spans_by_page))
+
+    if len(page_sizes) != total_pages:
+        raise RuntimeError("Page count mismatch between text extraction and page sizes.")
 
     layout_mode = (settings.layout_mode or "").strip().lower()
-    adaptive_enabled = bool(settings.layout_render_auto) and layout_mode == "server"
-    primary_dpi = settings.layout_render_dpi
-    primary_max_edge = settings.layout_render_max_edge
-    fallback_dpi = settings.layout_render_dpi
-    fallback_max_edge = settings.layout_render_max_edge
-    if adaptive_enabled:
-        if (
-            settings.layout_render_auto_small_dpi == fallback_dpi
-            and settings.layout_render_auto_small_max_edge == fallback_max_edge
-        ):
-            adaptive_enabled = False
-        primary_dpi = settings.layout_render_auto_small_dpi
-        primary_max_edge = settings.layout_render_auto_small_max_edge
-
-    total_pages, images = iter_pdf_images(
-        pdf_bytes,
-        dpi=primary_dpi,
-        max_edge=primary_max_edge,
-        max_pages=settings.max_pages,
-        max_bytes=settings.max_upload_bytes,
-    )
-
-    if (
-        len(spans_by_page) != int(total_pages)
-        or len(words_by_page) != int(total_pages)
-        or len(page_sizes) != int(total_pages)
-    ):
-        raise RuntimeError("Page count mismatch between render and text extraction.")
+    if layout_mode == "transformers":
+        # Backward-compatible alias.
+        layout_mode = "local-fast"
 
     _notify_html_progress(
         on_progress,
         PdfToHtmlProgress(
             phase=ProgressPhase.rendering,
             current=0,
-            total=int(total_pages),
+            total=total_pages,
             message="converting",
         ),
     )
 
     pages: list[Page] = []
     partial_sections: list[str] = []
+
     def _build_page_from_layout(
         *,
         page_number: int,
@@ -333,74 +312,19 @@ def pdf_to_html(
         page = Page(page_number=page_number, blocks=blocks)
         return page, render_page_html(page)
 
-    def _layout_needs_retry(layout_raw: dict[str, object]) -> bool:
-        elements = layout_raw.get("elements")
-        return isinstance(elements, list) and len(elements) == 0
+    if layout_mode == "local-fast":
+        from ragprep.layout.fast_layout import infer_fast_layout_elements
 
-    def _analyze_layout_for_page(
-        *,
-        page_number: int,
-        encoded: str,
-        image_width: float,
-        image_height: float,
-    ) -> tuple[dict[str, object], float, float]:
-        layout_raw = analyze_layout_image_base64(encoded, settings=settings)
-        if not adaptive_enabled or not _layout_needs_retry(layout_raw):
-            return layout_raw, image_width, image_height
-
-        large_image = render_pdf_page_image(
-            pdf_bytes,
-            page_index=page_number - 1,
-            dpi=fallback_dpi,
-            max_edge=fallback_max_edge,
-            max_pages=settings.max_pages,
-            max_bytes=settings.max_upload_bytes,
-        )
-        try:
-            encoded_large = _image_to_png_base64(large_image)
-            layout_raw_large = analyze_layout_image_base64(encoded_large, settings=settings)
-            return layout_raw_large, float(large_image.width), float(large_image.height)
-        finally:
-            try:
-                large_image.close()
-            except Exception:  # noqa: BLE001
-                pass
-
-    layout_workers = 1
-    if layout_mode == "server":
-        layout_workers = max(1, int(settings.layout_concurrency))
-
-    if layout_workers <= 1:
-        for page_number, image in enumerate(images, start=1):
-            image_width = float(getattr(image, "width", 0))
-            image_height = float(getattr(image, "height", 0))
-            if image_width <= 0 or image_height <= 0:
-                raise RuntimeError(
-                    "Failed to read rendered image size for layout normalization."
-                )
-
-            try:
-                encoded = _image_to_png_base64(image)
-            finally:
-                try:
-                    image.close()
-                except Exception:  # noqa: BLE001
-                    pass
-
-            layout_raw, used_w, used_h = _analyze_layout_for_page(
-                page_number=page_number,
-                encoded=encoded,
-                image_width=image_width,
-                image_height=image_height,
-            )
+        for page_number, spans in enumerate(spans_by_page, start=1):
+            page_w, page_h = page_sizes[page_number - 1]
+            fast_elements = infer_fast_layout_elements(spans, page_w, page_h)
             page, section_html = _build_page_from_layout(
                 page_number=page_number,
-                image_width=used_w,
-                image_height=used_h,
-                layout_raw=layout_raw,
+                image_width=page_w,
+                image_height=page_h,
+                layout_raw={"elements": fast_elements},
             )
             pages.append(page)
-
             partial_sections.append(section_html)
             if on_page is not None:
                 on_page(page_number, section_html)
@@ -410,42 +334,76 @@ def pdf_to_html(
                 PdfToHtmlProgress(
                     phase=ProgressPhase.rendering,
                     current=page_number,
-                    total=int(total_pages),
+                    total=total_pages,
                     message="converting",
                 ),
             )
     else:
-        inflight: dict[int, Future[tuple[dict[str, object], float, float]]] = {}
-        next_page_to_process = 1
-        executor = ThreadPoolExecutor(
-            max_workers=min(layout_workers, int(total_pages)),
-            thread_name_prefix="ragprep-layout",
+        from ragprep.layout.glm_doclayout import analyze_layout_image_base64
+        from ragprep.pdf_render import iter_pdf_images, render_pdf_page_image
+
+        adaptive_enabled = bool(settings.layout_render_auto) and layout_mode == "server"
+        primary_dpi = settings.layout_render_dpi
+        primary_max_edge = settings.layout_render_max_edge
+        fallback_dpi = settings.layout_render_dpi
+        fallback_max_edge = settings.layout_render_max_edge
+        if adaptive_enabled:
+            if (
+                settings.layout_render_auto_small_dpi == fallback_dpi
+                and settings.layout_render_auto_small_max_edge == fallback_max_edge
+            ):
+                adaptive_enabled = False
+            primary_dpi = settings.layout_render_auto_small_dpi
+            primary_max_edge = settings.layout_render_auto_small_max_edge
+
+        rendered_total_pages, images = iter_pdf_images(
+            pdf_bytes,
+            dpi=primary_dpi,
+            max_edge=primary_max_edge,
+            max_pages=settings.max_pages,
+            max_bytes=settings.max_upload_bytes,
         )
+        if int(rendered_total_pages) != total_pages:
+            raise RuntimeError("Page count mismatch between render and text extraction.")
 
-        def _process_page(page_number: int) -> None:
-            future = inflight[page_number]
-            layout_raw, image_width, image_height = future.result()
-            page, section_html = _build_page_from_layout(
-                page_number=page_number,
-                image_width=image_width,
-                image_height=image_height,
-                layout_raw=layout_raw,
-            )
-            pages.append(page)
-            partial_sections.append(section_html)
-            if on_page is not None:
-                on_page(page_number, section_html)
-            _notify_html_progress(
-                on_progress,
-                PdfToHtmlProgress(
-                    phase=ProgressPhase.rendering,
-                    current=page_number,
-                    total=int(total_pages),
-                    message="converting",
-                ),
-            )
+        def _layout_needs_retry(layout_raw: dict[str, object]) -> bool:
+            elements = layout_raw.get("elements")
+            return isinstance(elements, list) and len(elements) == 0
 
-        try:
+        def _analyze_layout_for_page(
+            *,
+            page_number: int,
+            encoded: str,
+            image_width: float,
+            image_height: float,
+        ) -> tuple[dict[str, object], float, float]:
+            layout_raw = analyze_layout_image_base64(encoded, settings=settings)
+            if not adaptive_enabled or not _layout_needs_retry(layout_raw):
+                return layout_raw, image_width, image_height
+
+            large_image = render_pdf_page_image(
+                pdf_bytes,
+                page_index=page_number - 1,
+                dpi=fallback_dpi,
+                max_edge=fallback_max_edge,
+                max_pages=settings.max_pages,
+                max_bytes=settings.max_upload_bytes,
+            )
+            try:
+                encoded_large = _image_to_png_base64(large_image)
+                layout_raw_large = analyze_layout_image_base64(encoded_large, settings=settings)
+                return layout_raw_large, float(large_image.width), float(large_image.height)
+            finally:
+                try:
+                    large_image.close()
+                except Exception:  # noqa: BLE001
+                    pass
+
+        layout_workers = 1
+        if layout_mode == "server":
+            layout_workers = max(1, int(settings.layout_concurrency))
+
+        if layout_workers <= 1:
             for page_number, image in enumerate(images, start=1):
                 image_width = float(getattr(image, "width", 0))
                 image_height = float(getattr(image, "height", 0))
@@ -462,36 +420,110 @@ def pdf_to_html(
                     except Exception:  # noqa: BLE001
                         pass
 
-                future = executor.submit(
-                    _analyze_layout_for_page,
+                layout_raw, used_w, used_h = _analyze_layout_for_page(
                     page_number=page_number,
                     encoded=encoded,
                     image_width=image_width,
                     image_height=image_height,
                 )
-                inflight[page_number] = future
+                page, section_html = _build_page_from_layout(
+                    page_number=page_number,
+                    image_width=used_w,
+                    image_height=used_h,
+                    layout_raw=layout_raw,
+                )
+                pages.append(page)
+                partial_sections.append(section_html)
+                if on_page is not None:
+                    on_page(page_number, section_html)
 
-                while len(inflight) >= layout_workers and next_page_to_process in inflight:
+                _notify_html_progress(
+                    on_progress,
+                    PdfToHtmlProgress(
+                        phase=ProgressPhase.rendering,
+                        current=page_number,
+                        total=total_pages,
+                        message="converting",
+                    ),
+                )
+        else:
+            inflight: dict[int, Future[tuple[dict[str, object], float, float]]] = {}
+            next_page_to_process = 1
+            executor = ThreadPoolExecutor(
+                max_workers=min(layout_workers, total_pages),
+                thread_name_prefix="ragprep-layout",
+            )
+
+            def _process_page(page_number: int) -> None:
+                future = inflight[page_number]
+                layout_raw, image_width, image_height = future.result()
+                page, section_html = _build_page_from_layout(
+                    page_number=page_number,
+                    image_width=image_width,
+                    image_height=image_height,
+                    layout_raw=layout_raw,
+                )
+                pages.append(page)
+                partial_sections.append(section_html)
+                if on_page is not None:
+                    on_page(page_number, section_html)
+                _notify_html_progress(
+                    on_progress,
+                    PdfToHtmlProgress(
+                        phase=ProgressPhase.rendering,
+                        current=page_number,
+                        total=total_pages,
+                        message="converting",
+                    ),
+                )
+
+            try:
+                for page_number, image in enumerate(images, start=1):
+                    image_width = float(getattr(image, "width", 0))
+                    image_height = float(getattr(image, "height", 0))
+                    if image_width <= 0 or image_height <= 0:
+                        raise RuntimeError(
+                            "Failed to read rendered image size for layout normalization."
+                        )
+
+                    try:
+                        encoded = _image_to_png_base64(image)
+                    finally:
+                        try:
+                            image.close()
+                        except Exception:  # noqa: BLE001
+                            pass
+
+                    future = executor.submit(
+                        _analyze_layout_for_page,
+                        page_number=page_number,
+                        encoded=encoded,
+                        image_width=image_width,
+                        image_height=image_height,
+                    )
+                    inflight[page_number] = future
+
+                    while len(inflight) >= layout_workers and next_page_to_process in inflight:
+                        _process_page(next_page_to_process)
+                        inflight.pop(next_page_to_process, None)
+                        next_page_to_process += 1
+
+                    while (
+                        next_page_to_process in inflight
+                        and inflight[next_page_to_process].done()
+                    ):
+                        _process_page(next_page_to_process)
+                        inflight.pop(next_page_to_process, None)
+                        next_page_to_process += 1
+
+                while next_page_to_process in inflight:
                     _process_page(next_page_to_process)
                     inflight.pop(next_page_to_process, None)
                     next_page_to_process += 1
-
-                while (
-                    next_page_to_process in inflight
-                    and inflight[next_page_to_process].done()
-                ):
-                    _process_page(next_page_to_process)
-                    inflight.pop(next_page_to_process, None)
-                    next_page_to_process += 1
-
-            while next_page_to_process in inflight:
-                _process_page(next_page_to_process)
-                inflight.pop(next_page_to_process, None)
-                next_page_to_process += 1
-        finally:
-            for future in inflight.values():
-                future.cancel()
-            executor.shutdown(wait=True, cancel_futures=True)
+            finally:
+                for future in inflight.values():
+                    future.cancel()
+                executor.shutdown(wait=True, cancel_futures=True)
 
     document = Document(pages=tuple(pages))
     fragment = render_document_html(document)
@@ -505,8 +537,8 @@ def pdf_to_html(
         on_progress,
         PdfToHtmlProgress(
             phase=ProgressPhase.done,
-            current=int(total_pages),
-            total=int(total_pages),
+            current=total_pages,
+            total=total_pages,
             message="done",
         ),
     )
@@ -524,7 +556,7 @@ def pdf_to_json(
     """
     Backward-compatible wrapper that now returns Markdown only.
 
-    JSON 出力は廃止し、.md のみを生成する。
+    JSON 蜃ｺ蜉帙・蟒・ｭ｢縺励・md 縺ｮ縺ｿ繧堤函謌舌☆繧九・
     """
 
     if not pdf_bytes:
@@ -558,3 +590,4 @@ def pdf_to_json(
         on_page=on_page,
         page_output_dir=page_output_dir,
     )
+

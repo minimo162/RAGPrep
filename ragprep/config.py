@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import os
 from dataclasses import dataclass
@@ -43,7 +43,12 @@ DEFAULT_GLM_OCR_BASE_URL: Final[str] = "http://127.0.0.1:8080"
 DEFAULT_GLM_OCR_MODEL: Final[str] = "zai-org/GLM-OCR"
 DEFAULT_GLM_OCR_MODE: Final[str] = "transformers"
 SUPPORTED_GLM_OCR_MODES: Final[tuple[str, ...]] = ("transformers", "server")
-SUPPORTED_LAYOUT_MODES: Final[tuple[str, ...]] = ("transformers", "server", "local-paddle")
+SUPPORTED_LAYOUT_MODES: Final[tuple[str, ...]] = (
+    "local-fast",
+    "transformers",
+    "server",
+    "local-paddle",
+)
 DEFAULT_GLM_OCR_MAX_TOKENS: Final[int] = 8192
 DEFAULT_GLM_OCR_TIMEOUT_SECONDS: Final[int] = 60
 DEFAULT_LAYOUT_MODE: Final[str] = "local-paddle"
@@ -192,11 +197,19 @@ def _get_glm_ocr_mode() -> str:
     return value
 
 
+def _normalize_layout_mode(value: str) -> str:
+    normalized = value.strip().lower()
+    if normalized == "transformers":
+        # Backward-compatible alias.
+        return "local-fast"
+    return normalized
+
+
 def _get_layout_mode() -> str:
     raw = os.getenv(ENV_LAYOUT_MODE)
     if raw is None or not raw.strip():
         return DEFAULT_LAYOUT_MODE
-    value = raw.strip().lower()
+    value = _normalize_layout_mode(raw)
     if value not in SUPPORTED_LAYOUT_MODES:
         raise ValueError(
             f"{ENV_LAYOUT_MODE} must be one of {', '.join(SUPPORTED_LAYOUT_MODES)}, got: {raw!r}"
@@ -338,3 +351,6 @@ def get_settings() -> Settings:
         layout_retry_count=_get_layout_retry_count(),
         layout_retry_backoff_seconds=_get_layout_retry_backoff_seconds(),
     )
+
+
+

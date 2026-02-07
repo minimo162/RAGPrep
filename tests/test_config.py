@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import pytest
 
@@ -92,6 +92,20 @@ def test_layout_settings_override_glm_ocr_settings(monkeypatch: pytest.MonkeyPat
     assert settings.layout_api_key == "layout-key"
     assert settings.layout_max_tokens == 222
     assert settings.layout_timeout_seconds == 9
+
+
+def test_layout_mode_accepts_local_fast(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("RAGPREP_LAYOUT_MODE", "local-fast")
+    settings = config.get_settings()
+    assert settings.layout_mode == "local-fast"
+
+
+def test_layout_mode_aliases_transformers_to_local_fast(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("RAGPREP_LAYOUT_MODE", "transformers")
+    settings = config.get_settings()
+    assert settings.layout_mode == "local-fast"
 
 
 def test_layout_mode_accepts_local_paddle(monkeypatch: pytest.MonkeyPatch) -> None:

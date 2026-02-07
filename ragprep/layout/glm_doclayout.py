@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import base64
 import binascii
@@ -70,7 +70,7 @@ def _parse_chat_completions_response_content(response: httpx.Response) -> str:
     if response.status_code != 200:
         body = (response.text or "").strip()
         if len(body) > 800:
-            body = body[:800] + "…"
+            body = body[:800] + "窶ｦ"
         raise RuntimeError(f"GLM server returned {response.status_code}: {body}")
 
     try:
@@ -102,6 +102,7 @@ def _parse_chat_completions_response_content(response: httpx.Response) -> str:
 
 class _GlmOcrMode:
     transformers = "transformers"
+    local_fast = "local-fast"
     server = "server"
     local_paddle = "local-paddle"
 
@@ -574,6 +575,8 @@ def _filter_supported_constructor_kwargs(
 
 
 @lru_cache(maxsize=1)
+
+
 def _get_paddleocr_engine() -> Any:
     PPStructure = _load_paddleocr_ppstructure()
 
@@ -784,11 +787,24 @@ def analyze_layout_image_base64(image_base64: str, *, settings: Settings) -> dic
     - `server`: call an OpenAI-compatible `/v1/chat/completions` endpoint (GLM-OCR server).
     - `local-paddle`: run PP-DocLayout-V3 locally via PaddleOCR (no Docker).
 
+    Note:
+    - `local-fast` mode is a text-layer-based path handled in `pdf_to_html` and does not
+      use this image API.
+
     Return shape is stable: `schema_version`, `elements[{page_index,bbox,label,score}]`, `raw`.
     """
 
-    mode = (settings.layout_mode or "").strip().lower() or _GlmOcrMode.transformers
-    if mode in {_GlmOcrMode.transformers, _GlmOcrMode.local_paddle}:
+    mode = (settings.layout_mode or "").strip().lower() or _GlmOcrMode.local_fast
+    if mode == _GlmOcrMode.transformers:
+        mode = _GlmOcrMode.local_fast
+
+    if mode == _GlmOcrMode.local_fast:
+        raise RuntimeError(
+            "local-fast layout mode does not use image layout API. "
+            "Use pdf_to_html() fast layout path or set RAGPREP_LAYOUT_MODE=local-paddle/server."
+        )
+
+    if mode == _GlmOcrMode.local_paddle:
         return _analyze_layout_local_paddle(image_base64, settings=settings)
     if mode != _GlmOcrMode.server:
         raise RuntimeError(
@@ -893,4 +909,3 @@ def analyze_layout_image_base64(image_base64: str, *, settings: Settings) -> dic
         "elements": elements,
         "raw": content,
     }
-

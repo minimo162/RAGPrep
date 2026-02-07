@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import base64
 import io
@@ -17,21 +17,9 @@ def _empty_words_for(spans_by_page: list[list[Span]]) -> list[list[Word]]:
 
 
 def test_pdf_to_html_reports_progress_and_renders_html(monkeypatch: pytest.MonkeyPatch) -> None:
-    def _fake_iter_pdf_images(
-        *_args: object,
-        **_kwargs: object,
-    ) -> tuple[int, Iterator[Image.Image]]:
-        def generate() -> Iterator[Image.Image]:
-            yield Image.new("RGB", (10, 10), color=(255, 255, 255))
-            yield Image.new("RGB", (10, 10), color=(255, 255, 255))
-
-        return 2, generate()
-
-    monkeypatch.setattr("ragprep.pdf_render.iter_pdf_images", _fake_iter_pdf_images)
-
     spans_by_page = [
-        [Span(x0=0, y0=0, x1=10, y1=10, text="Heading")],
-        [Span(x0=0, y0=150, x1=10, y1=160, text="Body")],
+        [Span(x0=100, y0=20, x1=360, y1=60, text="Heading", size=24)],
+        [Span(x0=80, y0=220, x1=700, y1=250, text="Body", size=12)],
     ]
     monkeypatch.setattr("ragprep.pdf_text.extract_pymupdf_page_spans", lambda _pdf: spans_by_page)
     monkeypatch.setattr(
@@ -41,22 +29,6 @@ def test_pdf_to_html_reports_progress_and_renders_html(monkeypatch: pytest.Monke
     monkeypatch.setattr(
         "ragprep.pdf_text.extract_pymupdf_page_sizes",
         lambda _pdf: [(1000.0, 1000.0), (1000.0, 1000.0)],
-    )
-
-    def _fake_analyze_layout(_image_b64: str, *, settings: object) -> dict[str, object]:
-        _ = settings
-        return {
-            "schema_version": "v1",
-            "elements": [
-                {"bbox": (0.0, 0.0, 10.0, 1.0), "label": "title", "score": 0.9},
-                {"bbox": (0.0, 1.0, 10.0, 3.0), "label": "text", "score": 0.9},
-            ],
-            "raw": "{}",
-        }
-
-    monkeypatch.setattr(
-        "ragprep.layout.glm_doclayout.analyze_layout_image_base64",
-        _fake_analyze_layout,
     )
 
     updates: list[PdfToHtmlProgress] = []
@@ -75,6 +47,60 @@ def test_pdf_to_html_reports_progress_and_renders_html(monkeypatch: pytest.Monke
         (ProgressPhase.rendering, 2, 2),
         (ProgressPhase.done, 2, 2),
     ]
+
+
+def test_pdf_to_html_local_fast_skips_image_layout_calls(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("RAGPREP_LAYOUT_MODE", raising=False)
+
+    def _fail_iter_pdf_images(
+        *_args: object,
+        **_kwargs: object,
+    ) -> tuple[int, Iterator[Image.Image]]:
+        raise AssertionError("iter_pdf_images should not be called in local-fast mode")
+
+    def _fail_analyze_layout(*_args: object, **_kwargs: object) -> dict[str, object]:
+        raise AssertionError("analyze_layout_image_base64 should not be called in local-fast mode")
+
+    monkeypatch.setattr("ragprep.pdf_render.iter_pdf_images", _fail_iter_pdf_images)
+    monkeypatch.setattr(
+        "ragprep.layout.glm_doclayout.analyze_layout_image_base64",
+        _fail_analyze_layout,
+    )
+    monkeypatch.setattr(
+        "ragprep.pdf_text.extract_pymupdf_page_spans",
+        lambda _pdf: [[Span(x0=100, y0=220, x1=700, y1=250, text="Fast path paragraph", size=12)]],
+    )
+    monkeypatch.setattr(
+        "ragprep.pdf_text.extract_pymupdf_page_sizes",
+        lambda _pdf: [(1000.0, 1000.0)],
+    )
+
+    html = pdf_to_html(b"%PDF", full_document=False)
+    assert "Fast path paragraph" in html
+
+
+def test_pdf_to_html_local_fast_emits_table_block(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("RAGPREP_LAYOUT_MODE", raising=False)
+
+    spans = [
+        Span(x0=80, y0=260, x1=160, y1=286, text="A1", size=12),
+        Span(x0=320, y0=260, x1=400, y1=286, text="B1", size=12),
+        Span(x0=560, y0=260, x1=640, y1=286, text="C1", size=12),
+        Span(x0=80, y0=292, x1=160, y1=318, text="A2", size=12),
+        Span(x0=320, y0=292, x1=400, y1=318, text="B2", size=12),
+        Span(x0=560, y0=292, x1=640, y1=318, text="C2", size=12),
+    ]
+
+    monkeypatch.setattr("ragprep.pdf_text.extract_pymupdf_page_spans", lambda _pdf: [spans])
+    monkeypatch.setattr(
+        "ragprep.pdf_text.extract_pymupdf_page_sizes",
+        lambda _pdf: [(1000.0, 1000.0)],
+    )
+
+    html = pdf_to_html(b"%PDF", full_document=False)
+    assert 'data-kind="table"' in html
 
 
 def test_pdf_to_html_pipelines_layout_requests_in_server_mode(
@@ -144,7 +170,10 @@ def test_pdf_to_html_pipelines_layout_requests_in_server_mode(
     assert call_count == 3
 
 
-def test_pdf_to_html_requires_layout_analysis(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_pdf_to_html_propagates_layout_error_server_mode(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("RAGPREP_LAYOUT_MODE", "server")
     def _fake_iter_pdf_images(
         *_args: object,
         **_kwargs: object,
@@ -367,3 +396,6 @@ def test_pdf_to_html_adaptive_layout_rerenders_on_empty_elements(
     assert captured["iter"] == (200, 1024)
     assert captured["rerender"] == (0, 400, 1540)
     assert calls == 2
+
+
+
