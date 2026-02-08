@@ -430,6 +430,12 @@ def _run_job(job_id: str, pdf_bytes: bytes) -> None:
         except Exception as exc:  # noqa: BLE001
             message = str(exc)
             expected_errors = (
+                "Failed to reach LightOn OCR server",
+                "LightOn OCR request timed out",
+                "LightOn OCR server returned",
+                "LightOn OCR did not return valid JSON",
+                "LightOn OCR returned invalid lines",
+                "LightOn OCR failed on page",
                 "Failed to reach GLM-OCR server",
                 "GLM-OCR request timed out",
                 "GLM-OCR server is not reachable",

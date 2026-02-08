@@ -1,17 +1,19 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import difflib
+import math
 import re
 from dataclasses import dataclass
 
 from ragprep.pdf_text import normalize_extracted_text, tokenize_by_char_class
 
 _DEFAULT_MERGE_MAX_CHANGED_RATIO = 0.08
+_AGGRESSIVE_MERGE_MAX_CHANGED_RATIO = 0.35
 
 _REPLACEMENT_CHAR = "\ufffd"
 
-_EMAIL_RE = re.compile(r"[^\s@＠]+[@＠][^\s@＠]+[\.．][^\s@＠]+")
-_URL_RE = re.compile(r"https?://|https?[:：][\\/／]{2}|www\\.", flags=re.IGNORECASE)
+_EMAIL_RE = re.compile(r"[^\s@]+@[^\s@]+\.[^\s@]+")
+_URL_RE = re.compile(r"(?:https?://|hxxps?://|www\.)", flags=re.IGNORECASE)
 
 
 @dataclass(frozen=True)
@@ -23,16 +25,23 @@ class MergeStats:
     replacements: tuple[tuple[str, str], ...] = ()
 
 
-def merge_ocr_with_pymupdf(ocr_text: str, pymupdf_text: str) -> tuple[str, MergeStats]:
+def merge_ocr_with_pymupdf(
+    ocr_text: str,
+    pymupdf_text: str,
+    *,
+    policy: str = "strict",
+    max_changed_ratio: float | None = None,
+) -> tuple[str, MergeStats]:
     """
     Merge OCR output with PyMuPDF text layer as a corrective reference.
 
-    Policy (strict and deterministic):
-    - Preserve OCR whitespace/line breaks.
-    - Apply only small, local substitutions (e.g., 1-kanji corrections).
-    - Prefer PyMuPDF for Japanese characters and for fixing replacement chars.
-    - Prefer OCR for digits/latin/symbols, and for URL/email-like spans.
+    Policies:
+    - strict: conservative, local substitutions only.
+    - aggressive: allow larger, multi-char substitutions while preserving URL/email safety.
     """
+
+    policy_name = _normalize_policy(policy)
+    changed_ratio = _resolve_max_changed_ratio(policy_name=policy_name, override=max_changed_ratio)
 
     ocr_normalized = normalize_extracted_text(ocr_text).strip()
     pymupdf_normalized = normalize_extracted_text(pymupdf_text).strip()
@@ -70,7 +79,7 @@ def merge_ocr_with_pymupdf(ocr_text: str, pymupdf_text: str) -> tuple[str, Merge
 
         ocr_compact = "".join(ocr_tokens[i1:i2])
         pym_compact = "".join(pymupdf_tokens[j1:j2])
-        max_changed = max(1, int(len(ocr_compact) * _DEFAULT_MERGE_MAX_CHANGED_RATIO))
+        max_changed = _max_changed_chars(len(ocr_compact), changed_ratio)
 
         if (
             _looks_like_url_or_email(ocr_compact)
@@ -83,118 +92,33 @@ def merge_ocr_with_pymupdf(ocr_text: str, pymupdf_text: str) -> tuple[str, Merge
         if non_ws_count != len(ocr_compact):
             continue
 
-        merged_compact_chars = list(ocr_compact)
-        block_changed_chars = 0
+        merge = _merge_compact_block(
+            ocr_compact=ocr_compact,
+            pym_compact=pym_compact,
+            policy_name=policy_name,
+            max_changed=max_changed,
+        )
+        if merge is None:
+            continue
 
-        if len(ocr_compact) == len(pym_compact):
-            diff_count = sum(1 for a, b in zip(ocr_compact, pym_compact, strict=False) if a != b)
-            if diff_count == 0:
-                continue
-            if diff_count > max_changed:
-                continue
-
-            for i, (o, p) in enumerate(zip(ocr_compact, pym_compact, strict=False)):
-                if o == p:
+        merged_compact, block_changed_chars = merge
+        if len(merged_compact) == len(ocr_compact):
+            merged_segment_chars: list[str] = []
+            compact_i = 0
+            for ch in template:
+                if ch.isspace():
+                    merged_segment_chars.append(ch)
                     continue
-                if o == _REPLACEMENT_CHAR and p != _REPLACEMENT_CHAR:
-                    merged_compact_chars[i] = p
-                elif p == _REPLACEMENT_CHAR:
-                    merged_compact_chars[i] = o
-                elif _is_japanese_char(p) or _is_japanese_char(o):
-                    merged_compact_chars[i] = p
-                else:
-                    merged_compact_chars[i] = o
-
-                if merged_compact_chars[i] != o:
-                    block_changed_chars += 1
+                merged_segment_chars.append(merged_compact[compact_i])
+                compact_i += 1
+            merged_segment = "".join(merged_segment_chars)
         else:
-            length_delta = abs(len(ocr_compact) - len(pym_compact))
-            if length_delta > max_changed:
+            # Length-changing replacements are allowed only for compact (no-space) spans.
+            if policy_name != "aggressive":
                 continue
-
-            char_matcher = difflib.SequenceMatcher(a=ocr_compact, b=pym_compact, autojunk=False)
-            opcodes = char_matcher.get_opcodes()
-            for opcode_index, (sub_tag, a1, a2, b1, b2) in enumerate(opcodes):
-                if sub_tag != "replace":
-                    continue
-                if a1 >= a2 or b1 >= b2:
-                    continue
-
-                a_len = a2 - a1
-                b_len = b2 - b1
-                if a_len == b_len:
-                    for i, (o, p) in enumerate(
-                        zip(ocr_compact[a1:a2], pym_compact[b1:b2], strict=False),
-                        start=a1,
-                    ):
-                        if o == p:
-                            continue
-                        if o == _REPLACEMENT_CHAR and p != _REPLACEMENT_CHAR:
-                            merged_compact_chars[i] = p
-                        elif p == _REPLACEMENT_CHAR:
-                            merged_compact_chars[i] = o
-                        elif _is_japanese_char(p) or _is_japanese_char(o):
-                            merged_compact_chars[i] = p
-                        else:
-                            merged_compact_chars[i] = o
-
-                        if merged_compact_chars[i] != o:
-                            block_changed_chars += 1
-                            if block_changed_chars > max_changed:
-                                break
-                else:
-                    pair_len = min(a_len, b_len)
-                    if pair_len <= 0:
-                        continue
-
-                    align_from_end = False
-                    if opcode_index + 1 < len(opcodes):
-                        next_tag, na1, na2, nb1, nb2 = opcodes[opcode_index + 1]
-                        if next_tag == "equal" and (na2 - na1) > 0 and (nb2 - nb1) > 0:
-                            align_from_end = True
-
-                    if align_from_end:
-                        a_start = a2 - pair_len
-                        b_start = b2 - pair_len
-                    else:
-                        a_start = a1
-                        b_start = b1
-
-                    for offset in range(pair_len):
-                        i = a_start + offset
-                        o = ocr_compact[i]
-                        p = pym_compact[b_start + offset]
-                        if o == p:
-                            continue
-
-                        if o == _REPLACEMENT_CHAR and p != _REPLACEMENT_CHAR:
-                            merged = p
-                        else:
-                            continue
-
-                        merged_compact_chars[i] = merged
-                        block_changed_chars += 1
-                        if block_changed_chars > max_changed:
-                            break
-
-                if block_changed_chars > max_changed:
-                    break
-
-        if block_changed_chars == 0:
-            continue
-        if block_changed_chars > max_changed:
-            continue
-
-        merged_compact = "".join(merged_compact_chars)
-        merged_segment_chars: list[str] = []
-        compact_i = 0
-        for ch in template:
-            if ch.isspace():
-                merged_segment_chars.append(ch)
+            if any(ch.isspace() for ch in template):
                 continue
-            merged_segment_chars.append(merged_compact[compact_i])
-            compact_i += 1
-        merged_segment = "".join(merged_segment_chars)
+            merged_segment = merged_compact
 
         out_chars[start:end] = list(merged_segment)
         changed_char_count += block_changed_chars
@@ -203,8 +127,8 @@ def merge_ocr_with_pymupdf(ocr_text: str, pymupdf_text: str) -> tuple[str, Merge
         if len(samples) < 3:
             samples.append(f"{ocr_compact[:40]} -> {merged_compact[:40]}")
         if len(replacements) < 20:
-            before = ocr_compact if len(ocr_compact) <= 80 else (ocr_compact[:80] + "…")
-            after = merged_compact if len(merged_compact) <= 80 else (merged_compact[:80] + "…")
+            before = ocr_compact if len(ocr_compact) <= 80 else (ocr_compact[:80] + "窶ｦ")
+            after = merged_compact if len(merged_compact) <= 80 else (merged_compact[:80] + "窶ｦ")
             replacements.append((before, after))
     merged_text = "".join(out_chars).strip()
     return merged_text, MergeStats(
@@ -214,6 +138,181 @@ def merge_ocr_with_pymupdf(ocr_text: str, pymupdf_text: str) -> tuple[str, Merge
         samples=tuple(samples),
         replacements=tuple(replacements),
     )
+
+
+def _normalize_policy(policy: str) -> str:
+    normalized = str(policy).strip().lower()
+    if normalized in {"", "strict"}:
+        return "strict"
+    if normalized == "aggressive":
+        return "aggressive"
+    raise ValueError(f"Unsupported merge policy: {policy!r}")
+
+
+def _resolve_max_changed_ratio(*, policy_name: str, override: float | None) -> float:
+    if override is not None:
+        value = float(override)
+        if value < 0:
+            raise ValueError("max_changed_ratio must be >= 0")
+        return value
+    if policy_name == "aggressive":
+        return _AGGRESSIVE_MERGE_MAX_CHANGED_RATIO
+    return _DEFAULT_MERGE_MAX_CHANGED_RATIO
+
+
+def _max_changed_chars(text_len: int, ratio: float) -> int:
+    if text_len <= 0:
+        return 0
+    return max(1, int(math.ceil(text_len * ratio)))
+
+
+def _merge_compact_block(
+    *,
+    ocr_compact: str,
+    pym_compact: str,
+    policy_name: str,
+    max_changed: int,
+) -> tuple[str, int] | None:
+    if policy_name == "aggressive":
+        return _merge_compact_block_aggressive(
+            ocr_compact=ocr_compact,
+            pym_compact=pym_compact,
+            max_changed=max_changed,
+        )
+    return _merge_compact_block_strict(
+        ocr_compact=ocr_compact,
+        pym_compact=pym_compact,
+        max_changed=max_changed,
+    )
+
+
+def _merge_compact_block_aggressive(
+    *,
+    ocr_compact: str,
+    pym_compact: str,
+    max_changed: int,
+) -> tuple[str, int] | None:
+    matcher = difflib.SequenceMatcher(a=ocr_compact, b=pym_compact, autojunk=False)
+    parts: list[str] = []
+    changed = 0
+
+    for tag, a1, a2, b1, b2 in matcher.get_opcodes():
+        if tag == "equal":
+            parts.append(ocr_compact[a1:a2])
+            continue
+        if tag == "replace":
+            parts.append(pym_compact[b1:b2])
+            changed += max(a2 - a1, b2 - b1)
+            continue
+        if tag == "delete":
+            changed += a2 - a1
+            continue
+        if tag == "insert":
+            parts.append(pym_compact[b1:b2])
+            changed += b2 - b1
+            continue
+
+    if changed <= 0 or changed > max_changed:
+        return None
+    return "".join(parts), changed
+
+
+def _merge_compact_block_strict(
+    *,
+    ocr_compact: str,
+    pym_compact: str,
+    max_changed: int,
+) -> tuple[str, int] | None:
+    merged_compact_chars = list(ocr_compact)
+    block_changed_chars = 0
+
+    if len(ocr_compact) == len(pym_compact):
+        diff_count = sum(1 for a, b in zip(ocr_compact, pym_compact, strict=False) if a != b)
+        if diff_count == 0 or diff_count > max_changed:
+            return None
+
+        for i, (o, p) in enumerate(zip(ocr_compact, pym_compact, strict=False)):
+            if o == p:
+                continue
+            if o == _REPLACEMENT_CHAR and p != _REPLACEMENT_CHAR:
+                merged_compact_chars[i] = p
+            elif p == _REPLACEMENT_CHAR:
+                merged_compact_chars[i] = o
+            elif _is_japanese_char(p) or _is_japanese_char(o):
+                merged_compact_chars[i] = p
+            else:
+                merged_compact_chars[i] = o
+
+            if merged_compact_chars[i] != o:
+                block_changed_chars += 1
+    else:
+        length_delta = abs(len(ocr_compact) - len(pym_compact))
+        if length_delta > max_changed:
+            return None
+
+        char_matcher = difflib.SequenceMatcher(a=ocr_compact, b=pym_compact, autojunk=False)
+        opcodes = char_matcher.get_opcodes()
+        for opcode_index, (sub_tag, a1, a2, b1, b2) in enumerate(opcodes):
+            if sub_tag != "replace":
+                continue
+            if a1 >= a2 or b1 >= b2:
+                continue
+
+            a_len = a2 - a1
+            b_len = b2 - b1
+            if a_len == b_len:
+                for i, (o, p) in enumerate(
+                    zip(ocr_compact[a1:a2], pym_compact[b1:b2], strict=False),
+                    start=a1,
+                ):
+                    if o == p:
+                        continue
+                    if o == _REPLACEMENT_CHAR and p != _REPLACEMENT_CHAR:
+                        merged_compact_chars[i] = p
+                    elif p == _REPLACEMENT_CHAR:
+                        merged_compact_chars[i] = o
+                    elif _is_japanese_char(p) or _is_japanese_char(o):
+                        merged_compact_chars[i] = p
+                    else:
+                        merged_compact_chars[i] = o
+
+                    if merged_compact_chars[i] != o:
+                        block_changed_chars += 1
+                        if block_changed_chars > max_changed:
+                            return None
+            else:
+                pair_len = min(a_len, b_len)
+                if pair_len <= 0:
+                    continue
+
+                align_from_end = False
+                if opcode_index + 1 < len(opcodes):
+                    next_tag, na1, na2, nb1, nb2 = opcodes[opcode_index + 1]
+                    if next_tag == "equal" and (na2 - na1) > 0 and (nb2 - nb1) > 0:
+                        align_from_end = True
+
+                if align_from_end:
+                    a_start = a2 - pair_len
+                    b_start = b2 - pair_len
+                else:
+                    a_start = a1
+                    b_start = b1
+
+                for offset in range(pair_len):
+                    i = a_start + offset
+                    o = ocr_compact[i]
+                    p = pym_compact[b_start + offset]
+                    if o == p:
+                        continue
+                    if o == _REPLACEMENT_CHAR and p != _REPLACEMENT_CHAR:
+                        merged_compact_chars[i] = p
+                        block_changed_chars += 1
+                        if block_changed_chars > max_changed:
+                            return None
+
+    if block_changed_chars <= 0 or block_changed_chars > max_changed:
+        return None
+    return "".join(merged_compact_chars), block_changed_chars
 
 
 def _is_japanese_char(ch: str) -> bool:
@@ -229,7 +328,20 @@ def _is_japanese_char(ch: str) -> bool:
 
 
 def _looks_like_url_or_email(text: str) -> bool:
-    return bool(_URL_RE.search(text) or _EMAIL_RE.search(text))
+    normalized = str(text).strip().lower()
+    if not normalized:
+        return False
+    if _URL_RE.search(normalized) or _EMAIL_RE.search(normalized):
+        return True
+    if "://" in normalized:
+        return True
+    if normalized.startswith("www."):
+        return True
+    if "@" in normalized:
+        tail = normalized.split("@", 1)[1]
+        if "." in tail:
+            return True
+    return False
 
 
 def _extract_non_whitespace_span(text: str, start: int, end: int) -> str:

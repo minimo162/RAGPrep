@@ -285,11 +285,13 @@ try {
     }
 
     $currentStep = "write run scripts"
-$startGlmOcrPs1 = @"
+$startLightOnOcrPs1 = @"
 [CmdletBinding()]
 param(
     [string]`$BaseUrl = "",
-    [string]`$Model = "zai-org/GLM-OCR",
+    [string]`$Model = "noctrex/LightOnOCR-2-1B-GGUF",
+    [string]`$ModelFile = "LightOnOCR-2-1B-IQ4_XS.gguf",
+    [string]`$MMProjFile = "mmproj-BF16.gguf",
     [int]`$Port = 8080
 )
 
@@ -297,16 +299,18 @@ Set-StrictMode -Version Latest
 `$ErrorActionPreference = "Stop"
 
 if (-not `$BaseUrl -or [string]::IsNullOrWhiteSpace(`$BaseUrl)) {
-    `$BaseUrl = `$env:RAGPREP_GLM_OCR_BASE_URL
+    `$BaseUrl = `$env:RAGPREP_LIGHTON_BASE_URL
 }
 if (-not `$BaseUrl -or [string]::IsNullOrWhiteSpace(`$BaseUrl)) {
     `$BaseUrl = "http://127.0.0.1:`$Port"
 }
 
 `$probeUrl = `$BaseUrl.TrimEnd("/") + "/v1/models"
-Write-Host "GLM-OCR start helper" -ForegroundColor Cyan
+Write-Host "LightOn OCR start helper" -ForegroundColor Cyan
 Write-Host "  base_url: `$BaseUrl" -ForegroundColor DarkGray
 Write-Host "  model:    `$Model" -ForegroundColor DarkGray
+Write-Host "  gguf:     `$ModelFile" -ForegroundColor DarkGray
+Write-Host "  mmproj:   `$MMProjFile" -ForegroundColor DarkGray
 Write-Host "  port:     `$Port" -ForegroundColor DarkGray
 
 try {
@@ -320,46 +324,32 @@ catch {
     # not reachable -> try to start
 }
 
-`$vllm = Get-Command vllm -ErrorAction SilentlyContinue
-if (`$vllm) {
-    Write-Host "Starting via: vllm serve" -ForegroundColor Cyan
+`$llamaServer = Get-Command llama-server -ErrorAction SilentlyContinue
+if (`$llamaServer) {
+    Write-Host "Starting via: llama.cpp (llama-server)" -ForegroundColor Cyan
     Write-Host "NOTE: This will block. Keep this window open while using RAGPrep." -ForegroundColor Yellow
-    & vllm serve `$Model --host 0.0.0.0 --port `$Port
+    & llama-server --host 0.0.0.0 --port `$Port --model `$ModelFile --mmproj `$MMProjFile --ctx-size 8192
     exit `$LASTEXITCODE
 }
 
-`$docker = Get-Command docker -ErrorAction SilentlyContinue
-if (`$docker) {
-    Write-Host "Starting via: Docker (vLLM OpenAI server image)" -ForegroundColor Cyan
-    Write-Host "NOTE: vLLM does not provide native Windows wheels; Docker/WSL2 is recommended on Windows." -ForegroundColor Yellow
-    Write-Host "NOTE: This will block. Keep this window open while using RAGPrep." -ForegroundColor Yellow
-    Write-Host "If Docker fails, install Docker Desktop (WSL2 backend) and ensure GPU support if needed." -ForegroundColor Yellow
-
-    `$image = "vllm/vllm-openai:nightly"
-    `$hostPort = `$Port
-    `$containerPort = 8080
-
-    & docker run --rm -it -p "`$hostPort`:`$containerPort" `$image vllm serve `$Model --host 0.0.0.0 --port `$containerPort
-    exit `$LASTEXITCODE
-}
-
-Write-Warning "Could not auto-start GLM-OCR (vllm and docker not found)."
+Write-Warning "Could not auto-start LightOn OCR (llama-server not found)."
 Write-Host "Options:" -ForegroundColor Yellow
-Write-Host "  1) Run GLM-OCR server on another machine, then set RAGPREP_GLM_OCR_BASE_URL." -ForegroundColor Yellow
-Write-Host "  2) On Windows, use Docker Desktop (WSL2 backend) and run vLLM container." -ForegroundColor Yellow
-Write-Host "  3) On Linux/WSL2, install vLLM and run: vllm serve zai-org/GLM-OCR --port 8080" -ForegroundColor Yellow
-throw "Cannot start GLM-OCR automatically."
+Write-Host "  1) Run an OpenAI-compatible OCR server on another machine, then set RAGPREP_LIGHTON_BASE_URL." -ForegroundColor Yellow
+Write-Host "  2) Install llama.cpp and run example:" -ForegroundColor Yellow
+Write-Host "     llama-server --host 0.0.0.0 --port 8080 --model LightOnOCR-2-1B-IQ4_XS.gguf --mmproj mmproj-BF16.gguf" -ForegroundColor Yellow
+Write-Host "  3) Ensure the server exposes /v1/chat/completions and /v1/models." -ForegroundColor Yellow
+throw "Cannot start LightOn OCR automatically."
 "@
-    Set-Content -Path (Join-Path $OutputDir "start-glm-ocr.ps1") -Value $startGlmOcrPs1 -Encoding UTF8
+    Set-Content -Path (Join-Path $OutputDir "start-lighton-ocr.ps1") -Value $startLightOnOcrPs1 -Encoding UTF8
 
-    $startGlmOcrCmd = @"
+    $startLightOnOcrCmd = @"
 @echo off
 setlocal
 set ROOT=%~dp0
-start "GLM-OCR" powershell -NoProfile -ExecutionPolicy Bypass -File "%ROOT%start-glm-ocr.ps1"
+start "LightOn OCR" powershell -NoProfile -ExecutionPolicy Bypass -File "%ROOT%start-lighton-ocr.ps1"
 exit /b 0
 "@
-    Set-Content -Path (Join-Path $OutputDir "start-glm-ocr.cmd") -Value $startGlmOcrCmd -Encoding ASCII
+    Set-Content -Path (Join-Path $OutputDir "start-lighton-ocr.cmd") -Value $startLightOnOcrCmd -Encoding ASCII
 
     $runPs1 = @"
 [CmdletBinding()]
@@ -378,30 +368,29 @@ if (-not (Test-Path `$pythonExe)) {
     throw "Missing `$pythonExe. Run scripts/build-standalone.ps1 first."
 }
 
-if (-not `$env:RAGPREP_GLM_OCR_MODE -or [string]::IsNullOrWhiteSpace(`$env:RAGPREP_GLM_OCR_MODE)) {
-    `$env:RAGPREP_GLM_OCR_MODE = "transformers"
-}
-if (-not `$env:RAGPREP_GLM_OCR_BASE_URL -or [string]::IsNullOrWhiteSpace(`$env:RAGPREP_GLM_OCR_BASE_URL)) {
-    `$env:RAGPREP_GLM_OCR_BASE_URL = "http://127.0.0.1:8080"
+if (-not `$env:RAGPREP_LIGHTON_BASE_URL -or [string]::IsNullOrWhiteSpace(`$env:RAGPREP_LIGHTON_BASE_URL)) {
+    `$env:RAGPREP_LIGHTON_BASE_URL = "http://127.0.0.1:8080"
 }
 if (-not `$env:RAGPREP_PDF_BACKEND -or [string]::IsNullOrWhiteSpace(`$env:RAGPREP_PDF_BACKEND)) {
-    `$env:RAGPREP_PDF_BACKEND = "glm-ocr"
+    `$env:RAGPREP_PDF_BACKEND = "lighton-ocr"
 }
-if (`$env:RAGPREP_PDF_BACKEND -ne "glm-ocr") {
-    throw "RAGPREP_PDF_BACKEND must be 'glm-ocr' (got: `$env:RAGPREP_PDF_BACKEND)."
+if (`$env:RAGPREP_PDF_BACKEND -ne "lighton-ocr") {
+    throw "RAGPREP_PDF_BACKEND must be 'lighton-ocr' (got: `$env:RAGPREP_PDF_BACKEND)."
 }
 
-if (`$env:RAGPREP_GLM_OCR_MODE -eq "server") {
-    `$probeUrl = `$env:RAGPREP_GLM_OCR_BASE_URL.TrimEnd("/") + "/v1/models"
-    try {
-        `$resp = Invoke-WebRequest -UseBasicParsing -TimeoutSec 2 -Uri `$probeUrl
-        if (`$resp.StatusCode -ne 200) {
-            throw "Unexpected status: `$(`$resp.StatusCode)"
-        }
+if (-not `$env:RAGPREP_LAYOUT_MODE -or [string]::IsNullOrWhiteSpace(`$env:RAGPREP_LAYOUT_MODE)) {
+    `$env:RAGPREP_LAYOUT_MODE = "lighton"
+}
+
+`$probeUrl = `$env:RAGPREP_LIGHTON_BASE_URL.TrimEnd("/") + "/v1/models"
+try {
+    `$resp = Invoke-WebRequest -UseBasicParsing -TimeoutSec 2 -Uri `$probeUrl
+    if (`$resp.StatusCode -ne 200) {
+        throw "Unexpected status: `$(`$resp.StatusCode)"
     }
-    catch {
-        throw "GLM-OCR server is not reachable: `$probeUrl. Run start-glm-ocr.ps1 (or start-glm-ocr.cmd) and retry."
-    }
+}
+catch {
+    throw "LightOn OCR server is not reachable: `$probeUrl. Run start-lighton-ocr.ps1 (or start-lighton-ocr.cmd) and retry."
 }
 
 `$env:PYTHONNOUSERSITE = "1"
@@ -429,27 +418,25 @@ set "PORT=8000"
 if not "%RAGPREP_PORT%"=="" set "PORT=%RAGPREP_PORT%"
 if not "%~2"=="" set "PORT=%~2"
 
-if "%RAGPREP_GLM_OCR_MODE%"=="" (
-  set RAGPREP_GLM_OCR_MODE=transformers
-)
-if "%RAGPREP_GLM_OCR_BASE_URL%"=="" (
-  set RAGPREP_GLM_OCR_BASE_URL=http://127.0.0.1:8080
+if "%RAGPREP_LIGHTON_BASE_URL%"=="" (
+  set RAGPREP_LIGHTON_BASE_URL=http://127.0.0.1:8080
 )
 if "%RAGPREP_PDF_BACKEND%"=="" (
-  set RAGPREP_PDF_BACKEND=glm-ocr
+  set RAGPREP_PDF_BACKEND=lighton-ocr
 )
-if /I not "%RAGPREP_PDF_BACKEND%"=="glm-ocr" (
-  echo [ERROR] RAGPREP_PDF_BACKEND must be glm-ocr (got: %RAGPREP_PDF_BACKEND%)
+if /I not "%RAGPREP_PDF_BACKEND%"=="lighton-ocr" (
+  echo [ERROR] RAGPREP_PDF_BACKEND must be lighton-ocr (got: %RAGPREP_PDF_BACKEND%)
   exit /b 1
 )
+if "%RAGPREP_LAYOUT_MODE%"=="" (
+  set RAGPREP_LAYOUT_MODE=lighton
+)
 
-if /I "%RAGPREP_GLM_OCR_MODE%"=="server" (
-  powershell -NoProfile -Command "try { $u=$env:RAGPREP_GLM_OCR_BASE_URL; $r=Invoke-WebRequest -UseBasicParsing -TimeoutSec 2 -Uri ($u.TrimEnd('/') + '/v1/models'); if ($r.StatusCode -eq 200) { exit 0 } exit 1 } catch { exit 1 }"
-  if not "%ERRORLEVEL%"=="0" (
-    echo [ERROR] GLM-OCR server is not reachable: %RAGPREP_GLM_OCR_BASE_URL%/v1/models
-    echo Start your server (vLLM/SGLang) and retry.
-    exit /b 1
-  )
+powershell -NoProfile -Command "try { $u=$env:RAGPREP_LIGHTON_BASE_URL; $r=Invoke-WebRequest -UseBasicParsing -TimeoutSec 2 -Uri ($u.TrimEnd('/') + '/v1/models'); if ($r.StatusCode -eq 200) { exit 0 } exit 1 } catch { exit 1 }"
+if not "%ERRORLEVEL%"=="0" (
+  echo [ERROR] LightOn OCR server is not reachable: %RAGPREP_LIGHTON_BASE_URL%/v1/models
+  echo Start your server (llama.cpp/OpenAI-compatible) and retry.
+  exit /b 1
 )
 
 set PYTHONNOUSERSITE=1

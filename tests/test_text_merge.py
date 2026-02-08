@@ -36,7 +36,7 @@ def test_merge_ocr_with_pymupdf_prefers_pymupdf_for_replacement_char() -> None:
     assert stats.applied_block_count == 1
 
 
-def test_merge_ocr_with_pymupdf_prefers_ocr_for_digits_and_latin() -> None:
+def test_merge_ocr_with_pymupdf_prefers_ocr_for_digits_and_latin_in_strict() -> None:
     ocr_text = "Version 1.2.3 ABC"
     pymupdf_text = "Version 1.2.8 ABD"
 
@@ -47,7 +47,7 @@ def test_merge_ocr_with_pymupdf_prefers_ocr_for_digits_and_latin() -> None:
     assert stats.applied_block_count == 0
 
 
-def test_merge_ocr_with_pymupdf_skips_if_too_many_changes() -> None:
+def test_merge_ocr_with_pymupdf_skips_if_too_many_changes_in_strict() -> None:
     ocr_text = "東京都千代田区"
     pymupdf_text = "大阪都千代田区"
 
@@ -91,3 +91,41 @@ def test_merge_ocr_with_pymupdf_can_fix_replacement_char_with_insertions() -> No
     assert merged == "ABCDE"
     assert stats.changed_char_count == 1
     assert stats.applied_block_count == 1
+
+
+def test_merge_ocr_with_pymupdf_aggressive_allows_multi_char_replacement() -> None:
+    ocr_text = "大坂市中央区"
+    pymupdf_text = "大阪市中央区"
+
+    merged, stats = merge_ocr_with_pymupdf(ocr_text, pymupdf_text, policy="aggressive")
+
+    assert merged == "大阪市中央区"
+    assert stats.changed_char_count >= 1
+    assert stats.applied_block_count == 1
+
+
+def test_merge_ocr_with_pymupdf_aggressive_allows_length_change_without_spaces() -> None:
+    ocr_text = "ABCD"
+    pymupdf_text = "ABCDE"
+
+    merged, stats = merge_ocr_with_pymupdf(
+        ocr_text,
+        pymupdf_text,
+        policy="aggressive",
+        max_changed_ratio=0.5,
+    )
+
+    assert merged == "ABCDE"
+    assert stats.changed_char_count == 1
+    assert stats.applied_block_count == 1
+
+
+def test_merge_ocr_with_pymupdf_aggressive_keeps_url_protection() -> None:
+    ocr_text = "hxxp://example.com/path"
+    pymupdf_text = "http://example.com/path"
+
+    merged, stats = merge_ocr_with_pymupdf(ocr_text, pymupdf_text, policy="aggressive")
+
+    assert merged == ocr_text
+    assert stats.changed_char_count == 0
+    assert stats.applied_block_count == 0

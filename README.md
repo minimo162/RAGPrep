@@ -1,66 +1,72 @@
 # RAGPrep
 
-RAGPrep converts PDFs to **structured HTML** by combining:
-- **Text layer extraction** (PyMuPDF): uses the PDF's existing text layer (no OCR for text extraction).
-- **Layout analysis (required)**: PP-DocLayout-V3 regions are used to structure the extracted text.
+RAGPrep converts PDFs to structured HTML/Markdown with:
+- LightOn OCR (OpenAI-compatible server)
+- PyMuPDF text layer extraction (for line-level correction)
+- Layout-aware rendering
 
-## Behavior highlights
+## Default behavior
 
-- Layout-aware output with improved natural reading order.
-- Table rendering supports merge-aware cell attributes (`colspan`/`rowspan`) when detected.
-- Web/Desktop `.html` download with in-app success/failure/cancel feedback.
-- Running-job partial output shows all processed pages so far (no last-N preview cap).
-- Optional startup prewarm to reduce first-request cold start for local layout backend.
-- `RAGPREP_LAYOUT_MODE` is defaulted to `local-paddle` (no env required for local mode).
-- UI shows prewarm/conversion state and disables `Convert` while prewarm/conversion is in progress.
+- Default OCR backend: `lighton-ocr`
+- Default layout mode: `lighton`
+- No fallback on OCR/layout failure: conversion fails fast with page-specific error
 
-Outputs:
-- Web / Desktop: download `.html`
-- CLI: writes an `.html` file
+## Install
 
-## Quickstart
-
-### 1) Install
 ```bash
 uv sync --dev
 ```
 
-### 2) Layout mode (default is already enabled)
+## Configure (LightOn default)
 
-RAGPrep **requires layout analysis**. By default, it runs with:
-
-```text
-RAGPREP_LAYOUT_MODE=local-paddle
-RAGPREP_WEB_PREWARM_ON_STARTUP=1
-```
-
-Set env vars only when you want to override this behavior.
-
-#### Option A: Local (no Docker) via PaddleOCR (recommended)
-Install optional runtime:
-```bash
-uv pip install paddlepaddle paddleocr "paddlex[ocr]"
-```
-
-Set layout mode:
+PowerShell:
 ```powershell
-$env:RAGPREP_LAYOUT_MODE = "local-paddle"
+$env:RAGPREP_PDF_BACKEND = "lighton-ocr"
+$env:RAGPREP_LAYOUT_MODE = "lighton"
+$env:RAGPREP_LIGHTON_BASE_URL = "http://127.0.0.1:8080"
+$env:RAGPREP_LIGHTON_MODEL = "noctrex/LightOnOCR-2-1B-GGUF"
 ```
+
+bash:
 ```bash
-export RAGPREP_LAYOUT_MODE=local-paddle
+export RAGPREP_PDF_BACKEND=lighton-ocr
+export RAGPREP_LAYOUT_MODE=lighton
+export RAGPREP_LIGHTON_BASE_URL=http://127.0.0.1:8080
+export RAGPREP_LIGHTON_MODEL=noctrex/LightOnOCR-2-1B-GGUF
 ```
 
-#### Option B: Server (OpenAI-compatible `/v1/chat/completions`)
-Point RAGPrep to a running server:
-```powershell
-$env:RAGPREP_LAYOUT_MODE = "server"
-$env:RAGPREP_LAYOUT_BASE_URL = "http://127.0.0.1:8080"
-$env:RAGPREP_LAYOUT_MODEL = "zai-org/GLM-OCR"
-# optional:
-# $env:RAGPREP_LAYOUT_API_KEY = "..."
+### LightOn response contract
+
+`POST /v1/chat/completions` must return `message.content` containing JSON:
+
+```json
+{
+  "schema_version": "v1",
+  "elements": [
+    {
+      "page_index": 0,
+      "bbox": [0, 0, 100, 100],
+      "label": "text",
+      "score": 0.9,
+      "order": 0
+    }
+  ],
+  "lines": [
+    {
+      "bbox": [0, 0, 100, 20],
+      "text": "example",
+      "confidence": 0.95
+    }
+  ]
+}
 ```
 
-### 3) Run
+- `elements` and `lines` are required.
+- `bbox` must satisfy `x0 < x1` and `y0 < y1`.
+- On invalid response, conversion fails immediately.
+
+## Run
+
 Desktop:
 ```bash
 uv run python -m ragprep.desktop
@@ -77,77 +83,54 @@ CLI (PDF -> HTML):
 uv run python scripts/pdf_to_html.py --pdf .\\path\\to\\input.pdf --out .\\out\\input.html --overwrite
 ```
 
-## Layout settings
-
-- `RAGPREP_LAYOUT_MODE`: `local-paddle` (local PP-DocLayout-V3) or `server` (OpenAI-compatible HTTP)
-- `RAGPREP_LAYOUT_BASE_URL`: server base URL (server mode only)
-- `RAGPREP_LAYOUT_MODEL`: model name (server mode; kept for parity in local mode)
-- `RAGPREP_LAYOUT_API_KEY`: bearer token (optional, server mode)
-- `RAGPREP_LAYOUT_TIMEOUT_SECONDS`: request timeout in seconds (server mode; default: `60`)
-- `RAGPREP_MODEL_CACHE_DIR`: shared local model cache directory used for Paddle/HuggingFace/Torch assets (default: OS cache dir under `ragprep/model-cache`)
-- `RAGPREP_LAYOUT_CONCURRENCY`: number of in-flight layout requests in server mode (default: `1`)
-- `RAGPREP_LAYOUT_RENDER_DPI`: DPI used for layout rendering (default: `250`)
-- `RAGPREP_LAYOUT_RENDER_MAX_EDGE`: max edge for layout rendering (default: `768`)
-- `RAGPREP_LAYOUT_RENDER_AUTO`: enable small-first layout rendering with one higher-res retry on empty results (server mode; default: `0`)
-- `RAGPREP_LAYOUT_RENDER_AUTO_SMALL_DPI`: DPI for small-first pass (default: `250`)
-- `RAGPREP_LAYOUT_RENDER_AUTO_SMALL_MAX_EDGE`: max edge for small-first pass (default: `768`)
-- `RAGPREP_LAYOUT_RETRY_COUNT`: retry count for transient failures (server mode; default: `1`)
-- `RAGPREP_LAYOUT_RETRY_BACKOFF_SECONDS`: base backoff seconds between retries (server mode; default: `0.0`)
-
-Fast layout hint (server mode):
-- Try `RAGPREP_LAYOUT_CONCURRENCY=2` and `RAGPREP_LAYOUT_RENDER_AUTO=1` first.
-- Start with `RAGPREP_LAYOUT_RENDER_MAX_EDGE=768` for layout-only workloads.
-- Very small `max_edge` values (for example `640`) can be slower depending on backend/device; if quality or speed regresses, try `1024`.
-
-## Web settings
-
-- `RAGPREP_WEB_PREWARM_ON_STARTUP`: pre-initialize local layout backend at app startup (`1`/`0`, default: `1`)
-- `RAGPREP_WEB_PREWARM_EXECUTOR`: prewarm backend executor (`thread` or `process`).
-  - default: `process` when `RAGPREP_DESKTOP_MODE=1`, otherwise `thread`
-- `RAGPREP_WEB_PREWARM_TIMEOUT_SECONDS`: timeout for process-based prewarm stage2 (default: `120`)
-- `RAGPREP_WEB_PREWARM_START_DELAY_SECONDS`: delay before prewarm starts (default: `0.35`)
-- `RAGPREP_DESKTOP_MODE`: desktop launcher marker (`1` enables desktop-optimized defaults)
-- Startup prewarm prepares cache directories and model artifacts in `RAGPREP_MODEL_CACHE_DIR`.
-- Startup prewarm runs in two phases: `stage1` (cache prep) -> `stage2` (layout engine load).
-- Partial output always accumulates all processed pages so far.
-- Legacy `RAGPREP_WEB_PARTIAL_PREVIEW_PAGES` is no longer used.
-- `Convert` button is locked during prewarm and while any conversion job is active.
-
-## Download behavior
-
-- Browser mode: `Download .html` triggers file download and shows status in the page.
-- Desktop mode (pywebview): tries saving to Downloads first, then falls back to save dialog.
-
-## Troubleshooting (layout server)
-
-If you see `Layout analysis request timed out`:
-- Confirm `RAGPREP_LAYOUT_BASE_URL` is reachable and supports `POST /v1/chat/completions`.
-- Increase `RAGPREP_LAYOUT_TIMEOUT_SECONDS` (or reduce PDF pages / image size).
-- If server backend is not required, switch to `RAGPREP_LAYOUT_MODE=local-paddle`.
-
-## Troubleshooting (local paddle)
-
-If local layout fails with a Paddle runtime error mentioning `ConvertPirAttribute2RuntimeAttribute` or
-`onednn_instruction.cc`, disable OneDNN/MKLDNN and PIR API flags, then restart:
-
-PowerShell:
-```powershell
-$env:FLAGS_use_mkldnn = "0"
-$env:FLAGS_enable_pir_api = "0"
-```
-
-bash:
+CLI (legacy PDF -> Markdown entrypoint, still supported):
 ```bash
-export FLAGS_use_mkldnn=0
-export FLAGS_enable_pir_api=0
+uv run python scripts/pdf_to_markdown.py --pdf .\\path\\to\\input.pdf --out .\\out\\input.md --overwrite
 ```
 
-Or set one switch and restart:
-```bash
-export RAGPREP_LAYOUT_PADDLE_SAFE_MODE=1
-```
+## Main settings
+
+### OCR backend
+- `RAGPREP_PDF_BACKEND`: `lighton-ocr` (default) or `glm-ocr`
+- `RAGPREP_OCR_BACKEND`: alias of `RAGPREP_PDF_BACKEND`
+
+### LightOn
+- `RAGPREP_LIGHTON_BASE_URL` (default: `http://127.0.0.1:8080`)
+- `RAGPREP_LIGHTON_MODEL` (default: `noctrex/LightOnOCR-2-1B-GGUF`)
+- `RAGPREP_LIGHTON_API_KEY` (optional)
+- `RAGPREP_LIGHTON_MAX_TOKENS` (default: `8192`)
+- `RAGPREP_LIGHTON_TIMEOUT_SECONDS` (default: `60`)
+
+### Layout
+- `RAGPREP_LAYOUT_MODE`: `lighton` (default), `local-fast`, `local-paddle`, or `server`
+- `RAGPREP_LAYOUT_BASE_URL`
+- `RAGPREP_LAYOUT_MODEL`
+- `RAGPREP_LAYOUT_API_KEY`
+- `RAGPREP_LAYOUT_MAX_TOKENS`
+- `RAGPREP_LAYOUT_TIMEOUT_SECONDS`
+- `RAGPREP_LAYOUT_CONCURRENCY` (server mode)
+- `RAGPREP_LAYOUT_RENDER_DPI`
+- `RAGPREP_LAYOUT_RENDER_MAX_EDGE`
+- `RAGPREP_LAYOUT_RENDER_AUTO` (+ small-pass settings)
+
+## Legacy GLM mode
+
+`RAGPREP_GLM_OCR_*` settings are legacy and used only when:
+- `RAGPREP_PDF_BACKEND=glm-ocr`, or
+- layout mode explicitly uses legacy server/local-paddle flows.
+
+## Standalone helper
+
+`scripts/build-standalone.ps1` now generates:
+- `start-lighton-ocr.ps1`
+- `start-lighton-ocr.cmd`
+
+It includes a llama.cpp example with:
+- `LightOnOCR-2-1B-IQ4_XS.gguf`
+- `mmproj-BF16.gguf`
 
 ## Quality gate
+
 ```bash
 uv run ruff check .
 uv run mypy ragprep tests

@@ -1,60 +1,57 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import pytest
 
 from ragprep import config
 
 
-def test_default_pdf_backend_is_glm_ocr(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_default_ocr_backend_is_lighton(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("RAGPREP_PDF_BACKEND", raising=False)
+    monkeypatch.delenv("RAGPREP_OCR_BACKEND", raising=False)
     settings = config.get_settings()
+    assert settings.ocr_backend == "lighton-ocr"
+    assert settings.pdf_backend == "lighton-ocr"
+
+
+def test_ocr_backend_accepts_lighton_and_glm(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("RAGPREP_PDF_BACKEND", "LIGHTON-OCR")
+    settings = config.get_settings()
+    assert settings.ocr_backend == "lighton-ocr"
+    assert settings.pdf_backend == "lighton-ocr"
+
+    monkeypatch.setenv("RAGPREP_OCR_BACKEND", "glm-ocr")
+    settings = config.get_settings()
+    assert settings.ocr_backend == "glm-ocr"
     assert settings.pdf_backend == "glm-ocr"
 
 
-def test_pdf_backend_accepts_glm_ocr(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("RAGPREP_PDF_BACKEND", "GLM-OCR")
-    settings = config.get_settings()
-    assert settings.pdf_backend == "glm-ocr"
-
-
-def test_pdf_backend_rejects_invalid(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("RAGPREP_PDF_BACKEND", "invalid")
+def test_ocr_backend_rejects_invalid(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("RAGPREP_OCR_BACKEND", "invalid")
     with pytest.raises(ValueError, match="RAGPREP_PDF_BACKEND"):
         config.get_settings()
 
 
-def test_glm_ocr_env_values_trimmed(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.delenv("RAGPREP_PDF_BACKEND", raising=False)
-    monkeypatch.delenv("RAGPREP_GLM_OCR_MODE", raising=False)
-    monkeypatch.setenv("RAGPREP_GLM_OCR_BASE_URL", "  http://localhost:8080  ")
-    monkeypatch.setenv("RAGPREP_GLM_OCR_MODEL", "  zai-org/GLM-OCR  ")
-    monkeypatch.setenv("RAGPREP_GLM_OCR_API_KEY", "  secret ")
-    monkeypatch.setenv("RAGPREP_GLM_OCR_MAX_TOKENS", "  123  ")
-    monkeypatch.setenv("RAGPREP_GLM_OCR_TIMEOUT_SECONDS", "  9  ")
+def test_lighton_env_values_trimmed(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("RAGPREP_LIGHTON_BASE_URL", "  http://localhost:8080  ")
+    monkeypatch.setenv("RAGPREP_LIGHTON_MODEL", "  noctrex/LightOnOCR-2-1B-GGUF  ")
+    monkeypatch.setenv("RAGPREP_LIGHTON_API_KEY", "  secret ")
+    monkeypatch.setenv("RAGPREP_LIGHTON_MAX_TOKENS", "  123  ")
+    monkeypatch.setenv("RAGPREP_LIGHTON_TIMEOUT_SECONDS", "  9  ")
     settings = config.get_settings()
-    assert settings.glm_ocr_base_url == "http://localhost:8080"
-    assert settings.glm_ocr_model == "zai-org/GLM-OCR"
-    assert settings.glm_ocr_mode == "transformers"
-    assert settings.glm_ocr_api_key == "secret"
-    assert settings.glm_ocr_max_tokens == 123
-    assert settings.glm_ocr_timeout_seconds == 9
+    assert settings.lighton_base_url == "http://localhost:8080"
+    assert settings.lighton_model == "noctrex/LightOnOCR-2-1B-GGUF"
+    assert settings.lighton_api_key == "secret"
+    assert settings.lighton_max_tokens == 123
+    assert settings.lighton_timeout_seconds == 9
 
 
-def test_default_glm_ocr_mode_is_transformers(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.delenv("RAGPREP_GLM_OCR_MODE", raising=False)
-    settings = config.get_settings()
-    assert settings.glm_ocr_mode == "transformers"
-
-
-def test_layout_mode_defaults_to_local_paddle(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_default_layout_mode_is_lighton(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("RAGPREP_LAYOUT_MODE", raising=False)
     settings = config.get_settings()
-    assert settings.layout_mode == "local-paddle"
+    assert settings.layout_mode == "lighton"
 
 
-def test_layout_settings_default_to_glm_ocr_values_when_layout_not_set(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_layout_settings_default_to_lighton_settings(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("RAGPREP_LAYOUT_MODE", raising=False)
     monkeypatch.delenv("RAGPREP_LAYOUT_BASE_URL", raising=False)
     monkeypatch.delenv("RAGPREP_LAYOUT_MODEL", raising=False)
@@ -62,22 +59,22 @@ def test_layout_settings_default_to_glm_ocr_values_when_layout_not_set(
     monkeypatch.delenv("RAGPREP_LAYOUT_MAX_TOKENS", raising=False)
     monkeypatch.delenv("RAGPREP_LAYOUT_TIMEOUT_SECONDS", raising=False)
 
-    monkeypatch.setenv("RAGPREP_GLM_OCR_BASE_URL", "http://example:8080")
-    monkeypatch.setenv("RAGPREP_GLM_OCR_MODEL", "model-x")
-    monkeypatch.setenv("RAGPREP_GLM_OCR_API_KEY", "k")
-    monkeypatch.setenv("RAGPREP_GLM_OCR_MAX_TOKENS", "111")
-    monkeypatch.setenv("RAGPREP_GLM_OCR_TIMEOUT_SECONDS", "7")
+    monkeypatch.setenv("RAGPREP_LIGHTON_BASE_URL", "http://lighton:8080")
+    monkeypatch.setenv("RAGPREP_LIGHTON_MODEL", "lighton-model")
+    monkeypatch.setenv("RAGPREP_LIGHTON_API_KEY", "k")
+    monkeypatch.setenv("RAGPREP_LIGHTON_MAX_TOKENS", "111")
+    monkeypatch.setenv("RAGPREP_LIGHTON_TIMEOUT_SECONDS", "7")
 
     settings = config.get_settings()
-    assert settings.layout_base_url == "http://example:8080"
-    assert settings.layout_model == "model-x"
+    assert settings.layout_mode == "lighton"
+    assert settings.layout_base_url == "http://lighton:8080"
+    assert settings.layout_model == "lighton-model"
     assert settings.layout_api_key == "k"
     assert settings.layout_max_tokens == 111
     assert settings.layout_timeout_seconds == 7
 
 
-def test_layout_settings_override_glm_ocr_settings(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("RAGPREP_GLM_OCR_MODE", "transformers")
+def test_layout_settings_override_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("RAGPREP_LAYOUT_MODE", "server")
     monkeypatch.setenv("RAGPREP_LAYOUT_BASE_URL", "http://layout:8080")
     monkeypatch.setenv("RAGPREP_LAYOUT_MODEL", "layout-model")
@@ -114,27 +111,7 @@ def test_layout_mode_accepts_local_paddle(monkeypatch: pytest.MonkeyPatch) -> No
     assert settings.layout_mode == "local-paddle"
 
 
-def test_layout_render_defaults_are_stable(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.delenv("RAGPREP_LAYOUT_RENDER_DPI", raising=False)
-    monkeypatch.delenv("RAGPREP_LAYOUT_RENDER_MAX_EDGE", raising=False)
-    monkeypatch.delenv("RAGPREP_LAYOUT_RENDER_AUTO_SMALL_DPI", raising=False)
-    monkeypatch.delenv("RAGPREP_LAYOUT_RENDER_AUTO_SMALL_MAX_EDGE", raising=False)
-
+def test_layout_mode_accepts_lighton(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("RAGPREP_LAYOUT_MODE", "lighton")
     settings = config.get_settings()
-    assert settings.layout_render_dpi == 250
-    assert settings.layout_render_max_edge == 768
-    assert settings.layout_render_auto_small_dpi == 250
-    assert settings.layout_render_auto_small_max_edge == 768
-
-
-def test_model_cache_dir_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.delenv("RAGPREP_MODEL_CACHE_DIR", raising=False)
-    settings = config.get_settings()
-    assert isinstance(settings.model_cache_dir, str)
-    assert settings.model_cache_dir.strip() != ""
-
-
-def test_model_cache_dir_can_be_overridden(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("RAGPREP_MODEL_CACHE_DIR", "  C:/tmp/ragprep-cache  ")
-    settings = config.get_settings()
-    assert settings.model_cache_dir == "C:/tmp/ragprep-cache"
+    assert settings.layout_mode == "lighton"

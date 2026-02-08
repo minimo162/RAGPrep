@@ -409,9 +409,7 @@ def extract_pymupdf_page_spans(pdf_bytes: bytes) -> list[list[Span]]:
 
 def extract_pymupdf_page_words(pdf_bytes: bytes) -> list[list[Word]]:
     """
-    Extract per-page words (with coordinates) from the PDF text layer via PyMuPDF.
-
-    Returns one list per page, preserving page order.
+    Extract per-page words (bbox + text) using PyMuPDF text layer.
     """
 
     if not pdf_bytes:
@@ -443,9 +441,8 @@ def extract_pymupdf_page_words(pdf_bytes: bytes) -> list[list[Word]]:
         for i in range(page_count):
             page = doc.load_page(i)
             words = _extract_words(page)
-            words.sort(key=lambda w: (w.y0, w.x0, w.y1, w.x1, w.block_no, w.line_no, w.word_no))
+            words.sort(key=lambda w: (w.y0, w.x0, w.y1, w.x1, w.text))
             pages.append(words)
-
     return pages
 
 
