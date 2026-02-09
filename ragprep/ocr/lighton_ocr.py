@@ -13,7 +13,7 @@ def ocr_image_base64(image_base64: str, *, settings: Settings) -> str:
     payload = _strip_data_url_prefix(image_base64)
     if not payload:
         raise ValueError("image_base64 is empty")
-    _validate_base64(payload)
+    payload = _normalize_and_validate_base64(payload)
 
     base_url = ensure_server_base_url(settings)
     request_url = f"{base_url}/v1/chat/completions"
@@ -99,13 +99,17 @@ def _strip_data_url_prefix(value: str) -> str:
     return raw
 
 
-def _validate_base64(value: str) -> None:
+def _normalize_and_validate_base64(value: str) -> str:
+    normalized = "".join(value.split())
+    if not normalized:
+        raise ValueError("image_base64 is empty")
     try:
-        decoded = base64.b64decode(value, validate=False)
+        decoded = base64.b64decode(normalized, validate=True)
     except (binascii.Error, ValueError) as exc:
         raise ValueError("image_base64 is not valid base64") from exc
     if not decoded:
         raise ValueError("image_base64 is empty")
+    return normalized
 
 
 def _normalize_newlines(text: str) -> str:

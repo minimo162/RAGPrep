@@ -108,8 +108,14 @@ def _render_table_grid(grid: tuple[tuple[str, ...], ...]) -> str:
     if col_count <= 0:
         return '<pre data-kind="table"></pre>'
 
-    parts: list[str] = ['<table data-kind="table"><tbody>']
-    for r in rows:
+    header = tuple(rows[0]) + ("",) * max(0, col_count - len(rows[0]))
+    body_rows = rows[1:]
+
+    parts: list[str] = ['<table data-kind="table">', "<thead>", "<tr>"]
+    for cell in header:
+        parts.append(f"<th>{_escape_with_breaks(str(cell))}</th>")
+    parts.extend(["</tr>", "</thead>", "<tbody>"])
+    for r in body_rows:
         parts.append("<tr>")
         padded = tuple(r) + ("",) * max(0, col_count - len(r))
         for cell in padded:
@@ -140,10 +146,15 @@ def _render_table_cells(
             continue
         starts[(r, c)] = cell
 
-    parts: list[str] = ['<table data-kind="table"><tbody>']
+    parts: list[str] = ['<table data-kind="table">']
     skip_by_row: dict[int, set[int]] = {}
     for r in range(row_count):
+        if r == 0:
+            parts.append("<thead>")
+        if r == 1:
+            parts.append("<tbody>")
         parts.append("<tr>")
+        tag_name = "th" if r == 0 else "td"
         skip_cols: set[int] = set()
         c = 0
         while c < col_count:
@@ -154,7 +165,7 @@ def _render_table_cells(
             start = starts.get((r, c))
             if start is None:
                 value = rows[r][c] if c < len(rows[r]) else ""
-                parts.append(f"<td>{_escape_with_breaks(str(value))}</td>")
+                parts.append(f"<{tag_name}>{_escape_with_breaks(str(value))}</{tag_name}>")
                 c += 1
                 continue
 
@@ -170,7 +181,7 @@ def _render_table_cells(
             value = str(getattr(start, "text", ""))
             if not value and c < len(rows[r]):
                 value = str(rows[r][c])
-            parts.append(f"<td{attr_text}>{_escape_with_breaks(value)}</td>")
+            parts.append(f"<{tag_name}{attr_text}>{_escape_with_breaks(value)}</{tag_name}>")
 
             for covered_col in range(c + 1, min(col_count, c + colspan)):
                 skip_cols.add(covered_col)
@@ -183,7 +194,14 @@ def _render_table_cells(
                         row_skip.add(covered_col)
             c += max(1, colspan)
         parts.append("</tr>")
+        if r == 0:
+            parts.append("</thead>")
+        if r == row_count - 1:
+            if row_count == 1:
+                parts.append("<tbody></tbody>")
+            else:
+                parts.append("</tbody>")
 
-    parts.append("</tbody></table>")
+    parts.append("</table>")
     return "\n".join(parts)
 

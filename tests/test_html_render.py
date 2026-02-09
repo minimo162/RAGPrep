@@ -49,7 +49,8 @@ def test_render_document_html_renders_structured_table_grid() -> None:
 
     html = render_document_html(doc)
     assert '<table data-kind="table">' in html
-    assert "<td>A</td>" in html
+    assert "<thead>" in html
+    assert "<th>A</th>" in html
     assert "<td>D</td>" in html
 
 
@@ -76,5 +77,5 @@ def test_render_document_html_renders_table_colspan_when_cells_present() -> None
     )
 
     html = render_document_html(doc)
-    assert '<td colspan="2">Header</td>' in html
+    assert '<th colspan="2">Header</th>' in html
 

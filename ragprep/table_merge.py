@@ -108,6 +108,16 @@ def merge_markdown_tables_with_pymupdf_words(
 
             merged_cell, merge_stats = merge_ocr_with_pymupdf(ocr_cell, pym_cell)
             if merged_cell == ocr_cell:
+                merged_cell_fallback, merge_stats_fallback = merge_ocr_with_pymupdf(
+                    ocr_cell,
+                    pym_cell,
+                    policy="aggressive",
+                    max_changed_ratio=0.45,
+                )
+                if merged_cell_fallback != ocr_cell:
+                    merged_cell = merged_cell_fallback
+                    merge_stats = merge_stats_fallback
+            if merged_cell == ocr_cell:
                 continue
             if not _is_safe_cell_merge(ocr_cell, merged_cell):
                 continue

@@ -176,7 +176,7 @@ def _start_llama_server_process(
             command,
             stdin=subprocess.DEVNULL,
             stdout=subprocess.DEVNULL,
-            stderr=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
         )
     except FileNotFoundError as exc:
         raise RuntimeError(f"llama-server not found: {executable}") from exc
@@ -209,10 +209,22 @@ def _wait_for_server_ready(
 
 def _is_server_healthy(base_url: str) -> bool:
     health_url = f"{base_url}/health"
+    models_url = f"{base_url}/v1/models"
     try:
         with httpx.Client(timeout=1.0, trust_env=False) as client:
-            response = client.get(health_url)
-        return response.status_code == 200
+            health_response = client.get(health_url)
+            if health_response.status_code != 200:
+                return False
+            models_response = client.get(models_url)
+            if models_response.status_code != 200:
+                return False
+        try:
+            payload = models_response.json()
+        except ValueError:
+            return False
+        if not isinstance(payload, dict):
+            return False
+        return isinstance(payload.get("data"), list)
     except httpx.HTTPError:
         return False
 

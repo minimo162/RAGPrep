@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import io
+import subprocess
 from pathlib import Path
 from typing import Any
 
@@ -31,6 +32,33 @@ class _DummyProcess:
         self._exit_code = 1
 
 
+class _StubResponse:
+    def __init__(self, *, status_code: int, payload: object) -> None:
+        self.status_code = status_code
+        self._payload = payload
+
+    def json(self) -> object:
+        return self._payload
+
+
+class _StubClient:
+    def __init__(self, *, responses: dict[str, _StubResponse]) -> None:
+        self._responses = responses
+
+    def __enter__(self) -> _StubClient:
+        return self
+
+    def __exit__(self, exc_type: object, exc: object, tb: object) -> None:
+        _ = exc_type, exc, tb
+        return None
+
+    def get(self, url: str) -> _StubResponse:
+        response = self._responses.get(url)
+        if response is None:
+            raise AssertionError(f"unexpected URL: {url}")
+        return response
+
+
 def _asset_paths(tmp_path: Path) -> LightOnAssetPaths:
     model = tmp_path / "model.gguf"
     mmproj = tmp_path / "mmproj.gguf"
@@ -58,8 +86,9 @@ def test_start_command_contains_required_flags(
     assets = _asset_paths(tmp_path)
     captured: dict[str, Any] = {}
 
-    def _fake_popen(command: list[str], **_kwargs: object) -> _DummyProcess:
+    def _fake_popen(command: list[str], **kwargs: object) -> _DummyProcess:
         captured["command"] = command
+        captured["kwargs"] = kwargs
         return _DummyProcess(exit_code=None)
 
     monkeypatch.setattr(lighton_server.subprocess, "Popen", _fake_popen)
@@ -86,6 +115,46 @@ def test_start_command_contains_required_flags(
     assert "--flash-attn" in command
     assert "-ngl" in command
     assert "-np" in command
+    kwargs = captured["kwargs"]
+    assert isinstance(kwargs, dict)
+    assert kwargs.get("stderr") is subprocess.DEVNULL
+
+
+def test_is_server_healthy_requires_models_endpoint(monkeypatch: pytest.MonkeyPatch) -> None:
+    base_url = "http://127.0.0.1:8080"
+    monkeypatch.setattr(
+        lighton_server.httpx,
+        "Client",
+        lambda **_kwargs: _StubClient(
+            responses={
+                f"{base_url}/health": _StubResponse(status_code=200, payload={"ok": True}),
+                f"{base_url}/v1/models": _StubResponse(status_code=404, payload={}),
+            }
+        ),
+    )
+
+    assert lighton_server._is_server_healthy(base_url) is False
+
+
+def test_is_server_healthy_accepts_expected_openai_shape(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    base_url = "http://127.0.0.1:8080"
+    monkeypatch.setattr(
+        lighton_server.httpx,
+        "Client",
+        lambda **_kwargs: _StubClient(
+            responses={
+                f"{base_url}/health": _StubResponse(status_code=200, payload={"ok": True}),
+                f"{base_url}/v1/models": _StubResponse(
+                    status_code=200,
+                    payload={"data": [{"id": "lighton-ocr"}]},
+                ),
+            }
+        ),
+    )
+
+    assert lighton_server._is_server_healthy(base_url) is True
 
 
 def test_ensure_server_retries_and_falls_back_to_cpu(

@@ -116,3 +116,9 @@ def test_lighton_ocr_rejects_invalid_base64() -> None:
     settings = get_settings()
     with pytest.raises(ValueError, match="not valid base64"):
         _ = lighton_ocr.ocr_image_base64("not base64 !!!", settings=settings)
+
+
+def test_lighton_ocr_rejects_base64_with_trailing_garbage() -> None:
+    settings = get_settings()
+    with pytest.raises(ValueError, match="not valid base64"):
+        _ = lighton_ocr.ocr_image_base64("aGVsbG8=@@@@", settings=settings)
