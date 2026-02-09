@@ -1,17 +1,20 @@
 # RAGPrep
 
-RAGPrep converts PDFs to structured HTML/Markdown with local processing.
+RAGPrep converts PDFs to structured HTML through one fixed path:
 
-- PyMuPDF text layer extraction
-- Local layout analysis (`local-fast` by default)
-- Local OCR path for Markdown via GLM-OCR Transformers
+1. Render PDF pages to images.
+2. OCR with `noctrex/LightOnOCR-2-1B-GGUF` (`LightOnOCR-2-1B-IQ4_XS.gguf` + `mmproj-BF16.gguf`).
+3. Correct OCR text with the PyMuPDF text layer (`strict` merge policy).
+4. Build HTML output.
 
-## Default behavior
+No fallback OCR/layout path is used.
 
-- `RAGPREP_PDF_BACKEND=glm-ocr`
-- `RAGPREP_GLM_OCR_MODE=transformers`
-- `RAGPREP_LAYOUT_MODE=local-fast`
-- No external OCR/layout server required
+## Requirements
+
+- Python `>=3.11,<3.13`
+- `llama-server` binary from `llama.cpp` available on PATH
+  - or set `RAGPREP_LLAMA_SERVER_PATH`
+- Network access on first run if model files are not present locally
 
 ## Install
 
@@ -19,33 +22,29 @@ RAGPrep converts PDFs to structured HTML/Markdown with local processing.
 uv sync --dev
 ```
 
-## Configure (local default)
+## Main settings (LightOn only)
 
-PowerShell:
+- `RAGPREP_PDF_BACKEND=lighton-ocr`
+- `RAGPREP_LIGHTON_REPO_ID=noctrex/LightOnOCR-2-1B-GGUF`
+- `RAGPREP_LIGHTON_MODEL_FILE=LightOnOCR-2-1B-IQ4_XS.gguf`
+- `RAGPREP_LIGHTON_MMPROJ_FILE=mmproj-BF16.gguf`
+- `RAGPREP_LIGHTON_MODEL_DIR=~/.ragprep/models/lighton`
+- `RAGPREP_LIGHTON_AUTO_DOWNLOAD=1` (auto-download missing files)
+- `RAGPREP_LLAMA_SERVER_PATH` (optional explicit `llama-server` path)
+- `RAGPREP_LIGHTON_MERGE_POLICY=strict`
 
-```powershell
-$env:RAGPREP_PDF_BACKEND = "glm-ocr"
-$env:RAGPREP_GLM_OCR_MODE = "transformers"
-$env:RAGPREP_LAYOUT_MODE = "local-fast"
-```
+Performance defaults are aggressive:
 
-bash:
+- GPU-first (`RAGPREP_LIGHTON_N_GPU_LAYERS=-1`)
+- `RAGPREP_LIGHTON_PARALLEL=4`
+- `RAGPREP_LIGHTON_FLASH_ATTN=1`
+- page-level OCR concurrency (`RAGPREP_LIGHTON_PAGE_CONCURRENCY=4`)
 
-```bash
-export RAGPREP_PDF_BACKEND=glm-ocr
-export RAGPREP_GLM_OCR_MODE=transformers
-export RAGPREP_LAYOUT_MODE=local-fast
-```
+If GPU startup fails, startup retries in this order:
 
-Optional local layout model path:
-
-```powershell
-$env:RAGPREP_LAYOUT_MODE = "local-paddle"
-```
-
-```bash
-export RAGPREP_LAYOUT_MODE=local-paddle
-```
+1. GPU aggressive
+2. GPU conservative (`flash-attn` off)
+3. CPU fallback (`-ngl 0`, `-np 1`)
 
 ## Run
 
@@ -69,29 +68,11 @@ CLI (PDF -> HTML):
 uv run python scripts/pdf_to_html.py --pdf .\\path\\to\\input.pdf --out .\\out\\input.html --overwrite
 ```
 
-CLI (PDF -> Markdown):
+## Failure behavior
 
-```bash
-uv run python scripts/pdf_to_markdown.py --pdf .\\path\\to\\input.pdf --out .\\out\\input.md --overwrite
-```
-
-## Main settings
-
-### OCR backend
-
-- `RAGPREP_PDF_BACKEND`: `glm-ocr` (default)
-- `RAGPREP_OCR_BACKEND`: alias of `RAGPREP_PDF_BACKEND`
-- `RAGPREP_GLM_OCR_MODE`: `transformers` (default)
-- `RAGPREP_GLM_OCR_MODEL`: model id (default: `zai-org/GLM-OCR`)
-- `RAGPREP_GLM_OCR_MAX_TOKENS` (default: `8192`)
-- `RAGPREP_GLM_OCR_TIMEOUT_SECONDS` (default: `60`)
-
-### Layout
-
-- `RAGPREP_LAYOUT_MODE`: `local-fast` (default), `local-paddle`, `transformers` (alias of `local-fast`)
-- `RAGPREP_LAYOUT_RENDER_DPI` (default: `250`)
-- `RAGPREP_LAYOUT_RENDER_MAX_EDGE` (default: `1024`)
-- `RAGPREP_LAYOUT_RENDER_AUTO` (+ small-pass settings)
+- If a page OCR call fails, the conversion job fails immediately.
+- If model files are missing and auto-download is disabled, conversion fails.
+- If `llama-server` is not found, conversion fails with a clear error.
 
 ## Quality gate
 

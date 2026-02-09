@@ -303,21 +303,17 @@ if (-not (Test-Path `$pythonExe)) {
 }
 
 if (-not `$env:RAGPREP_PDF_BACKEND -or [string]::IsNullOrWhiteSpace(`$env:RAGPREP_PDF_BACKEND)) {
-    `$env:RAGPREP_PDF_BACKEND = "glm-ocr"
+    `$env:RAGPREP_PDF_BACKEND = "lighton-ocr"
 }
-if (`$env:RAGPREP_PDF_BACKEND -ne "glm-ocr") {
-    throw "RAGPREP_PDF_BACKEND must be 'glm-ocr' (got: `$env:RAGPREP_PDF_BACKEND)."
+if (`$env:RAGPREP_PDF_BACKEND -ne "lighton-ocr") {
+    throw "RAGPREP_PDF_BACKEND must be 'lighton-ocr' (got: `$env:RAGPREP_PDF_BACKEND)."
 }
-
-if (-not `$env:RAGPREP_GLM_OCR_MODE -or [string]::IsNullOrWhiteSpace(`$env:RAGPREP_GLM_OCR_MODE)) {
-    `$env:RAGPREP_GLM_OCR_MODE = "transformers"
-}
-if (`$env:RAGPREP_GLM_OCR_MODE -ne "transformers") {
-    throw "RAGPREP_GLM_OCR_MODE must be 'transformers' (got: `$env:RAGPREP_GLM_OCR_MODE)."
-}
-
-if (-not `$env:RAGPREP_LAYOUT_MODE -or [string]::IsNullOrWhiteSpace(`$env:RAGPREP_LAYOUT_MODE)) {
-    `$env:RAGPREP_LAYOUT_MODE = "local-fast"
+if (
+    (-not `$env:RAGPREP_LLAMA_SERVER_PATH -or [string]::IsNullOrWhiteSpace(`$env:RAGPREP_LLAMA_SERVER_PATH))
+    -and
+    (`$null -eq (Get-Command "llama-server" -ErrorAction SilentlyContinue))
+) {
+    throw "llama-server not found. Install llama.cpp server or set RAGPREP_LLAMA_SERVER_PATH."
 }
 
 `$env:PYTHONNOUSERSITE = "1"
@@ -346,21 +342,18 @@ if not "%RAGPREP_PORT%"=="" set "PORT=%RAGPREP_PORT%"
 if not "%~2"=="" set "PORT=%~2"
 
 if "%RAGPREP_PDF_BACKEND%"=="" (
-  set RAGPREP_PDF_BACKEND=glm-ocr
+  set RAGPREP_PDF_BACKEND=lighton-ocr
 )
-if /I not "%RAGPREP_PDF_BACKEND%"=="glm-ocr" (
-  echo [ERROR] RAGPREP_PDF_BACKEND must be glm-ocr (got: %RAGPREP_PDF_BACKEND%)
+if /I not "%RAGPREP_PDF_BACKEND%"=="lighton-ocr" (
+  echo [ERROR] RAGPREP_PDF_BACKEND must be lighton-ocr (got: %RAGPREP_PDF_BACKEND%)
   exit /b 1
 )
-if "%RAGPREP_GLM_OCR_MODE%"=="" (
-  set RAGPREP_GLM_OCR_MODE=transformers
-)
-if /I not "%RAGPREP_GLM_OCR_MODE%"=="transformers" (
-  echo [ERROR] RAGPREP_GLM_OCR_MODE must be transformers (got: %RAGPREP_GLM_OCR_MODE%)
-  exit /b 1
-)
-if "%RAGPREP_LAYOUT_MODE%"=="" (
-  set RAGPREP_LAYOUT_MODE=local-fast
+if "%RAGPREP_LLAMA_SERVER_PATH%"=="" (
+  where llama-server >nul 2>&1
+  if errorlevel 1 (
+    echo [ERROR] llama-server not found. Install llama.cpp server or set RAGPREP_LLAMA_SERVER_PATH.
+    exit /b 1
+  )
 )
 
 set PYTHONNOUSERSITE=1

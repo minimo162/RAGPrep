@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>PDF to HTML</title>
+    <title>PDF to HTML (LightOnOCR)</title>
     <style>
       :root {
         --fg: #111827;
@@ -193,7 +193,7 @@
             } else if (prewarmPhase === "stage2") {
               const executorLabel = prewarmExecutor || "thread";
               setConvertStatus(
-                `Prewarm stage2 (${executorLabel}): loading layout engine...`,
+                `Prewarm stage2 (${executorLabel}): starting LightOn OCR server...`,
                 "pending"
               );
             } else {
@@ -398,8 +398,8 @@
   </head>
   <body>
     <main class="container">
-      <h1>PDF to HTML</h1>
-      <p class="muted">Upload a PDF and wait for HTML conversion to finish.</p>
+      <h1>PDF to HTML (LightOnOCR)</h1>
+      <p class="muted">Upload a PDF and convert through the LightOnOCR + PyMuPDF correction path.</p>
       <p
         id="convert-status"
         class="muted status {% if ui_state.prewarm_in_progress or ui_state.has_active_job %}pending{% else %}ready{% endif %}"
@@ -411,7 +411,7 @@
           {% elif ui_state.prewarm_phase == "stage1" %}
             Prewarm stage1: preparing model cache...
           {% elif ui_state.prewarm_phase == "stage2" %}
-            Prewarm stage2 ({{ ui_state.prewarm_executor or "thread" }}): loading layout engine...
+            Prewarm stage2 ({{ ui_state.prewarm_executor or "thread" }}): starting LightOn OCR server...
           {% else %}
             Prewarm in progress... please wait.
           {% endif %}

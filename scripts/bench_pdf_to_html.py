@@ -104,7 +104,7 @@ def main(argv: list[str]) -> int:
     s_per_page = convert_mean / max(1, page_count)
 
     print(
-        f"pages={page_count} mode={settings.layout_mode} repeat={int(args.repeat)} "
+        f"pages={page_count} backend={settings.pdf_backend} repeat={int(args.repeat)} "
         f"convert_s_mean={convert_mean:.3f} min={convert_min:.3f} max={convert_max:.3f} "
         f"s_per_page={s_per_page:.3f}",
         file=sys.stderr,

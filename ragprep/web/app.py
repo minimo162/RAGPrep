@@ -260,11 +260,11 @@ def _get_prewarm_state() -> dict[str, object]:
 def _prewarm_layout_backend() -> str | None:
     settings = get_settings()
     try:
-        from ragprep.layout.glm_doclayout import prewarm_layout_backend
+        from ragprep.ocr.lighton_server import prewarm_lighton_server
 
-        prewarm_layout_backend(settings=settings)
+        prewarm_lighton_server(settings=settings)
     except Exception as exc:  # noqa: BLE001
-        logger.warning("Layout prewarm failed: %s", exc)
+        logger.warning("LightOn server prewarm failed: %s", exc)
         return str(exc)
     return None
 
@@ -273,22 +273,26 @@ def _prewarm_stage1_cache() -> str | None:
     settings = get_settings()
     try:
         from ragprep.model_cache import configure_model_cache
+        from ragprep.ocr.lighton_assets import ensure_lighton_assets
 
         configure_model_cache(settings)
+        ensure_lighton_assets(settings)
     except Exception as exc:  # noqa: BLE001
-        logger.warning("Prewarm stage1 (cache) failed: %s", exc)
+        logger.warning("Prewarm stage1 (cache/assets) failed: %s", exc)
         return str(exc)
     return None
 
 
 def _prewarm_process_target(queue: Any) -> None:
     try:
-        from ragprep.layout.glm_doclayout import prewarm_layout_backend
         from ragprep.model_cache import configure_model_cache
+        from ragprep.ocr.lighton_assets import ensure_lighton_assets
+        from ragprep.ocr.lighton_server import prewarm_lighton_server
 
         settings = get_settings()
         configure_model_cache(settings)
-        prewarm_layout_backend(settings=settings)
+        ensure_lighton_assets(settings)
+        prewarm_lighton_server(settings=settings)
         queue.put({"ok": True, "error": None})
     except Exception as exc:  # noqa: BLE001
         queue.put({"ok": False, "error": str(exc)})
@@ -430,13 +434,11 @@ def _run_job(job_id: str, pdf_bytes: bytes) -> None:
         except Exception as exc:  # noqa: BLE001
             message = str(exc)
             expected_errors = (
-                "Failed to load GLM-OCR processor via Transformers",
-                "Failed to load GLM-OCR model via Transformers",
-                "Transformers backend selected, but required packages are missing",
-                "Local layout analysis requires PaddleOCR",
-                "Local layout analysis requires optional dependencies",
-                "Layout analysis requires RAGPREP_LAYOUT_MODE=local-paddle",
-                "argument of type 'NoneType' is not iterable",
+                "llama-server not found",
+                "Failed to start llama-server",
+                "LightOn model files are missing",
+                "LightOn OCR request failed",
+                "Failed to download Hugging Face asset",
             )
             if any(token in message for token in expected_errors):
                 logger.warning("Job %s failed: %s", job_id, message)

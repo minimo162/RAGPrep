@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import os
 from dataclasses import dataclass
@@ -10,28 +10,31 @@ ENV_RENDER_DPI: Final[str] = "RAGPREP_RENDER_DPI"
 ENV_RENDER_MAX_EDGE: Final[str] = "RAGPREP_RENDER_MAX_EDGE"
 ENV_MAX_CONCURRENCY: Final[str] = "RAGPREP_MAX_CONCURRENCY"
 ENV_PDF_BACKEND: Final[str] = "RAGPREP_PDF_BACKEND"
-ENV_OCR_BACKEND: Final[str] = "RAGPREP_OCR_BACKEND"
 ENV_MODEL_CACHE_DIR: Final[str] = "RAGPREP_MODEL_CACHE_DIR"
-ENV_GLM_OCR_BASE_URL: Final[str] = "RAGPREP_GLM_OCR_BASE_URL"
-ENV_GLM_OCR_MODEL: Final[str] = "RAGPREP_GLM_OCR_MODEL"
-ENV_GLM_OCR_MODE: Final[str] = "RAGPREP_GLM_OCR_MODE"
-ENV_GLM_OCR_API_KEY: Final[str] = "RAGPREP_GLM_OCR_API_KEY"
-ENV_GLM_OCR_MAX_TOKENS: Final[str] = "RAGPREP_GLM_OCR_MAX_TOKENS"
-ENV_GLM_OCR_TIMEOUT_SECONDS: Final[str] = "RAGPREP_GLM_OCR_TIMEOUT_SECONDS"
-ENV_LAYOUT_MODE: Final[str] = "RAGPREP_LAYOUT_MODE"
-ENV_LAYOUT_BASE_URL: Final[str] = "RAGPREP_LAYOUT_BASE_URL"
-ENV_LAYOUT_MODEL: Final[str] = "RAGPREP_LAYOUT_MODEL"
-ENV_LAYOUT_API_KEY: Final[str] = "RAGPREP_LAYOUT_API_KEY"
-ENV_LAYOUT_MAX_TOKENS: Final[str] = "RAGPREP_LAYOUT_MAX_TOKENS"
-ENV_LAYOUT_TIMEOUT_SECONDS: Final[str] = "RAGPREP_LAYOUT_TIMEOUT_SECONDS"
-ENV_LAYOUT_RENDER_DPI: Final[str] = "RAGPREP_LAYOUT_RENDER_DPI"
-ENV_LAYOUT_RENDER_MAX_EDGE: Final[str] = "RAGPREP_LAYOUT_RENDER_MAX_EDGE"
-ENV_LAYOUT_RENDER_AUTO: Final[str] = "RAGPREP_LAYOUT_RENDER_AUTO"
-ENV_LAYOUT_RENDER_AUTO_SMALL_DPI: Final[str] = "RAGPREP_LAYOUT_RENDER_AUTO_SMALL_DPI"
-ENV_LAYOUT_RENDER_AUTO_SMALL_MAX_EDGE: Final[str] = "RAGPREP_LAYOUT_RENDER_AUTO_SMALL_MAX_EDGE"
-ENV_LAYOUT_CONCURRENCY: Final[str] = "RAGPREP_LAYOUT_CONCURRENCY"
-ENV_LAYOUT_RETRY_COUNT: Final[str] = "RAGPREP_LAYOUT_RETRY_COUNT"
-ENV_LAYOUT_RETRY_BACKOFF_SECONDS: Final[str] = "RAGPREP_LAYOUT_RETRY_BACKOFF_SECONDS"
+
+ENV_LIGHTON_REPO_ID: Final[str] = "RAGPREP_LIGHTON_REPO_ID"
+ENV_LIGHTON_MODEL_FILE: Final[str] = "RAGPREP_LIGHTON_MODEL_FILE"
+ENV_LIGHTON_MMPROJ_FILE: Final[str] = "RAGPREP_LIGHTON_MMPROJ_FILE"
+ENV_LIGHTON_MODEL_DIR: Final[str] = "RAGPREP_LIGHTON_MODEL_DIR"
+ENV_LIGHTON_AUTO_DOWNLOAD: Final[str] = "RAGPREP_LIGHTON_AUTO_DOWNLOAD"
+ENV_LLAMA_SERVER_PATH: Final[str] = "RAGPREP_LLAMA_SERVER_PATH"
+ENV_LIGHTON_SERVER_HOST: Final[str] = "RAGPREP_LIGHTON_SERVER_HOST"
+ENV_LIGHTON_SERVER_PORT: Final[str] = "RAGPREP_LIGHTON_SERVER_PORT"
+ENV_LIGHTON_START_TIMEOUT_SECONDS: Final[str] = "RAGPREP_LIGHTON_START_TIMEOUT_SECONDS"
+ENV_LIGHTON_REQUEST_TIMEOUT_SECONDS: Final[str] = "RAGPREP_LIGHTON_REQUEST_TIMEOUT_SECONDS"
+ENV_LIGHTON_CTX_SIZE: Final[str] = "RAGPREP_LIGHTON_CTX_SIZE"
+ENV_LIGHTON_N_GPU_LAYERS: Final[str] = "RAGPREP_LIGHTON_N_GPU_LAYERS"
+ENV_LIGHTON_PARALLEL: Final[str] = "RAGPREP_LIGHTON_PARALLEL"
+ENV_LIGHTON_THREADS: Final[str] = "RAGPREP_LIGHTON_THREADS"
+ENV_LIGHTON_THREADS_BATCH: Final[str] = "RAGPREP_LIGHTON_THREADS_BATCH"
+ENV_LIGHTON_FLASH_ATTN: Final[str] = "RAGPREP_LIGHTON_FLASH_ATTN"
+ENV_LIGHTON_MAX_TOKENS: Final[str] = "RAGPREP_LIGHTON_MAX_TOKENS"
+ENV_LIGHTON_TEMPERATURE: Final[str] = "RAGPREP_LIGHTON_TEMPERATURE"
+ENV_LIGHTON_TOP_P: Final[str] = "RAGPREP_LIGHTON_TOP_P"
+ENV_LIGHTON_PAGE_CONCURRENCY: Final[str] = "RAGPREP_LIGHTON_PAGE_CONCURRENCY"
+ENV_LIGHTON_RENDER_DPI: Final[str] = "RAGPREP_LIGHTON_RENDER_DPI"
+ENV_LIGHTON_RENDER_MAX_EDGE: Final[str] = "RAGPREP_LIGHTON_RENDER_MAX_EDGE"
+ENV_LIGHTON_MERGE_POLICY: Final[str] = "RAGPREP_LIGHTON_MERGE_POLICY"
 
 DEFAULT_MAX_UPLOAD_BYTES: Final[int] = 10 * 1024 * 1024
 DEFAULT_MAX_PAGES: Final[int] = 50
@@ -39,31 +42,32 @@ DEFAULT_RENDER_DPI: Final[int] = 400
 DEFAULT_RENDER_MAX_EDGE: Final[int] = 1540
 DEFAULT_MAX_CONCURRENCY: Final[int] = 1
 DEFAULT_MODEL_CACHE_DIR: Final[str] = os.path.join("~", ".ragprep", "model-cache")
-DEFAULT_PDF_BACKEND: Final[str] = "glm-ocr"
-SUPPORTED_PDF_BACKENDS: Final[tuple[str, ...]] = ("glm-ocr",)
-DEFAULT_GLM_OCR_BASE_URL: Final[str] = "http://127.0.0.1:8080"
-DEFAULT_GLM_OCR_MODEL: Final[str] = "zai-org/GLM-OCR"
-DEFAULT_GLM_OCR_MODE: Final[str] = "transformers"
-SUPPORTED_GLM_OCR_MODES: Final[tuple[str, ...]] = ("transformers",)
-SUPPORTED_LAYOUT_MODES: Final[tuple[str, ...]] = (
-    "local-fast",
-    "local-paddle",
-)
-DEFAULT_GLM_OCR_MAX_TOKENS: Final[int] = 8192
-DEFAULT_GLM_OCR_TIMEOUT_SECONDS: Final[int] = 60
-DEFAULT_LAYOUT_MODE: Final[str] = "local-fast"
-DEFAULT_LAYOUT_BASE_URL: Final[str] = DEFAULT_GLM_OCR_BASE_URL
-DEFAULT_LAYOUT_MODEL: Final[str] = DEFAULT_GLM_OCR_MODEL
-DEFAULT_LAYOUT_MAX_TOKENS: Final[int] = DEFAULT_GLM_OCR_MAX_TOKENS
-DEFAULT_LAYOUT_TIMEOUT_SECONDS: Final[int] = DEFAULT_GLM_OCR_TIMEOUT_SECONDS
-DEFAULT_LAYOUT_CONCURRENCY: Final[int] = 1
-DEFAULT_LAYOUT_RETRY_COUNT: Final[int] = 1
-DEFAULT_LAYOUT_RETRY_BACKOFF_SECONDS: Final[float] = 0.0
-DEFAULT_LAYOUT_RENDER_DPI: Final[int] = 250
-DEFAULT_LAYOUT_RENDER_MAX_EDGE: Final[int] = 1024
-DEFAULT_LAYOUT_RENDER_AUTO: Final[bool] = False
-DEFAULT_LAYOUT_RENDER_AUTO_SMALL_DPI: Final[int] = 250
-DEFAULT_LAYOUT_RENDER_AUTO_SMALL_MAX_EDGE: Final[int] = 1024
+DEFAULT_PDF_BACKEND: Final[str] = "lighton-ocr"
+SUPPORTED_PDF_BACKENDS: Final[tuple[str, ...]] = ("lighton-ocr",)
+
+DEFAULT_LIGHTON_REPO_ID: Final[str] = "noctrex/LightOnOCR-2-1B-GGUF"
+DEFAULT_LIGHTON_MODEL_FILE: Final[str] = "LightOnOCR-2-1B-IQ4_XS.gguf"
+DEFAULT_LIGHTON_MMPROJ_FILE: Final[str] = "mmproj-BF16.gguf"
+DEFAULT_LIGHTON_MODEL_DIR: Final[str] = os.path.join("~", ".ragprep", "models", "lighton")
+DEFAULT_LIGHTON_AUTO_DOWNLOAD: Final[bool] = True
+DEFAULT_LIGHTON_SERVER_HOST: Final[str] = "127.0.0.1"
+DEFAULT_LIGHTON_SERVER_PORT: Final[int] = 8080
+DEFAULT_LIGHTON_START_TIMEOUT_SECONDS: Final[int] = 120
+DEFAULT_LIGHTON_REQUEST_TIMEOUT_SECONDS: Final[int] = 120
+DEFAULT_LIGHTON_CTX_SIZE: Final[int] = 8192
+DEFAULT_LIGHTON_N_GPU_LAYERS: Final[int] = -1
+DEFAULT_LIGHTON_PARALLEL: Final[int] = 4
+DEFAULT_LIGHTON_THREADS: Final[int] = max(1, int(os.cpu_count() or 4))
+DEFAULT_LIGHTON_THREADS_BATCH: Final[int] = max(1, int(os.cpu_count() or 4))
+DEFAULT_LIGHTON_FLASH_ATTN: Final[bool] = True
+DEFAULT_LIGHTON_MAX_TOKENS: Final[int] = 8192
+DEFAULT_LIGHTON_TEMPERATURE: Final[float] = 0.0
+DEFAULT_LIGHTON_TOP_P: Final[float] = 1.0
+DEFAULT_LIGHTON_PAGE_CONCURRENCY: Final[int] = 4
+DEFAULT_LIGHTON_RENDER_DPI: Final[int] = 220
+DEFAULT_LIGHTON_RENDER_MAX_EDGE: Final[int] = 1280
+DEFAULT_LIGHTON_MERGE_POLICY: Final[str] = "strict"
+SUPPORTED_LIGHTON_MERGE_POLICIES: Final[tuple[str, ...]] = ("strict", "aggressive")
 
 
 @dataclass(frozen=True)
@@ -76,26 +80,30 @@ class Settings:
     model_cache_dir: str
     ocr_backend: str
     pdf_backend: str
-    glm_ocr_base_url: str
-    glm_ocr_model: str
-    glm_ocr_mode: str
-    glm_ocr_api_key: str | None
-    glm_ocr_max_tokens: int
-    glm_ocr_timeout_seconds: int
-    layout_mode: str
-    layout_base_url: str
-    layout_model: str
-    layout_api_key: str | None
-    layout_max_tokens: int
-    layout_timeout_seconds: int
-    layout_render_dpi: int
-    layout_render_max_edge: int
-    layout_render_auto: bool
-    layout_render_auto_small_dpi: int
-    layout_render_auto_small_max_edge: int
-    layout_concurrency: int
-    layout_retry_count: int
-    layout_retry_backoff_seconds: float
+
+    lighton_repo_id: str
+    lighton_model_file: str
+    lighton_mmproj_file: str
+    lighton_model_dir: str
+    lighton_auto_download: bool
+    llama_server_path: str | None
+    lighton_server_host: str
+    lighton_server_port: int
+    lighton_start_timeout_seconds: int
+    lighton_request_timeout_seconds: int
+    lighton_ctx_size: int
+    lighton_n_gpu_layers: int
+    lighton_parallel: int
+    lighton_threads: int
+    lighton_threads_batch: int
+    lighton_flash_attn: bool
+    lighton_max_tokens: int
+    lighton_temperature: float
+    lighton_top_p: float
+    lighton_page_concurrency: int
+    lighton_render_dpi: int
+    lighton_render_max_edge: int
+    lighton_merge_policy: str
 
 
 def _get_positive_int(name: str, default: int) -> int:
@@ -111,7 +119,7 @@ def _get_positive_int(name: str, default: int) -> int:
     return value
 
 
-def _get_nonnegative_int(name: str, default: int) -> int:
+def _get_int_with_min(name: str, default: int, *, min_value: int) -> int:
     raw = os.getenv(name)
     if raw is None or not raw.strip():
         return default
@@ -119,21 +127,8 @@ def _get_nonnegative_int(name: str, default: int) -> int:
         value = int(raw.strip())
     except ValueError as exc:
         raise ValueError(f"{name} must be an int, got: {raw!r}") from exc
-    if value < 0:
-        raise ValueError(f"{name} must be >= 0, got: {value}")
-    return value
-
-
-def _get_nonnegative_float(name: str, default: float) -> float:
-    raw = os.getenv(name)
-    if raw is None or not raw.strip():
-        return default
-    try:
-        value = float(raw.strip())
-    except ValueError as exc:
-        raise ValueError(f"{name} must be a float, got: {raw!r}") from exc
-    if value < 0:
-        raise ValueError(f"{name} must be >= 0, got: {value}")
+    if value < min_value:
+        raise ValueError(f"{name} must be >= {min_value}, got: {value}")
     return value
 
 
@@ -147,6 +142,19 @@ def _get_bool(name: str, default: bool) -> bool:
     if value in {"0", "false", "no", "off"}:
         return False
     raise ValueError(f"{name} must be a bool (0/1/true/false), got: {raw!r}")
+
+
+def _get_float_with_min(name: str, default: float, *, min_value: float) -> float:
+    raw = os.getenv(name)
+    if raw is None or not raw.strip():
+        return default
+    try:
+        value = float(raw.strip())
+    except ValueError as exc:
+        raise ValueError(f"{name} must be a float, got: {raw!r}") from exc
+    if value < min_value:
+        raise ValueError(f"{name} must be >= {min_value}, got: {value}")
+    return value
 
 
 def _get_optional_str(name: str) -> str | None:
@@ -165,9 +173,7 @@ def _get_trimmed_str(name: str, default: str) -> str:
 
 
 def _get_pdf_backend() -> str:
-    raw = os.getenv(ENV_OCR_BACKEND)
-    if raw is None or not raw.strip():
-        raw = os.getenv(ENV_PDF_BACKEND)
+    raw = os.getenv(ENV_PDF_BACKEND)
     if raw is None or not raw.strip():
         return DEFAULT_PDF_BACKEND
     value = raw.strip().lower()
@@ -185,139 +191,17 @@ def _get_model_cache_dir() -> str:
     return raw.strip()
 
 
-def _get_glm_ocr_mode() -> str:
-    raw = os.getenv(ENV_GLM_OCR_MODE)
+def _get_lighton_merge_policy() -> str:
+    raw = os.getenv(ENV_LIGHTON_MERGE_POLICY)
     if raw is None or not raw.strip():
-        return DEFAULT_GLM_OCR_MODE
+        return DEFAULT_LIGHTON_MERGE_POLICY
     value = raw.strip().lower()
-    if value not in SUPPORTED_GLM_OCR_MODES:
+    if value not in SUPPORTED_LIGHTON_MERGE_POLICIES:
         raise ValueError(
-            f"{ENV_GLM_OCR_MODE} must be one of {', '.join(SUPPORTED_GLM_OCR_MODES)}, got: {raw!r}"
+            f"{ENV_LIGHTON_MERGE_POLICY} must be one of "
+            f"{', '.join(SUPPORTED_LIGHTON_MERGE_POLICIES)}, got: {raw!r}"
         )
     return value
-
-
-def _normalize_layout_mode(value: str) -> str:
-    normalized = value.strip().lower()
-    if normalized == "transformers":
-        # Backward-compatible alias.
-        return "local-fast"
-    return normalized
-
-
-def _get_layout_mode() -> str:
-    raw = os.getenv(ENV_LAYOUT_MODE)
-    if raw is None or not raw.strip():
-        return DEFAULT_LAYOUT_MODE
-
-    value = _normalize_layout_mode(raw)
-    if value not in SUPPORTED_LAYOUT_MODES:
-        raise ValueError(
-            f"{ENV_LAYOUT_MODE} must be one of {', '.join(SUPPORTED_LAYOUT_MODES)}, got: {raw!r}"
-        )
-    return value
-
-
-def _get_layout_base_url() -> str:
-    raw = os.getenv(ENV_LAYOUT_BASE_URL)
-    if raw is not None and raw.strip():
-        return raw.strip()
-    return _get_trimmed_str(ENV_GLM_OCR_BASE_URL, DEFAULT_GLM_OCR_BASE_URL)
-
-
-def _get_layout_model() -> str:
-    raw = os.getenv(ENV_LAYOUT_MODEL)
-    if raw is not None and raw.strip():
-        return raw.strip()
-    return _get_trimmed_str(ENV_GLM_OCR_MODEL, DEFAULT_GLM_OCR_MODEL)
-
-
-def _get_layout_api_key() -> str | None:
-    raw = os.getenv(ENV_LAYOUT_API_KEY)
-    if raw is None:
-        return _get_optional_str(ENV_GLM_OCR_API_KEY)
-    value = raw.strip()
-    return value or None
-
-
-def _get_layout_max_tokens() -> int:
-    raw = os.getenv(ENV_LAYOUT_MAX_TOKENS)
-    if raw is None or not raw.strip():
-        return _get_positive_int(ENV_GLM_OCR_MAX_TOKENS, DEFAULT_GLM_OCR_MAX_TOKENS)
-    try:
-        value = int(raw.strip())
-    except ValueError as exc:
-        raise ValueError(f"{ENV_LAYOUT_MAX_TOKENS} must be an int, got: {raw!r}") from exc
-    if value <= 0:
-        raise ValueError(f"{ENV_LAYOUT_MAX_TOKENS} must be > 0, got: {value}")
-    return value
-
-
-def _get_layout_timeout_seconds() -> int:
-    raw = os.getenv(ENV_LAYOUT_TIMEOUT_SECONDS)
-    if raw is None or not raw.strip():
-        return _get_positive_int(ENV_GLM_OCR_TIMEOUT_SECONDS, DEFAULT_GLM_OCR_TIMEOUT_SECONDS)
-    try:
-        value = int(raw.strip())
-    except ValueError as exc:
-        raise ValueError(f"{ENV_LAYOUT_TIMEOUT_SECONDS} must be an int, got: {raw!r}") from exc
-    if value <= 0:
-        raise ValueError(f"{ENV_LAYOUT_TIMEOUT_SECONDS} must be > 0, got: {value}")
-    return value
-
-
-def _get_layout_render_dpi() -> int:
-    raw = os.getenv(ENV_LAYOUT_RENDER_DPI)
-    if raw is None or not raw.strip():
-        return DEFAULT_LAYOUT_RENDER_DPI
-    try:
-        value = int(raw.strip())
-    except ValueError as exc:
-        raise ValueError(f"{ENV_LAYOUT_RENDER_DPI} must be an int, got: {raw!r}") from exc
-    if value <= 0:
-        raise ValueError(f"{ENV_LAYOUT_RENDER_DPI} must be > 0, got: {value}")
-    return value
-
-
-def _get_layout_render_max_edge() -> int:
-    raw = os.getenv(ENV_LAYOUT_RENDER_MAX_EDGE)
-    if raw is None or not raw.strip():
-        return DEFAULT_LAYOUT_RENDER_MAX_EDGE
-    try:
-        value = int(raw.strip())
-    except ValueError as exc:
-        raise ValueError(f"{ENV_LAYOUT_RENDER_MAX_EDGE} must be an int, got: {raw!r}") from exc
-    if value <= 0:
-        raise ValueError(f"{ENV_LAYOUT_RENDER_MAX_EDGE} must be > 0, got: {value}")
-    return value
-
-
-def _get_layout_render_auto() -> bool:
-    return _get_bool(ENV_LAYOUT_RENDER_AUTO, DEFAULT_LAYOUT_RENDER_AUTO)
-
-
-def _get_layout_render_auto_small_dpi() -> int:
-    return _get_positive_int(ENV_LAYOUT_RENDER_AUTO_SMALL_DPI, DEFAULT_LAYOUT_RENDER_AUTO_SMALL_DPI)
-
-
-def _get_layout_render_auto_small_max_edge() -> int:
-    return _get_positive_int(
-        ENV_LAYOUT_RENDER_AUTO_SMALL_MAX_EDGE, DEFAULT_LAYOUT_RENDER_AUTO_SMALL_MAX_EDGE
-    )
-
-
-def _get_layout_concurrency() -> int:
-    return _get_positive_int(ENV_LAYOUT_CONCURRENCY, DEFAULT_LAYOUT_CONCURRENCY)
-
-
-def _get_layout_retry_count() -> int:
-    return _get_nonnegative_int(ENV_LAYOUT_RETRY_COUNT, DEFAULT_LAYOUT_RETRY_COUNT)
-
-
-def _get_layout_retry_backoff_seconds() -> float:
-    return _get_nonnegative_float(
-        ENV_LAYOUT_RETRY_BACKOFF_SECONDS, DEFAULT_LAYOUT_RETRY_BACKOFF_SECONDS
-    )
 
 
 def get_settings() -> Settings:
@@ -331,29 +215,50 @@ def get_settings() -> Settings:
         model_cache_dir=_get_model_cache_dir(),
         ocr_backend=ocr_backend,
         pdf_backend=ocr_backend,
-        glm_ocr_base_url=_get_trimmed_str(ENV_GLM_OCR_BASE_URL, DEFAULT_GLM_OCR_BASE_URL),
-        glm_ocr_model=_get_trimmed_str(ENV_GLM_OCR_MODEL, DEFAULT_GLM_OCR_MODEL),
-        glm_ocr_mode=_get_glm_ocr_mode(),
-        glm_ocr_api_key=_get_optional_str(ENV_GLM_OCR_API_KEY),
-        glm_ocr_max_tokens=_get_positive_int(ENV_GLM_OCR_MAX_TOKENS, DEFAULT_GLM_OCR_MAX_TOKENS),
-        glm_ocr_timeout_seconds=_get_positive_int(
-            ENV_GLM_OCR_TIMEOUT_SECONDS, DEFAULT_GLM_OCR_TIMEOUT_SECONDS
+        lighton_repo_id=_get_trimmed_str(ENV_LIGHTON_REPO_ID, DEFAULT_LIGHTON_REPO_ID),
+        lighton_model_file=_get_trimmed_str(ENV_LIGHTON_MODEL_FILE, DEFAULT_LIGHTON_MODEL_FILE),
+        lighton_mmproj_file=_get_trimmed_str(ENV_LIGHTON_MMPROJ_FILE, DEFAULT_LIGHTON_MMPROJ_FILE),
+        lighton_model_dir=_get_trimmed_str(ENV_LIGHTON_MODEL_DIR, DEFAULT_LIGHTON_MODEL_DIR),
+        lighton_auto_download=_get_bool(ENV_LIGHTON_AUTO_DOWNLOAD, DEFAULT_LIGHTON_AUTO_DOWNLOAD),
+        llama_server_path=_get_optional_str(ENV_LLAMA_SERVER_PATH),
+        lighton_server_host=_get_trimmed_str(ENV_LIGHTON_SERVER_HOST, DEFAULT_LIGHTON_SERVER_HOST),
+        lighton_server_port=_get_positive_int(ENV_LIGHTON_SERVER_PORT, DEFAULT_LIGHTON_SERVER_PORT),
+        lighton_start_timeout_seconds=_get_positive_int(
+            ENV_LIGHTON_START_TIMEOUT_SECONDS,
+            DEFAULT_LIGHTON_START_TIMEOUT_SECONDS,
         ),
-        layout_mode=_get_layout_mode(),
-        layout_base_url=_get_layout_base_url(),
-        layout_model=_get_layout_model(),
-        layout_api_key=_get_layout_api_key(),
-        layout_max_tokens=_get_layout_max_tokens(),
-        layout_timeout_seconds=_get_layout_timeout_seconds(),
-        layout_render_dpi=_get_layout_render_dpi(),
-        layout_render_max_edge=_get_layout_render_max_edge(),
-        layout_render_auto=_get_layout_render_auto(),
-        layout_render_auto_small_dpi=_get_layout_render_auto_small_dpi(),
-        layout_render_auto_small_max_edge=_get_layout_render_auto_small_max_edge(),
-        layout_concurrency=_get_layout_concurrency(),
-        layout_retry_count=_get_layout_retry_count(),
-        layout_retry_backoff_seconds=_get_layout_retry_backoff_seconds(),
+        lighton_request_timeout_seconds=_get_positive_int(
+            ENV_LIGHTON_REQUEST_TIMEOUT_SECONDS,
+            DEFAULT_LIGHTON_REQUEST_TIMEOUT_SECONDS,
+        ),
+        lighton_ctx_size=_get_positive_int(ENV_LIGHTON_CTX_SIZE, DEFAULT_LIGHTON_CTX_SIZE),
+        lighton_n_gpu_layers=_get_int_with_min(
+            ENV_LIGHTON_N_GPU_LAYERS,
+            DEFAULT_LIGHTON_N_GPU_LAYERS,
+            min_value=-1,
+        ),
+        lighton_parallel=_get_positive_int(ENV_LIGHTON_PARALLEL, DEFAULT_LIGHTON_PARALLEL),
+        lighton_threads=_get_positive_int(ENV_LIGHTON_THREADS, DEFAULT_LIGHTON_THREADS),
+        lighton_threads_batch=_get_positive_int(
+            ENV_LIGHTON_THREADS_BATCH,
+            DEFAULT_LIGHTON_THREADS_BATCH,
+        ),
+        lighton_flash_attn=_get_bool(ENV_LIGHTON_FLASH_ATTN, DEFAULT_LIGHTON_FLASH_ATTN),
+        lighton_max_tokens=_get_positive_int(ENV_LIGHTON_MAX_TOKENS, DEFAULT_LIGHTON_MAX_TOKENS),
+        lighton_temperature=_get_float_with_min(
+            ENV_LIGHTON_TEMPERATURE,
+            DEFAULT_LIGHTON_TEMPERATURE,
+            min_value=0.0,
+        ),
+        lighton_top_p=_get_float_with_min(ENV_LIGHTON_TOP_P, DEFAULT_LIGHTON_TOP_P, min_value=0.0),
+        lighton_page_concurrency=_get_positive_int(
+            ENV_LIGHTON_PAGE_CONCURRENCY,
+            DEFAULT_LIGHTON_PAGE_CONCURRENCY,
+        ),
+        lighton_render_dpi=_get_positive_int(ENV_LIGHTON_RENDER_DPI, DEFAULT_LIGHTON_RENDER_DPI),
+        lighton_render_max_edge=_get_positive_int(
+            ENV_LIGHTON_RENDER_MAX_EDGE,
+            DEFAULT_LIGHTON_RENDER_MAX_EDGE,
+        ),
+        lighton_merge_policy=_get_lighton_merge_policy(),
     )
-
-
-

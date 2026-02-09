@@ -17,12 +17,10 @@ def _read_verify_standalone_ps1() -> str:
 
 def test_run_cmd_template_does_not_mkdir_empty_hf_home() -> None:
     content = _read_build_standalone_ps1()
-    assert "set RAGPREP_PDF_BACKEND=glm-ocr" in content
-    assert "set RAGPREP_GLM_OCR_MODE=transformers" in content
-    assert "set RAGPREP_LAYOUT_MODE=local-fast" in content
+    assert "set RAGPREP_PDF_BACKEND=lighton-ocr" in content
+    assert "llama-server not found" in content
     assert "RAGPREP_LIGHTON" not in content
     assert "/v1/models" not in content
-    assert "llama-server" not in content
     expected = (
         '"%ROOT%python\\python.exe" -m ragprep.desktop --host %BIND_HOST% '
         "--port %PORT%"
@@ -37,12 +35,11 @@ def test_run_ps1_template_avoids_host_automatic_variable() -> None:
     assert "--host `$BindHost" in content
     assert "& `$pythonExe -m ragprep.desktop --host `$BindHost --port `$Port" in content
     assert '[string]`$Host = "127.0.0.1",' not in content
-    assert "`$env:RAGPREP_PDF_BACKEND = \"glm-ocr\"" in content
-    assert "`$env:RAGPREP_GLM_OCR_MODE = \"transformers\"" in content
-    assert "`$env:RAGPREP_LAYOUT_MODE = \"local-fast\"" in content
+    assert "`$env:RAGPREP_PDF_BACKEND = \"lighton-ocr\"" in content
+    assert "RAGPREP_LLAMA_SERVER_PATH" in content
+    assert "llama-server not found" in content
     assert "RAGPREP_LIGHTON" not in content
     assert "/v1/models" not in content
-    assert "llama-server" not in content
 
 
 def test_build_standalone_calls_verify_script() -> None:

@@ -1,3 +1,3 @@
-from ragprep.ocr import glm_ocr
+from ragprep.ocr import lighton_ocr
 
-__all__ = ["glm_ocr"]
+__all__ = ["lighton_ocr"]
