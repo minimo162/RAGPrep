@@ -42,8 +42,6 @@ $appDir = Join-Path $resolvedOutputDir "app"
 $sitePackagesDir = Join-Path $resolvedOutputDir "site-packages"
 $runPs1 = Join-Path $resolvedOutputDir "run.ps1"
 $runCmd = Join-Path $resolvedOutputDir "run.cmd"
-$startLightOnOcrPs1 = Join-Path $resolvedOutputDir "start-lighton-ocr.ps1"
-$startLightOnOcrCmd = Join-Path $resolvedOutputDir "start-lighton-ocr.cmd"
 
 Assert-Directory -Path $resolvedOutputDir -Label "standalone output"
 Assert-File -Path $pythonExe -Label "python.exe"
@@ -51,8 +49,6 @@ Assert-Directory -Path $appDir -Label "app"
 Assert-Directory -Path $sitePackagesDir -Label "site-packages"
 Assert-File -Path $runPs1 -Label "run.ps1"
 Assert-File -Path $runCmd -Label "run.cmd"
-Assert-File -Path $startLightOnOcrPs1 -Label "start-lighton-ocr.ps1"
-Assert-File -Path $startLightOnOcrCmd -Label "start-lighton-ocr.cmd"
 
 Write-Host "Standalone verification passed." -ForegroundColor Green
 Write-Host "  output: $resolvedOutputDir" -ForegroundColor DarkGray

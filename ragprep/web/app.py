@@ -430,20 +430,12 @@ def _run_job(job_id: str, pdf_bytes: bytes) -> None:
         except Exception as exc:  # noqa: BLE001
             message = str(exc)
             expected_errors = (
-                "Failed to reach LightOn OCR server",
-                "LightOn OCR request timed out",
-                "LightOn OCR server returned",
-                "LightOn OCR did not return valid JSON",
-                "LightOn OCR returned invalid lines",
-                "LightOn OCR failed on page",
-                "Failed to reach GLM-OCR server",
-                "GLM-OCR request timed out",
-                "GLM-OCR server is not reachable",
-                "Failed to reach layout server",
-                "Layout analysis request timed out",
                 "Failed to load GLM-OCR processor via Transformers",
                 "Failed to load GLM-OCR model via Transformers",
                 "Transformers backend selected, but required packages are missing",
+                "Local layout analysis requires PaddleOCR",
+                "Local layout analysis requires optional dependencies",
+                "Layout analysis requires RAGPREP_LAYOUT_MODE=local-paddle",
                 "argument of type 'NoneType' is not iterable",
             )
             if any(token in message for token in expected_errors):

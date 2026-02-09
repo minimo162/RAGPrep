@@ -4,7 +4,6 @@ import math
 import re
 import statistics
 from collections.abc import Callable
-from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass
 from enum import Enum
 from io import BytesIO
@@ -12,7 +11,7 @@ from pathlib import Path
 from typing import cast
 
 from ragprep.config import Settings, get_settings
-from ragprep.pdf_text import Span, Word
+from ragprep.pdf_text import Span
 
 
 class ProgressPhase(str, Enum):
@@ -587,276 +586,6 @@ def _remove_repeated_margin_rows(
     return filtered
 
 
-def _lighton_lines_to_page_spans(
-    *,
-    lines: list[dict[str, object]],
-    image_width: float,
-    image_height: float,
-    page_width: float,
-    page_height: float,
-) -> list[Span]:
-    from ragprep.pdf_text import normalize_extracted_text
-
-    if image_width <= 0 or image_height <= 0:
-        return []
-    if page_width <= 0 or page_height <= 0:
-        return []
-
-    sx = page_width / image_width
-    sy = page_height / image_height
-    spans: list[Span] = []
-    for raw in lines:
-        bbox_obj = raw.get("bbox")
-        if not isinstance(bbox_obj, (list, tuple)) or len(bbox_obj) != 4:
-            continue
-        try:
-            x0 = float(bbox_obj[0]) * sx
-            y0 = float(bbox_obj[1]) * sy
-            x1 = float(bbox_obj[2]) * sx
-            y1 = float(bbox_obj[3]) * sy
-        except Exception:  # noqa: BLE001
-            continue
-        if not (x0 < x1 and y0 < y1):
-            continue
-        text = normalize_extracted_text(str(raw.get("text") or "")).replace("\n", " ").strip()
-        text = " ".join(text.split())
-        if not text:
-            continue
-        spans.append(
-            Span(
-                x0=max(0.0, min(page_width, x0)),
-                y0=max(0.0, min(page_height, y0)),
-                x1=max(0.0, min(page_width, x1)),
-                y1=max(0.0, min(page_height, y1)),
-                text=text,
-                size=max(1.0, y1 - y0),
-                flags=None,
-                font=None,
-            )
-        )
-    spans.sort(key=lambda s: (s.y0, s.x0, s.y1, s.x1, s.text))
-    return spans
-
-
-def _collect_pymupdf_words_for_bbox(
-    words: list[Word],
-    *,
-    x0: float,
-    y0: float,
-    x1: float,
-    y1: float,
-) -> list[Word]:
-    line_h = max(1.0, y1 - y0)
-    margin_x = max(2.0, line_h * 0.35)
-    margin_y = max(1.5, line_h * 0.35)
-    bx0 = x0 - margin_x
-    bx1 = x1 + margin_x
-    by0 = y0 - margin_y
-    by1 = y1 + margin_y
-
-    hits: list[Word] = []
-    for word in words:
-        wx0 = float(getattr(word, "x0", 0.0))
-        wy0 = float(getattr(word, "y0", 0.0))
-        wx1 = float(getattr(word, "x1", 0.0))
-        wy1 = float(getattr(word, "y1", 0.0))
-        cx = (wx0 + wx1) / 2.0
-        cy = (wy0 + wy1) / 2.0
-        if bx0 <= cx <= bx1 and by0 <= cy <= by1:
-            hits.append(word)
-
-    hits.sort(
-        key=lambda w: (
-            int(getattr(w, "line_no", 0)),
-            float(getattr(w, "y0", 0.0)),
-            float(getattr(w, "x0", 0.0)),
-            int(getattr(w, "word_no", 0)),
-        )
-    )
-    return hits
-
-
-def _join_pymupdf_words_for_line(words: list[Word]) -> str:
-    if not words:
-        return ""
-    out: list[str] = []
-    prev = None
-    for word in words:
-        text = str(getattr(word, "text", "")).strip()
-        if not text:
-            continue
-        if prev is not None:
-            prev_line = int(getattr(prev, "line_no", -1))
-            cur_line = int(getattr(word, "line_no", -1))
-            if prev_line != cur_line:
-                out.append("\n")
-            else:
-                out.append(" ")
-        out.append(text)
-        prev = word
-    return "".join(out).strip()
-
-
-def _correct_line_spans_with_pymupdf_words(
-    spans: list[Span],
-    words: list[Word],
-    *,
-    policy: str = "aggressive",
-) -> list[Span]:
-    from ragprep.text_merge import merge_ocr_with_pymupdf
-
-    corrected: list[Span] = []
-    for span in spans:
-        span_text = str(getattr(span, "text", ""))
-        if not span_text:
-            continue
-        matches = _collect_pymupdf_words_for_bbox(
-            words,
-            x0=float(getattr(span, "x0", 0.0)),
-            y0=float(getattr(span, "y0", 0.0)),
-            x1=float(getattr(span, "x1", 0.0)),
-            y1=float(getattr(span, "y1", 0.0)),
-        )
-        pym_line = _join_pymupdf_words_for_line(matches)
-        merged = span_text
-        if pym_line:
-            merged, _ = merge_ocr_with_pymupdf(span_text, pym_line, policy=policy)
-            if not merged:
-                merged = span_text
-        corrected.append(
-            Span(
-                x0=float(getattr(span, "x0", 0.0)),
-                y0=float(getattr(span, "y0", 0.0)),
-                x1=float(getattr(span, "x1", 0.0)),
-                y1=float(getattr(span, "y1", 0.0)),
-                text=str(merged).strip(),
-                size=float(getattr(span, "size", 0.0)) if getattr(span, "size", None) else None,
-                flags=getattr(span, "flags", None),
-                font=getattr(span, "font", None),
-            )
-        )
-    corrected.sort(key=lambda s: (s.y0, s.x0, s.y1, s.x1, s.text))
-    return corrected
-
-
-def _render_plain_text_from_spans(spans: list[Span]) -> str:
-    if not spans:
-        return ""
-    rows = _cluster_page_spans_to_rows(spans)
-    parts: list[str] = []
-    for row in rows:
-        text = _join_row_text_for_margin(row)
-        if text:
-            parts.append(text)
-    return "\n".join(parts).strip()
-
-
-def _pdf_to_markdown_lighton_ocr(
-    pdf_bytes: bytes,
-    *,
-    settings: Settings,
-    on_progress: ProgressCallback | None = None,
-    on_page: PageCallback | None = None,
-) -> str:
-    from ragprep.ocr import lighton_ocr
-    from ragprep.pdf_render import iter_pdf_images
-    from ragprep.pdf_text import extract_pymupdf_page_sizes, extract_pymupdf_page_words
-
-    try:
-        page_sizes = extract_pymupdf_page_sizes(pdf_bytes)
-        words_by_page = extract_pymupdf_page_words(pdf_bytes)
-    except Exception as exc:  # noqa: BLE001
-        raise RuntimeError("Failed to extract PyMuPDF page references for LightOn OCR.") from exc
-
-    try:
-        total_pages, images = iter_pdf_images(
-            pdf_bytes,
-            dpi=settings.render_dpi,
-            max_edge=settings.render_max_edge,
-            max_pages=settings.max_pages,
-            max_bytes=settings.max_upload_bytes,
-        )
-    except ValueError:
-        raise
-    except Exception as exc:  # noqa: BLE001
-        raise RuntimeError("Failed to render PDF for LightOn OCR.") from exc
-
-    if len(page_sizes) != int(total_pages) or len(words_by_page) != int(total_pages):
-        raise RuntimeError("Page count mismatch between render and PyMuPDF references.")
-
-    _notify_progress(
-        on_progress,
-        PdfToMarkdownProgress(
-            phase=ProgressPhase.rendering,
-            current=0,
-            total=int(total_pages),
-            message="converting",
-        ),
-    )
-
-    parts: list[str] = []
-    for page_index, image in enumerate(images, start=1):
-        image_width = float(getattr(image, "width", 0.0))
-        image_height = float(getattr(image, "height", 0.0))
-        try:
-            encoded = _image_to_png_base64(image)
-        finally:
-            try:
-                image.close()
-            except Exception:  # noqa: BLE001
-                pass
-
-        try:
-            lighton_raw = lighton_ocr.analyze_ocr_layout_image_base64(encoded, settings=settings)
-        except Exception as exc:  # noqa: BLE001
-            raise RuntimeError(f"LightOn OCR failed on page {page_index}: {exc}") from exc
-
-        raw_lines = lighton_raw.get("lines")
-        if not isinstance(raw_lines, list):
-            raise RuntimeError(f"LightOn OCR returned invalid lines on page {page_index}.")
-
-        page_w, page_h = page_sizes[page_index - 1]
-        line_spans = _lighton_lines_to_page_spans(
-            lines=[cast(dict[str, object], r) for r in raw_lines if isinstance(r, dict)],
-            image_width=image_width,
-            image_height=image_height,
-            page_width=page_w,
-            page_height=page_h,
-        )
-        corrected = _correct_line_spans_with_pymupdf_words(
-            line_spans,
-            words_by_page[page_index - 1],
-            policy="aggressive",
-        )
-        normalized = _render_plain_text_from_spans(corrected)
-        if on_page is not None:
-            on_page(page_index, normalized)
-        if normalized:
-            parts.append(normalized)
-
-        _notify_progress(
-            on_progress,
-            PdfToMarkdownProgress(
-                phase=ProgressPhase.rendering,
-                current=page_index,
-                total=int(total_pages),
-                message="converting",
-            ),
-        )
-
-    markdown = "\n\n".join(parts).strip()
-    _notify_progress(
-        on_progress,
-        PdfToMarkdownProgress(
-            phase=ProgressPhase.done,
-            current=int(total_pages),
-            total=int(total_pages),
-            message="done",
-        ),
-    )
-    return markdown
-
-
 def _pdf_to_markdown_glm_ocr(
     pdf_bytes: bytes,
     *,
@@ -952,14 +681,7 @@ def pdf_to_markdown(
         )
 
     backend = (settings.ocr_backend or settings.pdf_backend or "").strip().lower()
-    if backend == "lighton-ocr":
-        markdown = _pdf_to_markdown_lighton_ocr(
-            pdf_bytes,
-            settings=settings,
-            on_progress=on_progress,
-            on_page=on_page,
-        )
-    elif backend == "glm-ocr":
+    if backend == "glm-ocr":
         markdown = _pdf_to_markdown_glm_ocr(
             pdf_bytes,
             settings=settings,
@@ -1005,7 +727,7 @@ def pdf_to_html(
     Strategy:
     - Extract text layer spans via PyMuPDF.
     - For `local-fast`, infer layout directly from spans (no image rendering).
-    - For `server`/`local-paddle`, run image-based layout analysis.
+    - For `local-paddle`, run image-based layout analysis.
     - Assign spans to layout regions and render structured HTML.
     """
 
@@ -1028,17 +750,15 @@ def pdf_to_html(
     from ragprep.pdf_text import (
         extract_pymupdf_page_sizes,
         extract_pymupdf_page_spans,
-        extract_pymupdf_page_words,
     )
     from ragprep.structure_ir import Document, Page, build_page_blocks, layout_element_from_raw
 
     pymupdf_spans_by_page = extract_pymupdf_page_spans(pdf_bytes)
-    pymupdf_words_by_page = extract_pymupdf_page_words(pdf_bytes)
     page_sizes = extract_pymupdf_page_sizes(pdf_bytes)
     active_spans_by_page = pymupdf_spans_by_page
     total_pages = int(len(active_spans_by_page))
 
-    if len(page_sizes) != total_pages or len(pymupdf_words_by_page) != total_pages:
+    if len(page_sizes) != total_pages:
         raise RuntimeError("Page count mismatch between text extraction and page sizes.")
 
     layout_mode = (settings.layout_mode or "").strip().lower()
@@ -1120,87 +840,14 @@ def pdf_to_html(
                     message="converting",
                 ),
             )
-    elif layout_mode == "lighton":
-        from ragprep.ocr import lighton_ocr
-        from ragprep.pdf_render import iter_pdf_images
-
-        rendered_total_pages, images = iter_pdf_images(
-            pdf_bytes,
-            dpi=settings.layout_render_dpi,
-            max_edge=settings.layout_render_max_edge,
-            max_pages=settings.max_pages,
-            max_bytes=settings.max_upload_bytes,
-        )
-        if int(rendered_total_pages) != total_pages:
-            raise RuntimeError("Page count mismatch between render and text extraction.")
-
-        active_spans_by_page = [[] for _ in range(total_pages)]
-
-        for page_number, image in enumerate(images, start=1):
-            image_width = float(getattr(image, "width", 0))
-            image_height = float(getattr(image, "height", 0))
-            if image_width <= 0 or image_height <= 0:
-                raise RuntimeError("Failed to read rendered image size for LightOn normalization.")
-
-            try:
-                encoded = _image_to_png_base64(image)
-            finally:
-                try:
-                    image.close()
-                except Exception:  # noqa: BLE001
-                    pass
-
-            try:
-                lighton_raw = lighton_ocr.analyze_ocr_layout_image_base64(
-                    encoded,
-                    settings=settings,
-                )
-            except Exception as exc:  # noqa: BLE001
-                raise RuntimeError(f"LightOn OCR failed on page {page_number}: {exc}") from exc
-
-            raw_lines = lighton_raw.get("lines")
-            if not isinstance(raw_lines, list):
-                raise RuntimeError(f"LightOn OCR returned invalid lines on page {page_number}.")
-
-            page_w, page_h = page_sizes[page_number - 1]
-            line_spans = _lighton_lines_to_page_spans(
-                lines=[cast(dict[str, object], r) for r in raw_lines if isinstance(r, dict)],
-                image_width=image_width,
-                image_height=image_height,
-                page_width=page_w,
-                page_height=page_h,
-            )
-            active_spans_by_page[page_number - 1] = _correct_line_spans_with_pymupdf_words(
-                line_spans,
-                pymupdf_words_by_page[page_number - 1],
-                policy="aggressive",
-            )
-
-            page, section_html = _build_page_from_layout(
-                page_number=page_number,
-                image_width=image_width,
-                image_height=image_height,
-                layout_raw=lighton_raw,
-            )
-            pages.append(page)
-            partial_sections.append(section_html)
-            if on_page is not None:
-                on_page(page_number, section_html)
-
-            _notify_html_progress(
-                on_progress,
-                PdfToHtmlProgress(
-                    phase=ProgressPhase.rendering,
-                    current=page_number,
-                    total=total_pages,
-                    message="converting",
-                ),
-            )
     else:
         from ragprep.layout.glm_doclayout import analyze_layout_image_base64
         from ragprep.pdf_render import iter_pdf_images, render_pdf_page_image
 
-        adaptive_enabled = bool(settings.layout_render_auto) and layout_mode == "server"
+        if layout_mode != "local-paddle":
+            raise RuntimeError(f"Unsupported layout mode: {layout_mode!r}")
+
+        adaptive_enabled = bool(settings.layout_render_auto)
         primary_dpi = settings.layout_render_dpi
         primary_max_edge = settings.layout_render_max_edge
         fallback_dpi = settings.layout_render_dpi
@@ -1211,8 +858,9 @@ def pdf_to_html(
                 and settings.layout_render_auto_small_max_edge == fallback_max_edge
             ):
                 adaptive_enabled = False
-            primary_dpi = settings.layout_render_auto_small_dpi
-            primary_max_edge = settings.layout_render_auto_small_max_edge
+            else:
+                primary_dpi = settings.layout_render_auto_small_dpi
+                primary_max_edge = settings.layout_render_auto_small_max_edge
 
         rendered_total_pages, images = iter_pdf_images(
             pdf_bytes,
@@ -1257,131 +905,48 @@ def pdf_to_html(
                 except Exception:  # noqa: BLE001
                     pass
 
-        layout_workers = 1
-        if layout_mode == "server":
-            layout_workers = max(1, int(settings.layout_concurrency))
-
-        if layout_workers <= 1:
-            for page_number, image in enumerate(images, start=1):
-                image_width = float(getattr(image, "width", 0))
-                image_height = float(getattr(image, "height", 0))
-                if image_width <= 0 or image_height <= 0:
-                    raise RuntimeError(
-                        "Failed to read rendered image size for layout normalization."
-                    )
-
-                try:
-                    encoded = _image_to_png_base64(image)
-                finally:
-                    try:
-                        image.close()
-                    except Exception:  # noqa: BLE001
-                        pass
-
-                layout_raw, used_w, used_h = _analyze_layout_for_page(
-                    page_number=page_number,
-                    encoded=encoded,
-                    image_width=image_width,
-                    image_height=image_height,
-                )
-                page, section_html = _build_page_from_layout(
-                    page_number=page_number,
-                    image_width=used_w,
-                    image_height=used_h,
-                    layout_raw=layout_raw,
-                )
-                pages.append(page)
-                partial_sections.append(section_html)
-                if on_page is not None:
-                    on_page(page_number, section_html)
-
-                _notify_html_progress(
-                    on_progress,
-                    PdfToHtmlProgress(
-                        phase=ProgressPhase.rendering,
-                        current=page_number,
-                        total=total_pages,
-                        message="converting",
-                    ),
-                )
-        else:
-            inflight: dict[int, Future[tuple[dict[str, object], float, float]]] = {}
-            next_page_to_process = 1
-            executor = ThreadPoolExecutor(
-                max_workers=min(layout_workers, total_pages),
-                thread_name_prefix="ragprep-layout",
-            )
-
-            def _process_page(page_number: int) -> None:
-                future = inflight[page_number]
-                layout_raw, image_width, image_height = future.result()
-                page, section_html = _build_page_from_layout(
-                    page_number=page_number,
-                    image_width=image_width,
-                    image_height=image_height,
-                    layout_raw=layout_raw,
-                )
-                pages.append(page)
-                partial_sections.append(section_html)
-                if on_page is not None:
-                    on_page(page_number, section_html)
-                _notify_html_progress(
-                    on_progress,
-                    PdfToHtmlProgress(
-                        phase=ProgressPhase.rendering,
-                        current=page_number,
-                        total=total_pages,
-                        message="converting",
-                    ),
+        for page_number, image in enumerate(images, start=1):
+            image_width = float(getattr(image, "width", 0))
+            image_height = float(getattr(image, "height", 0))
+            if image_width <= 0 or image_height <= 0:
+                raise RuntimeError(
+                    "Failed to read rendered image size for layout normalization."
                 )
 
             try:
-                for page_number, image in enumerate(images, start=1):
-                    image_width = float(getattr(image, "width", 0))
-                    image_height = float(getattr(image, "height", 0))
-                    if image_width <= 0 or image_height <= 0:
-                        raise RuntimeError(
-                            "Failed to read rendered image size for layout normalization."
-                        )
-
-                    try:
-                        encoded = _image_to_png_base64(image)
-                    finally:
-                        try:
-                            image.close()
-                        except Exception:  # noqa: BLE001
-                            pass
-
-                    future = executor.submit(
-                        _analyze_layout_for_page,
-                        page_number=page_number,
-                        encoded=encoded,
-                        image_width=image_width,
-                        image_height=image_height,
-                    )
-                    inflight[page_number] = future
-
-                    while len(inflight) >= layout_workers and next_page_to_process in inflight:
-                        _process_page(next_page_to_process)
-                        inflight.pop(next_page_to_process, None)
-                        next_page_to_process += 1
-
-                    while (
-                        next_page_to_process in inflight
-                        and inflight[next_page_to_process].done()
-                    ):
-                        _process_page(next_page_to_process)
-                        inflight.pop(next_page_to_process, None)
-                        next_page_to_process += 1
-
-                while next_page_to_process in inflight:
-                    _process_page(next_page_to_process)
-                    inflight.pop(next_page_to_process, None)
-                    next_page_to_process += 1
+                encoded = _image_to_png_base64(image)
             finally:
-                for future in inflight.values():
-                    future.cancel()
-                executor.shutdown(wait=True, cancel_futures=True)
+                try:
+                    image.close()
+                except Exception:  # noqa: BLE001
+                    pass
+
+            layout_raw, used_w, used_h = _analyze_layout_for_page(
+                page_number=page_number,
+                encoded=encoded,
+                image_width=image_width,
+                image_height=image_height,
+            )
+            page, section_html = _build_page_from_layout(
+                page_number=page_number,
+                image_width=used_w,
+                image_height=used_h,
+                layout_raw=layout_raw,
+            )
+            pages.append(page)
+            partial_sections.append(section_html)
+            if on_page is not None:
+                on_page(page_number, section_html)
+
+            _notify_html_progress(
+                on_progress,
+                PdfToHtmlProgress(
+                    phase=ProgressPhase.rendering,
+                    current=page_number,
+                    total=total_pages,
+                    message="converting",
+                ),
+            )
 
     document = Document(pages=tuple(pages))
     fragment = render_document_html(document)

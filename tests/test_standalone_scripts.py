@@ -17,23 +17,17 @@ def _read_verify_standalone_ps1() -> str:
 
 def test_run_cmd_template_does_not_mkdir_empty_hf_home() -> None:
     content = _read_build_standalone_ps1()
-    assert "set RAGPREP_PDF_BACKEND=lighton-ocr" in content
-    assert "RAGPREP_LIGHTON_BASE_URL" in content
-    assert "Invoke-WebRequest -UseBasicParsing -TimeoutSec 2" in content
-    assert "/v1/models" in content
-    assert "llama-server" in content
-    assert "LightOnOCR-2-1B-IQ4_XS.gguf" in content
-    assert "mmproj-BF16.gguf" in content
-    assert "llama.cpp" in content.lower()
-    assert "vllm" not in content.lower()
-    assert "docker run --rm -it" not in content
+    assert "set RAGPREP_PDF_BACKEND=glm-ocr" in content
+    assert "set RAGPREP_GLM_OCR_MODE=transformers" in content
+    assert "set RAGPREP_LAYOUT_MODE=local-fast" in content
+    assert "RAGPREP_LIGHTON" not in content
+    assert "/v1/models" not in content
+    assert "llama-server" not in content
     expected = (
         '"%ROOT%python\\python.exe" -m ragprep.desktop --host %BIND_HOST% '
         "--port %PORT%"
     )
     assert expected in content
-    assert "start-lighton-ocr.ps1" in content
-    assert "start-lighton-ocr.cmd" in content
 
 
 def test_run_ps1_template_avoids_host_automatic_variable() -> None:
@@ -43,12 +37,12 @@ def test_run_ps1_template_avoids_host_automatic_variable() -> None:
     assert "--host `$BindHost" in content
     assert "& `$pythonExe -m ragprep.desktop --host `$BindHost --port `$Port" in content
     assert '[string]`$Host = "127.0.0.1",' not in content
-    assert "Invoke-WebRequest -UseBasicParsing -TimeoutSec 2" in content
-    assert "`$env:RAGPREP_PDF_BACKEND = \"lighton-ocr\"" in content
-    assert "`$env:RAGPREP_LIGHTON_BASE_URL = \"http://127.0.0.1:8080\"" in content
-    assert "/v1/models" in content
-    assert "start-lighton-ocr.ps1" in content
-    assert "llama-server" in content
+    assert "`$env:RAGPREP_PDF_BACKEND = \"glm-ocr\"" in content
+    assert "`$env:RAGPREP_GLM_OCR_MODE = \"transformers\"" in content
+    assert "`$env:RAGPREP_LAYOUT_MODE = \"local-fast\"" in content
+    assert "RAGPREP_LIGHTON" not in content
+    assert "/v1/models" not in content
+    assert "llama-server" not in content
 
 
 def test_build_standalone_calls_verify_script() -> None:
@@ -65,5 +59,4 @@ def test_verify_standalone_checks_required_artifacts() -> None:
     assert '"site-packages"' in content
     assert '"run.ps1"' in content
     assert '"run.cmd"' in content
-    assert '"start-lighton-ocr.ps1"' in content
-    assert '"start-lighton-ocr.cmd"' in content
+    assert "start-lighton-ocr" not in content

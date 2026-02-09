@@ -3,8 +3,8 @@ from __future__ import annotations
 import statistics
 from dataclasses import dataclass
 
-from ragprep.pdf_text import Span
-from ragprep.table_grid import build_table_grid
+from ragprep.pdf_text import Span, Word
+from ragprep.table_grid import TableCell, build_table_grid
 
 
 @dataclass(frozen=True)
@@ -46,6 +46,7 @@ class Paragraph:
 class Table:
     text: str
     grid: tuple[tuple[str, ...], ...] | None = None
+    cells: tuple[TableCell, ...] | None = None
 
 
 @dataclass(frozen=True)
@@ -132,6 +133,7 @@ def layout_element_from_raw(
 def build_page_blocks(
     *,
     spans: list[Span],
+    page_words: list[Word] | None = None,
     page_width: float,
     page_height: float,
     layout_elements: list[LayoutElement],
@@ -180,7 +182,53 @@ def build_page_blocks(
                 best_area = area
 
         if best_index is None:
-            unassigned.append(span)
+            span_x0 = float(span.x0) / page_width
+            span_y0 = float(span.y0) / page_height
+            span_x1 = float(span.x1) / page_width
+            span_y1 = float(span.y1) / page_height
+            span_area = max(1e-6, max(0.0, span_x1 - span_x0) * max(0.0, span_y1 - span_y0))
+
+            best_overlap_ratio = 0.0
+            best_overlap_area = 0.0
+            best_overlap_index: int | None = None
+            best_overlap_target_area = 0.0
+            for i, elt in enumerate(elements_for_assignment):
+                overlap_w = max(
+                    0.0,
+                    min(span_x1, float(elt.bbox.x1)) - max(span_x0, float(elt.bbox.x0)),
+                )
+                overlap_h = max(
+                    0.0,
+                    min(span_y1, float(elt.bbox.y1)) - max(span_y0, float(elt.bbox.y0)),
+                )
+                overlap_area = overlap_w * overlap_h
+                if overlap_area <= 0:
+                    continue
+                overlap_ratio = overlap_area / span_area
+                target_area = float(elt.bbox.area)
+                if (
+                    best_overlap_index is None
+                    or overlap_ratio > best_overlap_ratio + 1e-9
+                    or (
+                        abs(overlap_ratio - best_overlap_ratio) <= 1e-9
+                        and (
+                            overlap_area > best_overlap_area + 1e-9
+                            or (
+                                abs(overlap_area - best_overlap_area) <= 1e-9
+                                and target_area < best_overlap_target_area
+                            )
+                        )
+                    )
+                ):
+                    best_overlap_ratio = overlap_ratio
+                    best_overlap_area = overlap_area
+                    best_overlap_index = i
+                    best_overlap_target_area = target_area
+
+            if best_overlap_index is not None and best_overlap_ratio >= 0.05:
+                assignments[best_overlap_index].append(span)
+            else:
+                unassigned.append(span)
         else:
             assignments[best_index].append(span)
 
@@ -207,6 +255,7 @@ def build_page_blocks(
                 elt.label,
                 text,
                 spans=collected,
+                page_words=page_words,
                 page_median_span_size=page_median_size,
             )
         )
@@ -222,11 +271,14 @@ def build_page_blocks(
 def build_document(
     *,
     spans_by_page: list[list[Span]],
+    page_words_by_page: list[list[Word]] | None = None,
     page_sizes: list[tuple[float, float]],
     layout_by_page: list[list[LayoutElement]],
 ) -> Document:
     if len(spans_by_page) != len(page_sizes) or len(spans_by_page) != len(layout_by_page):
         raise ValueError("spans_by_page, page_sizes, layout_by_page length mismatch")
+    if page_words_by_page is not None and len(page_words_by_page) != len(spans_by_page):
+        raise ValueError("spans_by_page and page_words_by_page length mismatch")
 
     pages: list[Page] = []
     for page_index, (spans, (w, h), layout_elements) in enumerate(
@@ -234,6 +286,7 @@ def build_document(
     ):
         blocks = build_page_blocks(
             spans=spans,
+            page_words=page_words_by_page[page_index] if page_words_by_page is not None else None,
             page_width=w,
             page_height=h,
             layout_elements=layout_elements,
@@ -296,6 +349,14 @@ def _xy_cut_order_inner(
     if not has_y and not has_x:
         return _topo_order(elements)
 
+    if has_y and not has_x:
+        column_split = _try_column_major_split(elements)
+        if column_split is not None:
+            left, right = column_split
+            left_ordered = _xy_cut_order_inner(left, depth=depth + 1, max_depth=max_depth)
+            right_ordered = _xy_cut_order_inner(right, depth=depth + 1, max_depth=max_depth)
+            return left_ordered + right_ordered
+
     chosen = split_y
     if has_x and (
         not has_y
@@ -317,6 +378,50 @@ def _xy_cut_order_inner(
     first = _xy_cut_order_inner(a, depth=depth + 1, max_depth=max_depth)
     second = _xy_cut_order_inner(b, depth=depth + 1, max_depth=max_depth)
     return first + second
+
+
+def _try_column_major_split(
+    elements: list[LayoutElement],
+) -> tuple[list[LayoutElement], list[LayoutElement]] | None:
+    if len(elements) < 4:
+        return None
+
+    widths = [max(0.0, float(e.bbox.x1) - float(e.bbox.x0)) for e in elements]
+    if any(width > 0.75 for width in widths):
+        return None
+
+    with_centers = sorted(
+        [
+            (
+                (float(e.bbox.x0) + float(e.bbox.x1)) / 2.0,
+                e,
+            )
+            for e in elements
+        ],
+        key=lambda item: (item[0], item[1].bbox.y0, item[1].bbox.x0),
+    )
+
+    split_at = len(with_centers) // 2
+    left_pairs = with_centers[:split_at]
+    right_pairs = with_centers[split_at:]
+    if len(left_pairs) < 2 or len(right_pairs) < 2:
+        return None
+
+    left_centers = [c for c, _ in left_pairs]
+    right_centers = [c for c, _ in right_pairs]
+    left_center = float(statistics.median(left_centers))
+    right_center = float(statistics.median(right_centers))
+    center_gap = right_center - left_center
+    width_median = _median_or_default(widths, default=0.0)
+    if center_gap < max(0.15, width_median * 0.55):
+        return None
+
+    left = [e for _, e in left_pairs]
+    right = [e for _, e in right_pairs]
+    if max(left_centers) >= min(right_centers):
+        return None
+
+    return left, right
 
 
 @dataclass(frozen=True)
@@ -544,6 +649,7 @@ def _block_from_label(
     text: str,
     *,
     spans: list[Span],
+    page_words: list[Word] | None,
     page_median_span_size: float,
 ) -> Block:
     normalized = (label or "").strip().lower()
@@ -575,17 +681,20 @@ def _block_from_label(
         return Paragraph(text=text)
 
     if normalized == "table":
-        return _table_from_spans(text=text, spans=spans)
+        return _table_from_spans(text=text, spans=spans, page_words=page_words)
     if normalized in {"figure", "image"}:
         return Figure(alt=text)
     return Unknown(text=text)
 
 
-def _table_from_spans(*, text: str, spans: list[Span]) -> Table:
+def _table_from_spans(
+    *,
+    text: str,
+    spans: list[Span],
+    page_words: list[Word] | None,
+) -> Table:
     # Best-effort: infer a grid from span positions. If uncertain, fall back to plain text.
-    from ragprep.pdf_text import Word
-
-    words = [
+    words = page_words if page_words else [
         Word(
             x0=float(s.x0),
             y0=float(s.y0),
@@ -601,10 +710,12 @@ def _table_from_spans(*, text: str, spans: list[Span]) -> Table:
     ]
 
     best_rows: tuple[tuple[str, ...], ...] | None = None
+    best_cells: tuple[TableCell, ...] | None = None
+    best_collision_ratio: float | None = None
     best_empty_ratio: float | None = None
     best_conf = -1.0
     best_k = 0
-    for k in range(2, 7):
+    for k in _candidate_table_column_counts(words):
         result = build_table_grid(words, column_count=k)
         if not result.ok or result.grid is None:
             continue
@@ -613,19 +724,54 @@ def _table_from_spans(*, text: str, spans: list[Span]) -> Table:
         empty = sum(1 for r in rows for c in r[:k] if not str(c).strip())
         empty_ratio = empty / total
         conf = float(result.confidence)
+        collision_ratio = float(result.grid.collision_count) / max(
+            1.0,
+            float(result.grid.group_count),
+        )
 
-        if best_empty_ratio is None or empty_ratio < best_empty_ratio - 1e-9:
+        if best_collision_ratio is None or collision_ratio < best_collision_ratio - 1e-9:
+            best_collision_ratio = collision_ratio
             best_empty_ratio = empty_ratio
             best_conf = conf
             best_k = k
             best_rows = rows
+            best_cells = result.grid.cells
             continue
 
-        if best_empty_ratio is not None and abs(empty_ratio - best_empty_ratio) <= 1e-9:
-            if k > best_k or (k == best_k and conf > best_conf):
+        if best_collision_ratio is not None and abs(collision_ratio - best_collision_ratio) <= 1e-9:
+            if best_empty_ratio is None or empty_ratio < best_empty_ratio - 1e-9:
+                best_collision_ratio = collision_ratio
                 best_empty_ratio = empty_ratio
                 best_conf = conf
                 best_k = k
                 best_rows = rows
+                best_cells = result.grid.cells
+                continue
+            if best_empty_ratio is not None and abs(empty_ratio - best_empty_ratio) <= 1e-9:
+                if conf > best_conf + 1e-9 or (
+                    abs(conf - best_conf) <= 1e-9 and k > best_k
+                ):
+                    best_collision_ratio = collision_ratio
+                    best_empty_ratio = empty_ratio
+                    best_conf = conf
+                    best_k = k
+                    best_rows = rows
+                    best_cells = result.grid.cells
 
-    return Table(text=text, grid=best_rows)
+    return Table(text=text, grid=best_rows, cells=best_cells)
+
+
+def _candidate_table_column_counts(words: list[Word]) -> tuple[int, ...]:
+    if not words:
+        return (2,)
+
+    heights = [max(0.0, float(w.y1) - float(w.y0)) for w in words]
+    row_bin = max(4.0, _median_or_default(heights, default=10.0) * 0.75)
+    row_counts: dict[int, int] = {}
+    for w in words:
+        y_center = (float(w.y0) + float(w.y1)) / 2.0
+        key = int(round(y_center / row_bin)) if row_bin > 0 else 0
+        row_counts[key] = row_counts.get(key, 0) + 1
+
+    max_columns = max(2, min(6, max(row_counts.values(), default=2)))
+    return tuple(range(max_columns, 1, -1))

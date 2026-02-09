@@ -71,8 +71,7 @@ def test_run_job_sets_error_on_layout_timeout(monkeypatch: pytest.MonkeyPatch) -
     ) -> str:
         _ = _pdf_bytes, full_document, on_progress, on_page, _page_output_dir
         raise RuntimeError(
-            "Layout analysis request timed out. base_url='http://127.0.0.1:8080'. "
-            "Ensure the layout server is running and reachable."
+            "Layout analysis requires RAGPREP_LAYOUT_MODE=local-paddle."
         )
 
     monkeypatch.setattr(webapp, "pdf_to_html", _fake_pdf_to_html)
@@ -84,7 +83,7 @@ def test_run_job_sets_error_on_layout_timeout(monkeypatch: pytest.MonkeyPatch) -
     assert updated.status == JobStatus.error
     assert updated.phase == "error"
     assert updated.error is not None
-    assert "Layout analysis request timed out" in updated.error
+    assert "RAGPREP_LAYOUT_MODE=local-paddle" in updated.error
 
 
 def test_job_status_returns_204_when_version_matches() -> None:

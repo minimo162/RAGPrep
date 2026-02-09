@@ -8,7 +8,6 @@ from dataclasses import dataclass
 from threading import Lock
 from typing import Any
 
-import httpx
 from PIL import Image
 
 from ragprep.config import Settings
@@ -17,18 +16,8 @@ from ragprep.model_cache import configure_model_cache
 DEFAULT_TEXT_RECOGNITION_PROMPT = "Text Recognition:"
 
 
-@dataclass(frozen=True)
-class _ChatCompletionResult:
-    content: str
-
-
 class _GlmOcrMode:
     transformers = "transformers"
-    server = "server"
-
-
-def _normalize_base_url(base_url: str) -> str:
-    return base_url.strip().rstrip("/")
 
 
 def _strip_data_url_prefix(value: str) -> str:
@@ -51,119 +40,12 @@ def _validate_base64_payload(payload: str) -> None:
         raise ValueError("image_base64 is empty")
 
 
-def _post_chat_completions(
-    *,
-    url: str,
-    headers: dict[str, str],
-    payload: dict[str, object],
-    timeout_seconds: int,
-) -> httpx.Response:
-    timeout = httpx.Timeout(timeout_seconds)
-    with httpx.Client(timeout=timeout) as client:
-        return client.post(url, headers=headers, json=payload)
-
-
-def _parse_chat_completions_response(response: httpx.Response) -> _ChatCompletionResult:
-    if response.status_code != 200:
-        body = (response.text or "").strip()
-        if len(body) > 800:
-            body = body[:800] + "…"
-        raise RuntimeError(f"GLM-OCR server returned {response.status_code}: {body}")
-
-    try:
-        data = response.json()
-    except ValueError as exc:
-        raise RuntimeError("GLM-OCR server returned invalid JSON.") from exc
-
-    if not isinstance(data, dict):
-        raise RuntimeError("GLM-OCR server returned invalid JSON shape (expected object).")
-
-    choices = data.get("choices")
-    if not isinstance(choices, list) or not choices:
-        raise RuntimeError("GLM-OCR response missing choices.")
-
-    first = choices[0]
-    if not isinstance(first, dict):
-        raise RuntimeError("GLM-OCR response choices[0] is invalid.")
-
-    message = first.get("message")
-    if not isinstance(message, dict):
-        raise RuntimeError("GLM-OCR response missing message.")
-
-    content = message.get("content")
-    if not isinstance(content, str):
-        raise RuntimeError("GLM-OCR response message.content is missing or not a string.")
-
-    return _ChatCompletionResult(content=content)
-
-
 def _decode_png_from_base64(image_base64: str) -> bytes:
     payload = _strip_data_url_prefix(image_base64)
     if not payload:
         raise ValueError("image_base64 is empty")
     _validate_base64_payload(payload)
     return base64.b64decode(payload, validate=False)
-
-
-def _ocr_image_base64_via_server(image_base64: str, *, settings: Settings) -> str:
-    """
-    Call a locally running GLM-OCR server (OpenAI-compatible) and return extracted Markdown/text.
-
-    This expects an OpenAI-compatible endpoint at:
-      POST {RAGPREP_GLM_OCR_BASE_URL}/v1/chat/completions
-    """
-
-    if not image_base64:
-        raise ValueError("image_base64 is empty")
-
-    payload = _strip_data_url_prefix(image_base64)
-    if not payload:
-        raise ValueError("image_base64 is empty")
-    _validate_base64_payload(payload)
-
-    url = f"{_normalize_base_url(settings.glm_ocr_base_url)}/v1/chat/completions"
-    headers: dict[str, str] = {"Content-Type": "application/json"}
-    if settings.glm_ocr_api_key is not None:
-        headers["Authorization"] = f"Bearer {settings.glm_ocr_api_key}"
-
-    data_url = f"data:image/png;base64,{payload}"
-    request_payload: dict[str, object] = {
-        "model": settings.glm_ocr_model,
-        "messages": [
-            {
-                "role": "user",
-                "content": [
-                    {"type": "image_url", "image_url": {"url": data_url}},
-                    {"type": "text", "text": DEFAULT_TEXT_RECOGNITION_PROMPT},
-                ],
-            }
-        ],
-        "max_tokens": settings.glm_ocr_max_tokens,
-    }
-
-    base_url = _normalize_base_url(settings.glm_ocr_base_url)
-    try:
-        response = _post_chat_completions(
-            url=url,
-            headers=headers,
-            payload=request_payload,
-            timeout_seconds=settings.glm_ocr_timeout_seconds,
-        )
-    except httpx.TimeoutException as exc:
-        raise RuntimeError(
-            "GLM-OCR request timed out. "
-            f"base_url={base_url!r}. "
-            "Ensure the GLM-OCR server is running and reachable."
-        ) from exc
-    except httpx.RequestError as exc:
-        raise RuntimeError(
-            "Failed to reach GLM-OCR server. "
-            f"base_url={base_url!r}. "
-            f"error={exc}. "
-            "Ensure the GLM-OCR server is running and reachable."
-        ) from exc
-
-    return _parse_chat_completions_response(response).content
 
 
 @dataclass(frozen=True)
@@ -210,7 +92,7 @@ def _load_transformers_client(model_path: str) -> _TransformersClient:
             raise RuntimeError(
                 "Failed to load GLM-OCR processor via Transformers. "
                 f"model={model_path!r}, transformers={transformers_version}. "
-                "Try upgrading Transformers, or set RAGPREP_GLM_OCR_MODE=server."
+                "Try upgrading Transformers."
             ) from exc
 
         model_kwargs: dict[str, object] = {"pretrained_model_name_or_path": model_path}
@@ -238,7 +120,7 @@ def _load_transformers_client(model_path: str) -> _TransformersClient:
             raise RuntimeError(
                 "Failed to load GLM-OCR model via Transformers. "
                 f"model={model_path!r}, transformers={transformers_version}. "
-                "Try upgrading Transformers, or set RAGPREP_GLM_OCR_MODE=server."
+                "Try upgrading Transformers."
             ) from exc
 
         # Ensure model is on some device when device_map isn't supported.
@@ -262,9 +144,8 @@ def _ocr_image_base64_via_transformers(image_base64: str, *, settings: Settings)
     if not image_base64:
         raise ValueError("image_base64 is empty")
 
-    configure_model_cache(settings)
-
     png_bytes = _decode_png_from_base64(image_base64)
+    configure_model_cache(settings)
 
     # The official GLM-OCR transformers example uses a file path in messages.
     # Writing to a temp file avoids relying on in-memory image object support.
@@ -344,21 +225,20 @@ def _ocr_image_base64_via_transformers(image_base64: str, *, settings: Settings)
 
 def ocr_image_base64(image_base64: str, *, settings: Settings) -> str:
     """
-    Extract Markdown/text from a base64-encoded image using GLM-OCR.
+    Extract Markdown/text from a base64-encoded image using local GLM-OCR.
 
-    Modes:
+    Supported mode:
     - transformers (default): run in-process via Hugging Face Transformers.
-    - server: call an OpenAI-compatible GLM-OCR server at
-      `{RAGPREP_GLM_OCR_BASE_URL}/v1/chat/completions`.
     """
 
     mode = (settings.glm_ocr_mode or "").strip().lower()
     if not mode:
         mode = _GlmOcrMode.transformers
 
-    if mode == _GlmOcrMode.server:
-        return _ocr_image_base64_via_server(image_base64, settings=settings)
     if mode == _GlmOcrMode.transformers:
         return _ocr_image_base64_via_transformers(image_base64, settings=settings)
 
-    raise RuntimeError(f"Unsupported GLM-OCR mode: {settings.glm_ocr_mode!r}")
+    raise RuntimeError(
+        f"Unsupported GLM-OCR mode: {settings.glm_ocr_mode!r}. "
+        "Supported mode: transformers."
+    )

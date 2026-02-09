@@ -7,30 +7,16 @@ import io
 import json
 import os
 import subprocess
-import time
 import warnings
 from collections.abc import Callable
 from contextlib import contextmanager
 from functools import lru_cache
 from typing import Any, cast
 
-import httpx
-
 from ragprep.config import Settings
 from ragprep.model_cache import configure_model_cache
 
-DEFAULT_LAYOUT_ANALYSIS_PROMPT = (
-    "Document Layout Analysis (PP-DocLayout-V3): "
-    "Return JSON only with keys: schema_version, elements[]. "
-    "Each element must include: page_index, bbox[x0,y0,x1,y1], label, score."
-)
-
 ENV_LAYOUT_PADDLE_SAFE_MODE = "RAGPREP_LAYOUT_PADDLE_SAFE_MODE"
-
-
-def _normalize_base_url(base_url: str) -> str:
-    return base_url.strip().rstrip("/")
-
 
 def _strip_data_url_prefix(value: str) -> str:
     raw = value.strip()
@@ -52,165 +38,10 @@ def _validate_base64_payload(payload: str) -> None:
         raise ValueError("image_base64 is empty")
 
 
-def _post_chat_completions(
-    *,
-    url: str,
-    headers: dict[str, str],
-    payload: dict[str, object],
-    timeout_seconds: int,
-) -> httpx.Response:
-    timeout = httpx.Timeout(timeout_seconds)
-    # Desktop environments often have proxy env vars configured; avoid routing loopback
-    # layout requests through proxies.
-    with httpx.Client(timeout=timeout, follow_redirects=False, trust_env=False) as client:
-        return client.post(url, headers=headers, json=payload)
-
-
-def _parse_chat_completions_response_content(response: httpx.Response) -> str:
-    if response.status_code != 200:
-        body = (response.text or "").strip()
-        if len(body) > 800:
-            body = body[:800] + "窶ｦ"
-        raise RuntimeError(f"GLM server returned {response.status_code}: {body}")
-
-    try:
-        data = response.json()
-    except ValueError as exc:
-        raise RuntimeError("GLM server returned invalid JSON.") from exc
-
-    if not isinstance(data, dict):
-        raise RuntimeError("GLM server returned invalid JSON shape (expected object).")
-
-    choices = data.get("choices")
-    if not isinstance(choices, list) or not choices:
-        raise RuntimeError("GLM response missing choices.")
-
-    first = choices[0]
-    if not isinstance(first, dict):
-        raise RuntimeError("GLM response choices[0] is invalid.")
-
-    message = first.get("message")
-    if not isinstance(message, dict):
-        raise RuntimeError("GLM response missing message.")
-
-    content = message.get("content")
-    if not isinstance(content, str):
-        raise RuntimeError("GLM response message.content is missing or not a string.")
-
-    return content
-
-
 class _GlmOcrMode:
     transformers = "transformers"
     local_fast = "local-fast"
-    server = "server"
     local_paddle = "local-paddle"
-
-_CODE_FENCE = "```"
-
-
-def _sleep_backoff(*, base_seconds: float, attempt_index: int) -> None:
-    if base_seconds <= 0:
-        return
-    if attempt_index < 0:
-        attempt_index = 0
-    time.sleep(base_seconds * (2**attempt_index))
-
-
-def _as_float(value: object, *, name: str) -> float:
-    if isinstance(value, (int, float)):
-        return float(value)
-    raise ValueError(f"{name} must be a number, got: {value!r}")
-
-
-def _as_int(value: object, *, name: str) -> int:
-    if isinstance(value, int) and not isinstance(value, bool):
-        return int(value)
-    if isinstance(value, float) and value.is_integer():
-        return int(value)
-    raise ValueError(f"{name} must be an int, got: {value!r}")
-
-
-def _as_str(value: object, *, name: str) -> str:
-    if isinstance(value, str):
-        return value
-    raise ValueError(f"{name} must be a string, got: {value!r}")
-
-
-def _parse_bbox(value: object) -> tuple[float, float, float, float]:
-    if not isinstance(value, (list, tuple)) or len(value) != 4:
-        raise ValueError(f"bbox must be a list[4], got: {value!r}")
-    x0 = _as_float(value[0], name="bbox[0]")
-    y0 = _as_float(value[1], name="bbox[1]")
-    x1 = _as_float(value[2], name="bbox[2]")
-    y1 = _as_float(value[3], name="bbox[3]")
-    if not (x0 < x1 and y0 < y1):
-        raise ValueError(f"bbox must satisfy x0<x1 and y0<y1, got: {value!r}")
-    return x0, y0, x1, y1
-
-
-def _strip_code_fence(content: str) -> str:
-    text = content.strip()
-    if not text.startswith(_CODE_FENCE):
-        return content
-
-    # Format we expect: ```json\n{...}\n```
-    first_nl = text.find("\n")
-    if first_nl == -1:
-        return content
-    closing = text.find(_CODE_FENCE, first_nl + 1)
-    if closing == -1:
-        return content
-    inner = text[first_nl + 1 : closing]
-    return inner.strip()
-
-
-def _extract_first_json_object(content: str) -> str:
-    text = content.strip()
-    if not text:
-        raise RuntimeError("Layout analysis returned empty content.")
-
-    start = text.find("{")
-    if start == -1:
-        raise RuntimeError("Layout analysis content does not contain a JSON object.")
-
-    depth = 0
-    in_string = False
-    escaped = False
-    for i in range(start, len(text)):
-        ch = text[i]
-
-        if in_string:
-            if escaped:
-                escaped = False
-                continue
-            if ch == "\\":
-                escaped = True
-                continue
-            if ch == '"':
-                in_string = False
-            continue
-
-        if ch == '"':
-            in_string = True
-            continue
-        if ch == "{":
-            depth += 1
-            continue
-        if ch == "}":
-            depth -= 1
-            if depth == 0:
-                return text[start : i + 1]
-            if depth < 0:
-                break
-
-    raise RuntimeError("Layout analysis content contains an unterminated JSON object.")
-
-
-def _sanitize_layout_content(content: str) -> str:
-    # Prefer fenced JSON if present, but fall back to brace extraction.
-    unfenced = _strip_code_fence(content)
-    return _extract_first_json_object(unfenced)
 
 
 def _is_ccache_probe_command(command: object) -> bool:
@@ -261,31 +92,6 @@ def _suppress_paddle_ccache_probe_noise() -> Any:
         subprocess.check_output = cast(Any, original_check_output)
 
 
-def _parse_layout_result(content: str) -> tuple[str, tuple[dict[str, object], ...]]:
-    sanitized = _sanitize_layout_content(content)
-    try:
-        payload = json.loads(sanitized)
-    except json.JSONDecodeError as exc:
-        raise RuntimeError("Layout analysis did not return valid JSON.") from exc
-
-    if not isinstance(payload, dict):
-        raise RuntimeError("Layout analysis JSON must be an object.")
-
-    schema_version = payload.get("schema_version")
-    elements = payload.get("elements")
-    if not isinstance(schema_version, str) or not schema_version.strip():
-        raise RuntimeError("Layout analysis JSON missing schema_version.")
-    if not isinstance(elements, list):
-        raise RuntimeError("Layout analysis JSON missing elements list.")
-
-    cleaned: list[dict[str, object]] = []
-    for elt in elements:
-        if not isinstance(elt, dict):
-            raise RuntimeError("Layout analysis elements must be objects.")
-        cleaned.append(elt)
-    return schema_version, tuple(cleaned)
-
-
 def _load_paddleocr_ppstructure() -> Any:
     with _suppress_paddle_ccache_probe_noise():
         try:
@@ -301,14 +107,13 @@ def _load_paddleocr_ppstructure() -> Any:
             except Exception as exc:  # noqa: BLE001
                 raise RuntimeError(
                     "Local layout analysis requires PaddleOCR with PPStructure/PPStructureV3 "
-                    "available. Install PaddleOCR (CPU) and try again, or use "
-                    "RAGPREP_LAYOUT_MODE=server. Suggested install: uv pip install paddlepaddle "
-                    "paddleocr"
+                    "available. Install PaddleOCR (CPU) and try again. Suggested install: "
+                    "uv pip install paddlepaddle paddleocr"
                 ) from exc
         except Exception as exc:  # noqa: BLE001
             raise RuntimeError(
                 "Local layout analysis requires optional dependencies. "
-                "Install PaddleOCR (CPU) and try again, or use RAGPREP_LAYOUT_MODE=server. "
+                "Install PaddleOCR (CPU) and try again. "
                 "Suggested install: uv pip install paddlepaddle paddleocr"
             ) from exc
 
@@ -394,9 +199,6 @@ def _paddle_pir_onednn_workaround_hint() -> str:
             "",
             "Or set a single switch and restart:",
             f"  {ENV_LAYOUT_PADDLE_SAFE_MODE}=1",
-            "",
-            "If it still fails, try upgrading/downgrading Paddle packages, or use server mode:",
-            "  RAGPREP_LAYOUT_MODE=server",
         ]
     )
 
@@ -762,7 +564,6 @@ def prewarm_layout_backend(*, settings: Settings) -> None:
     Eagerly initialize layout backend resources to reduce first-request cold start.
 
     - local-paddle / transformers: initialize and cache PaddleOCR PPStructure engine.
-    - server: no local heavy resources to initialize.
     """
 
     mode = (settings.layout_mode or "").strip().lower() or _GlmOcrMode.transformers
@@ -771,11 +572,8 @@ def prewarm_layout_backend(*, settings: Settings) -> None:
         _apply_paddle_safe_mode_env()
         _ = _get_paddleocr_engine()
         return
-    if mode == _GlmOcrMode.server:
-        return
     raise RuntimeError(
-        "Layout analysis requires RAGPREP_LAYOUT_MODE=server or "
-        "RAGPREP_LAYOUT_MODE=local-paddle."
+        "Layout analysis requires RAGPREP_LAYOUT_MODE=local-paddle."
     )
 
 
@@ -784,7 +582,6 @@ def analyze_layout_image_base64(image_base64: str, *, settings: Settings) -> dic
     Request layout analysis for a single page image.
 
     Supported backends:
-    - `server`: call an OpenAI-compatible `/v1/chat/completions` endpoint (GLM-OCR server).
     - `local-paddle`: run PP-DocLayout-V3 locally via PaddleOCR (no Docker).
 
     Note:
@@ -801,111 +598,9 @@ def analyze_layout_image_base64(image_base64: str, *, settings: Settings) -> dic
     if mode == _GlmOcrMode.local_fast:
         raise RuntimeError(
             "local-fast layout mode does not use image layout API. "
-            "Use pdf_to_html() fast layout path or set RAGPREP_LAYOUT_MODE=local-paddle/server."
+            "Use pdf_to_html() fast layout path or set RAGPREP_LAYOUT_MODE=local-paddle."
         )
 
     if mode == _GlmOcrMode.local_paddle:
         return _analyze_layout_local_paddle(image_base64, settings=settings)
-    if mode != _GlmOcrMode.server:
-        raise RuntimeError(
-            "Layout analysis requires RAGPREP_LAYOUT_MODE=server or "
-            "RAGPREP_LAYOUT_MODE=local-paddle."
-        )
-
-    if not image_base64:
-        raise ValueError("image_base64 is empty")
-
-    payload = _strip_data_url_prefix(image_base64)
-    if not payload:
-        raise ValueError("image_base64 is empty")
-    _validate_base64_payload(payload)
-
-    base_url = _normalize_base_url(settings.layout_base_url)
-    url = f"{base_url}/v1/chat/completions"
-    headers: dict[str, str] = {"Content-Type": "application/json"}
-    if settings.layout_api_key is not None:
-        headers["Authorization"] = f"Bearer {settings.layout_api_key}"
-
-    data_url = f"data:image/png;base64,{payload}"
-    request_payload: dict[str, object] = {
-        "model": settings.layout_model,
-        "messages": [
-            {
-                "role": "user",
-                "content": [
-                    {"type": "image_url", "image_url": {"url": data_url}},
-                    {"type": "text", "text": DEFAULT_LAYOUT_ANALYSIS_PROMPT},
-                ],
-            }
-        ],
-        "max_tokens": settings.layout_max_tokens,
-    }
-
-    retry_count = max(0, int(settings.layout_retry_count))
-    backoff_seconds = float(settings.layout_retry_backoff_seconds)
-
-    for attempt_index in range(retry_count + 1):
-        try:
-            response = _post_chat_completions(
-                url=url,
-                headers=headers,
-                payload=request_payload,
-                timeout_seconds=settings.layout_timeout_seconds,
-            )
-        except httpx.TimeoutException as exc:
-            if attempt_index < retry_count:
-                _sleep_backoff(base_seconds=backoff_seconds, attempt_index=attempt_index)
-                continue
-            raise RuntimeError(
-                "Layout analysis request timed out. "
-                f"base_url={base_url!r}. "
-                "Ensure the layout server is running and reachable."
-            ) from exc
-        except httpx.RequestError as exc:
-            if attempt_index < retry_count:
-                _sleep_backoff(base_seconds=backoff_seconds, attempt_index=attempt_index)
-                continue
-            raise RuntimeError(
-                "Failed to reach layout server. "
-                f"base_url={base_url!r}. "
-                f"error={exc}. "
-                "Ensure the layout server is running and reachable."
-            ) from exc
-
-        # Retry on transient gateway/service errors from the server.
-        if response.status_code in {502, 503, 504} and attempt_index < retry_count:
-            _sleep_backoff(base_seconds=backoff_seconds, attempt_index=attempt_index)
-            continue
-        break
-    else:  # pragma: no cover
-        raise RuntimeError("unreachable")
-
-    content = _parse_chat_completions_response_content(response)
-    schema_version, raw_elements = _parse_layout_result(content)
-
-    elements: list[dict[str, object]] = []
-    for raw in raw_elements:
-        page_index = _as_int(raw.get("page_index"), name="page_index")
-        bbox = _parse_bbox(raw.get("bbox"))
-        label = _as_str(raw.get("label"), name="label").strip()
-        if not label:
-            raise ValueError("label must be non-empty")
-        score_obj = raw.get("score", None)
-        score = _as_float(score_obj, name="score") if score_obj is not None else None
-        if score is not None and not (0.0 <= score <= 1.0):
-            raise ValueError(f"score must be in [0,1], got: {score!r}")
-
-        elements.append(
-            {
-                "page_index": page_index,
-                "bbox": bbox,
-                "label": label,
-                "score": score,
-            }
-        )
-
-    return {
-        "schema_version": schema_version,
-        "elements": elements,
-        "raw": content,
-    }
+    raise RuntimeError("Layout analysis requires RAGPREP_LAYOUT_MODE=local-paddle.")

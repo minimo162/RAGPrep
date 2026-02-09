@@ -1,15 +1,17 @@
 # RAGPrep
 
-RAGPrep converts PDFs to structured HTML/Markdown with:
-- LightOn OCR (OpenAI-compatible server)
-- PyMuPDF text layer extraction (for line-level correction)
-- Layout-aware rendering
+RAGPrep converts PDFs to structured HTML/Markdown with local processing.
+
+- PyMuPDF text layer extraction
+- Local layout analysis (`local-fast` by default)
+- Local OCR path for Markdown via GLM-OCR Transformers
 
 ## Default behavior
 
-- Default OCR backend: `lighton-ocr`
-- Default layout mode: `lighton`
-- No fallback on OCR/layout failure: conversion fails fast with page-specific error
+- `RAGPREP_PDF_BACKEND=glm-ocr`
+- `RAGPREP_GLM_OCR_MODE=transformers`
+- `RAGPREP_LAYOUT_MODE=local-fast`
+- No external OCR/layout server required
 
 ## Install
 
@@ -17,73 +19,58 @@ RAGPrep converts PDFs to structured HTML/Markdown with:
 uv sync --dev
 ```
 
-## Configure (LightOn default)
+## Configure (local default)
 
 PowerShell:
+
 ```powershell
-$env:RAGPREP_PDF_BACKEND = "lighton-ocr"
-$env:RAGPREP_LAYOUT_MODE = "lighton"
-$env:RAGPREP_LIGHTON_BASE_URL = "http://127.0.0.1:8080"
-$env:RAGPREP_LIGHTON_MODEL = "noctrex/LightOnOCR-2-1B-GGUF"
+$env:RAGPREP_PDF_BACKEND = "glm-ocr"
+$env:RAGPREP_GLM_OCR_MODE = "transformers"
+$env:RAGPREP_LAYOUT_MODE = "local-fast"
 ```
 
 bash:
+
 ```bash
-export RAGPREP_PDF_BACKEND=lighton-ocr
-export RAGPREP_LAYOUT_MODE=lighton
-export RAGPREP_LIGHTON_BASE_URL=http://127.0.0.1:8080
-export RAGPREP_LIGHTON_MODEL=noctrex/LightOnOCR-2-1B-GGUF
+export RAGPREP_PDF_BACKEND=glm-ocr
+export RAGPREP_GLM_OCR_MODE=transformers
+export RAGPREP_LAYOUT_MODE=local-fast
 ```
 
-### LightOn response contract
+Optional local layout model path:
 
-`POST /v1/chat/completions` must return `message.content` containing JSON:
-
-```json
-{
-  "schema_version": "v1",
-  "elements": [
-    {
-      "page_index": 0,
-      "bbox": [0, 0, 100, 100],
-      "label": "text",
-      "score": 0.9,
-      "order": 0
-    }
-  ],
-  "lines": [
-    {
-      "bbox": [0, 0, 100, 20],
-      "text": "example",
-      "confidence": 0.95
-    }
-  ]
-}
+```powershell
+$env:RAGPREP_LAYOUT_MODE = "local-paddle"
 ```
 
-- `elements` and `lines` are required.
-- `bbox` must satisfy `x0 < x1` and `y0 < y1`.
-- On invalid response, conversion fails immediately.
+```bash
+export RAGPREP_LAYOUT_MODE=local-paddle
+```
 
 ## Run
 
 Desktop:
+
 ```bash
 uv run python -m ragprep.desktop
 ```
 
 Web:
+
 ```bash
 uv run uvicorn ragprep.web.app:app --reload
 ```
+
 Open `http://127.0.0.1:8000`.
 
 CLI (PDF -> HTML):
+
 ```bash
 uv run python scripts/pdf_to_html.py --pdf .\\path\\to\\input.pdf --out .\\out\\input.html --overwrite
 ```
 
-CLI (legacy PDF -> Markdown entrypoint, still supported):
+CLI (PDF -> Markdown):
+
 ```bash
 uv run python scripts/pdf_to_markdown.py --pdf .\\path\\to\\input.pdf --out .\\out\\input.md --overwrite
 ```
@@ -91,43 +78,20 @@ uv run python scripts/pdf_to_markdown.py --pdf .\\path\\to\\input.pdf --out .\\o
 ## Main settings
 
 ### OCR backend
-- `RAGPREP_PDF_BACKEND`: `lighton-ocr` (default) or `glm-ocr`
-- `RAGPREP_OCR_BACKEND`: alias of `RAGPREP_PDF_BACKEND`
 
-### LightOn
-- `RAGPREP_LIGHTON_BASE_URL` (default: `http://127.0.0.1:8080`)
-- `RAGPREP_LIGHTON_MODEL` (default: `noctrex/LightOnOCR-2-1B-GGUF`)
-- `RAGPREP_LIGHTON_API_KEY` (optional)
-- `RAGPREP_LIGHTON_MAX_TOKENS` (default: `8192`)
-- `RAGPREP_LIGHTON_TIMEOUT_SECONDS` (default: `60`)
+- `RAGPREP_PDF_BACKEND`: `glm-ocr` (default)
+- `RAGPREP_OCR_BACKEND`: alias of `RAGPREP_PDF_BACKEND`
+- `RAGPREP_GLM_OCR_MODE`: `transformers` (default)
+- `RAGPREP_GLM_OCR_MODEL`: model id (default: `zai-org/GLM-OCR`)
+- `RAGPREP_GLM_OCR_MAX_TOKENS` (default: `8192`)
+- `RAGPREP_GLM_OCR_TIMEOUT_SECONDS` (default: `60`)
 
 ### Layout
-- `RAGPREP_LAYOUT_MODE`: `lighton` (default), `local-fast`, `local-paddle`, or `server`
-- `RAGPREP_LAYOUT_BASE_URL`
-- `RAGPREP_LAYOUT_MODEL`
-- `RAGPREP_LAYOUT_API_KEY`
-- `RAGPREP_LAYOUT_MAX_TOKENS`
-- `RAGPREP_LAYOUT_TIMEOUT_SECONDS`
-- `RAGPREP_LAYOUT_CONCURRENCY` (server mode)
-- `RAGPREP_LAYOUT_RENDER_DPI`
-- `RAGPREP_LAYOUT_RENDER_MAX_EDGE`
+
+- `RAGPREP_LAYOUT_MODE`: `local-fast` (default), `local-paddle`, `transformers` (alias of `local-fast`)
+- `RAGPREP_LAYOUT_RENDER_DPI` (default: `250`)
+- `RAGPREP_LAYOUT_RENDER_MAX_EDGE` (default: `1024`)
 - `RAGPREP_LAYOUT_RENDER_AUTO` (+ small-pass settings)
-
-## Legacy GLM mode
-
-`RAGPREP_GLM_OCR_*` settings are legacy and used only when:
-- `RAGPREP_PDF_BACKEND=glm-ocr`, or
-- layout mode explicitly uses legacy server/local-paddle flows.
-
-## Standalone helper
-
-`scripts/build-standalone.ps1` now generates:
-- `start-lighton-ocr.ps1`
-- `start-lighton-ocr.cmd`
-
-It includes a llama.cpp example with:
-- `LightOnOCR-2-1B-IQ4_XS.gguf`
-- `mmproj-BF16.gguf`
 
 ## Quality gate
 

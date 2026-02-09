@@ -10,7 +10,6 @@ from ragprep.structure_ir import (
     Page,
     Paragraph,
     Table,
-    TableCell,
     Unknown,
 )
 
@@ -79,9 +78,10 @@ def _render_block(block: Block) -> str:
         text = _escape_with_breaks(block.text)
         return f"<p>{text}</p>"
     if isinstance(block, Table):
+        cells = getattr(block, "cells", None)
         if block.grid:
-            if block.cells:
-                return _render_table_cells(block.grid, block.cells)
+            if cells:
+                return _render_table_cells(block.grid, cells)
             return _render_table_grid(block.grid)
         text = _escape_with_breaks(block.text)
         return f'<pre data-kind="table">{text}</pre>'
@@ -121,7 +121,7 @@ def _render_table_grid(grid: tuple[tuple[str, ...], ...]) -> str:
 
 def _render_table_cells(
     grid: tuple[tuple[str, ...], ...],
-    cells: tuple[TableCell, ...],
+    cells: tuple[object, ...],
 ) -> str:
     rows = list(grid)
     if not rows:
@@ -132,10 +132,10 @@ def _render_table_cells(
     if col_count <= 0:
         return '<pre data-kind="table"></pre>'
 
-    starts: dict[tuple[int, int], TableCell] = {}
+    starts: dict[tuple[int, int], object] = {}
     for cell in cells:
-        r = int(cell.row)
-        c = int(cell.col)
+        r = int(getattr(cell, "row", -1))
+        c = int(getattr(cell, "col", -1))
         if r < 0 or c < 0 or r >= row_count or c >= col_count:
             continue
         starts[(r, c)] = cell
@@ -158,8 +158,8 @@ def _render_table_cells(
                 c += 1
                 continue
 
-            colspan = max(1, int(start.colspan))
-            rowspan = max(1, int(start.rowspan))
+            colspan = max(1, int(getattr(start, "colspan", 1)))
+            rowspan = max(1, int(getattr(start, "rowspan", 1)))
             attrs: list[str] = []
             if colspan > 1:
                 attrs.append(f' colspan="{colspan}"')
@@ -167,7 +167,7 @@ def _render_table_cells(
                 attrs.append(f' rowspan="{rowspan}"')
             attr_text = "".join(attrs)
 
-            value = str(start.text)
+            value = str(getattr(start, "text", ""))
             if not value and c < len(rows[r]):
                 value = str(rows[r][c])
             parts.append(f"<td{attr_text}>{_escape_with_breaks(value)}</td>")

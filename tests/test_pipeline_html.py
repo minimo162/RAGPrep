@@ -3,7 +3,6 @@
 import base64
 import io
 from collections.abc import Iterator
-from threading import Barrier, BrokenBarrierError, Lock
 
 import pytest
 from PIL import Image
@@ -265,12 +264,12 @@ def test_pdf_to_html_local_fast_keeps_left_column_text_without_toc_signature(
     assert "同時に研究開発費も増加" in html
 
 
-def test_pdf_to_html_default_uses_lighton_mode(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_pdf_to_html_default_uses_local_fast_mode(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("RAGPREP_LAYOUT_MODE", raising=False)
 
     monkeypatch.setattr(
         "ragprep.pdf_text.extract_pymupdf_page_spans",
-        lambda _pdf: [[Span(x0=0, y0=0, x1=10, y1=10, text="legacy", size=12)]],
+        lambda _pdf: [[Span(x0=80, y0=80, x1=220, y1=110, text="LOCAL", size=12)]],
     )
     monkeypatch.setattr(
         "ragprep.pdf_text.extract_pymupdf_page_sizes",
@@ -294,104 +293,22 @@ def test_pdf_to_html_default_uses_lighton_mode(monkeypatch: pytest.MonkeyPatch) 
         ],
     )
 
-    def _fake_iter_pdf_images(
+    def _fail_iter_pdf_images(
         *_args: object,
         **_kwargs: object,
     ) -> tuple[int, Iterator[Image.Image]]:
-        def _generate() -> Iterator[Image.Image]:
-            yield Image.new("RGB", (1000, 1000), color=(255, 255, 255))
+        raise AssertionError("iter_pdf_images should not be called in local-fast mode")
 
-        return 1, _generate()
-
-    monkeypatch.setattr("ragprep.pdf_render.iter_pdf_images", _fake_iter_pdf_images)
-
-    def _fail_fast_layout(*_args: object, **_kwargs: object) -> list[dict[str, object]]:
-        raise AssertionError("local-fast should not be used by default")
-
-    monkeypatch.setattr("ragprep.layout.fast_layout.infer_fast_layout_elements", _fail_fast_layout)
-
-    calls = 0
-
-    def _fake_lighton(_image_b64: str, *, settings: object) -> dict[str, object]:
-        nonlocal calls
-        _ = settings
-        calls += 1
-        return {
-            "schema_version": "v1",
-            "elements": [{"bbox": (50.0, 50.0, 400.0, 180.0), "label": "text", "page_index": 0}],
-            "lines": [{"bbox": (80.0, 80.0, 220.0, 110.0), "text": "OCR"}],
-            "raw": "{}",
-        }
-
-    monkeypatch.setattr("ragprep.ocr.lighton_ocr.analyze_ocr_layout_image_base64", _fake_lighton)
+    monkeypatch.setattr("ragprep.pdf_render.iter_pdf_images", _fail_iter_pdf_images)
 
     html = pdf_to_html(b"%PDF", full_document=False)
-    assert "OCR" in html
-    assert calls == 1
+    assert "LOCAL" in html
 
 
-def test_pdf_to_html_lighton_prefers_order_and_applies_aggressive_correction(
+def test_pdf_to_html_pipelines_layout_requests_in_local_paddle_mode(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setenv("RAGPREP_LAYOUT_MODE", "lighton")
-
-    monkeypatch.setattr(
-        "ragprep.pdf_text.extract_pymupdf_page_spans",
-        lambda _pdf: [[Span(x0=0, y0=0, x1=10, y1=10, text="seed", size=12)]],
-    )
-    monkeypatch.setattr(
-        "ragprep.pdf_text.extract_pymupdf_page_sizes",
-        lambda _pdf: [(1000.0, 1000.0)],
-    )
-    monkeypatch.setattr(
-        "ragprep.pdf_text.extract_pymupdf_page_words",
-        lambda _pdf: [
-            [
-                Word(x0=60, y0=60, x1=180, y1=92, text="大阪市", block_no=0, line_no=0, word_no=0),
-                Word(x0=560, y0=60, x1=760, y1=92, text="RIGHT", block_no=0, line_no=1, word_no=0),
-            ]
-        ],
-    )
-
-    def _fake_iter_pdf_images(
-        *_args: object,
-        **_kwargs: object,
-    ) -> tuple[int, Iterator[Image.Image]]:
-        def _generate() -> Iterator[Image.Image]:
-            yield Image.new("RGB", (1000, 1000), color=(255, 255, 255))
-
-        return 1, _generate()
-
-    monkeypatch.setattr("ragprep.pdf_render.iter_pdf_images", _fake_iter_pdf_images)
-
-    def _fake_lighton(_image_b64: str, *, settings: object) -> dict[str, object]:
-        _ = settings
-        return {
-            "schema_version": "v1",
-            "elements": [
-                {"bbox": (520.0, 20.0, 980.0, 200.0), "label": "text", "page_index": 0, "order": 0},
-                {"bbox": (20.0, 20.0, 480.0, 200.0), "label": "text", "page_index": 0, "order": 1},
-            ],
-            "lines": [
-                {"bbox": (60.0, 60.0, 220.0, 92.0), "text": "大坂市"},
-                {"bbox": (560.0, 60.0, 760.0, 92.0), "text": "RIGHT"},
-            ],
-            "raw": "{}",
-        }
-
-    monkeypatch.setattr("ragprep.ocr.lighton_ocr.analyze_ocr_layout_image_base64", _fake_lighton)
-
-    html = pdf_to_html(b"%PDF", full_document=False)
-    assert "大阪市" in html
-    assert "大坂市" not in html
-    assert html.index("RIGHT") < html.index("大阪市")
-
-
-def test_pdf_to_html_pipelines_layout_requests_in_server_mode(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setenv("RAGPREP_LAYOUT_MODE", "server")
-    monkeypatch.setenv("RAGPREP_LAYOUT_CONCURRENCY", "2")
+    monkeypatch.setenv("RAGPREP_LAYOUT_MODE", "local-paddle")
 
     def _fake_iter_pdf_images(
         *_args: object,
@@ -417,21 +334,12 @@ def test_pdf_to_html_pipelines_layout_requests_in_server_mode(
         lambda _pdf: [(1000.0, 1000.0), (1000.0, 1000.0), (1000.0, 1000.0)],
     )
 
-    barrier = Barrier(2)
-    call_lock = Lock()
     call_count = 0
 
     def _fake_analyze_layout(_image_b64: str, *, settings: object) -> dict[str, object]:
         nonlocal call_count
         _ = settings
-        with call_lock:
-            call_count += 1
-            index = call_count
-        if index in {1, 2}:
-            try:
-                barrier.wait(timeout=2.0)
-            except BrokenBarrierError as exc:  # pragma: no cover
-                raise AssertionError("expected concurrent layout requests") from exc
+        call_count += 1
         return {
             "schema_version": "v1",
             "elements": [{"bbox": (0.0, 0.0, 10.0, 10.0), "label": "text", "score": 0.9}],
@@ -450,10 +358,10 @@ def test_pdf_to_html_pipelines_layout_requests_in_server_mode(
     assert call_count == 3
 
 
-def test_pdf_to_html_propagates_layout_error_server_mode(
+def test_pdf_to_html_propagates_layout_error_local_paddle_mode(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setenv("RAGPREP_LAYOUT_MODE", "server")
+    monkeypatch.setenv("RAGPREP_LAYOUT_MODE", "local-paddle")
     def _fake_iter_pdf_images(
         *_args: object,
         **_kwargs: object,
@@ -475,19 +383,18 @@ def test_pdf_to_html_propagates_layout_error_server_mode(
 
     def _raise_layout(_image_b64: str, *, settings: object) -> dict[str, object]:
         _ = settings
-        raise RuntimeError("Layout analysis currently requires RAGPREP_LAYOUT_MODE=server.")
+        raise RuntimeError("Layout analysis requires RAGPREP_LAYOUT_MODE=local-paddle.")
 
     monkeypatch.setattr("ragprep.layout.glm_doclayout.analyze_layout_image_base64", _raise_layout)
 
-    with pytest.raises(RuntimeError, match="Layout analysis currently requires"):
+    with pytest.raises(RuntimeError, match="Layout analysis requires"):
         _ = pdf_to_html(b"%PDF", full_document=False)
 
 
 def test_pdf_to_html_uses_layout_render_settings(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("RAGPREP_LAYOUT_MODE", "server")
+    monkeypatch.setenv("RAGPREP_LAYOUT_MODE", "local-paddle")
     monkeypatch.setenv("RAGPREP_LAYOUT_RENDER_DPI", "123")
     monkeypatch.setenv("RAGPREP_LAYOUT_RENDER_MAX_EDGE", "456")
-    monkeypatch.setenv("RAGPREP_LAYOUT_CONCURRENCY", "1")
 
     captured: dict[str, int] = {}
 
@@ -538,8 +445,7 @@ def test_pdf_to_html_uses_layout_render_settings(monkeypatch: pytest.MonkeyPatch
 
 
 def test_pdf_to_html_layout_render_defaults_are_fixed(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("RAGPREP_LAYOUT_MODE", "server")
-    monkeypatch.setenv("RAGPREP_LAYOUT_CONCURRENCY", "1")
+    monkeypatch.setenv("RAGPREP_LAYOUT_MODE", "local-paddle")
     monkeypatch.setenv("RAGPREP_RENDER_DPI", "999")
     monkeypatch.setenv("RAGPREP_RENDER_MAX_EDGE", "999")
 
@@ -594,8 +500,7 @@ def test_pdf_to_html_layout_render_defaults_are_fixed(monkeypatch: pytest.Monkey
 def test_pdf_to_html_adaptive_layout_rerenders_on_empty_elements(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setenv("RAGPREP_LAYOUT_MODE", "server")
-    monkeypatch.setenv("RAGPREP_LAYOUT_CONCURRENCY", "1")
+    monkeypatch.setenv("RAGPREP_LAYOUT_MODE", "local-paddle")
     monkeypatch.setenv("RAGPREP_LAYOUT_RENDER_AUTO", "1")
     monkeypatch.setenv("RAGPREP_LAYOUT_RENDER_AUTO_SMALL_DPI", "200")
     monkeypatch.setenv("RAGPREP_LAYOUT_RENDER_AUTO_SMALL_MAX_EDGE", "1024")
