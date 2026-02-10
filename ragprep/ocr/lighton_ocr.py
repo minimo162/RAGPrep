@@ -8,6 +8,16 @@ import httpx
 from ragprep.config import Settings
 from ragprep.ocr.lighton_server import ensure_server_base_url
 
+_OCR_EXTRACTION_PROMPT = (
+    "You are an OCR transcription engine. "
+    "Transcribe the page exactly and return only extracted content. "
+    "Do not add explanations, notes, placeholders, or comments. "
+    "Do not output markdown image placeholders such as ![...](...). "
+    "For layout text, use plain lines and markdown headings if clearly present. "
+    "For tables, output either an HTML <table>...</table> or a markdown pipe table. "
+    "Return only the transcription body."
+)
+
 
 def ocr_image_base64(image_base64: str, *, settings: Settings) -> str:
     payload = _strip_data_url_prefix(image_base64)
@@ -24,6 +34,10 @@ def ocr_image_base64(image_base64: str, *, settings: Settings) -> str:
             {
                 "role": "user",
                 "content": [
+                    {
+                        "type": "text",
+                        "text": _OCR_EXTRACTION_PROMPT,
+                    },
                     {
                         "type": "image_url",
                         "image_url": {"url": f"data:image/png;base64,{payload}"},

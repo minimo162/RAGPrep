@@ -90,6 +90,44 @@ _ESCAPED_COMPLETE_TABLE_RE = re.compile(
 )
 _RAW_TAG_RE = re.compile(r"<\s*(/?)\s*([a-zA-Z0-9]+)(?:\s+[^>]*)?>", re.IGNORECASE)
 _TABLE_TAGS: set[str] = {"table", "thead", "tbody", "tr", "th", "td"}
+_MARKDOWN_IMAGE_RE = re.compile(r"!\[[^\]]*\]\([^)]+\)")
+_MARKDOWN_HR_RE = re.compile(r"^\s{0,3}(?:-{3,}|\*{3,}|_{3,})\s*$")
+_NOTE_PREFIX_RE = re.compile(r"^\*?\s*note\s*:\s*", re.IGNORECASE)
+_TRANSCRIPTION_PREFIX_RE = re.compile(r"^\*?\s*this transcription\s+is\b", re.IGNORECASE)
+_HTML_TAG_RE = re.compile(r"</?[a-zA-Z][^>]*>")
+_HTML_BR_RE = re.compile(r"<\s*br\s*/?\s*>", re.IGNORECASE)
+_TAG_FRAGMENT_START_RE = re.compile(r"^\s*</?\s*([a-zA-Z][a-zA-Z0-9:-]*)\b")
+_TABLE_TAG_HINTS: tuple[str, ...] = (
+    "<table",
+    "</table",
+    "<thead",
+    "</thead",
+    "<tbody",
+    "</tbody",
+    "<tr",
+    "</tr",
+    "<th",
+    "</th",
+    "<td",
+    "</td",
+)
+_NOTE_ARTIFACT_HINTS: tuple[str, ...] = (
+    "image contains",
+    "image shows",
+    "placeholder",
+    "actual image",
+    "replace it with",
+    "cannot be represented in markdown",
+    "cannot be rendered in markdown",
+    "text content has been fully extracted",
+    "for illustrative purposes",
+    "actual image url",
+    "base64",
+    "visual styling element",
+    "fictional",
+    "this transcription is",
+    "no additional text or structured data",
+)
 
 
 def _has_unclosed_table_markup(text: str) -> bool:
@@ -225,6 +263,134 @@ def _force_close_unclosed_table_markup(text: str) -> str:
     if not suffix:
         return content
     return content.rstrip() + "\n" + suffix
+
+
+def _sanitize_ocr_markdown_text(text: str) -> str:
+    content = str(text or "")
+    if not content:
+        return ""
+
+    lines = content.replace("\r\n", "\n").replace("\r", "\n").split("\n")
+    cleaned_lines: list[str] = []
+    for raw_line in lines:
+        line = html_unescape(raw_line)
+        line = _MARKDOWN_IMAGE_RE.sub("", line)
+        line = line.replace("**", "").replace("__", "")
+
+        stripped = line.strip()
+        if _is_dangling_non_table_tag_fragment(stripped):
+            continue
+        if stripped.lstrip().startswith("```"):
+            continue
+        if _MARKDOWN_HR_RE.fullmatch(stripped):
+            continue
+        if _is_llm_note_artifact_line(stripped):
+            continue
+
+        line = _strip_non_table_html_tags(line)
+        if "\n" not in line:
+            cleaned_lines.append(line.rstrip())
+            continue
+        for part in line.split("\n"):
+            cleaned_lines.append(part.rstrip())
+
+    trimmed_tail = _trim_repeated_tail_line_patterns(cleaned_lines)
+    normalized = _join_lines_with_compact_blank_runs(trimmed_tail)
+    return normalized
+
+
+def _is_llm_note_artifact_line(line: str) -> bool:
+    stripped = str(line or "").strip()
+    if not stripped:
+        return False
+    normalized = stripped.strip("*").strip()
+    lowered = normalized.lower()
+    if _TRANSCRIPTION_PREFIX_RE.match(normalized):
+        return True
+    if not _NOTE_PREFIX_RE.match(normalized):
+        return False
+    if "image" in lowered:
+        return True
+    return any(hint in lowered for hint in _NOTE_ARTIFACT_HINTS)
+
+
+def _strip_non_table_html_tags(line: str) -> str:
+    raw = str(line or "")
+    if "<" not in raw or ">" not in raw:
+        return raw
+    lowered = raw.lower()
+    if any(tag in lowered for tag in _TABLE_TAG_HINTS):
+        return raw
+
+    without_br = _HTML_BR_RE.sub("\n", raw)
+    without_comments = re.sub(r"<!--.*?-->", "", without_br)
+    return _HTML_TAG_RE.sub("", without_comments)
+
+
+def _is_dangling_non_table_tag_fragment(line: str) -> bool:
+    stripped = str(line or "").strip()
+    if not stripped or not stripped.startswith("<") or ">" in stripped:
+        return False
+    match = _TAG_FRAGMENT_START_RE.match(stripped)
+    if match is None:
+        return False
+    tag_name = str(match.group(1) or "").lower()
+    return tag_name not in _TABLE_TAGS
+
+
+def _trim_repeated_tail_line_patterns(
+    lines: list[str],
+    *,
+    max_window: int = 3,
+    min_repeats: int = 5,
+    keep_repeats: int = 2,
+) -> list[str]:
+    if not lines:
+        return []
+
+    out = list(lines)
+    for window in range(1, max_window + 1):
+        if len(out) < (window * min_repeats):
+            continue
+        pattern = out[-window:]
+        if not pattern or any(not _is_tail_pattern_candidate(line) for line in pattern):
+            continue
+
+        repeats = 1
+        cursor = len(out) - (2 * window)
+        while cursor >= 0 and out[cursor : cursor + window] == pattern:
+            repeats += 1
+            cursor -= window
+
+        if repeats < min_repeats:
+            continue
+
+        keep_start = len(out) - (repeats * window)
+        keep_len = keep_repeats * window
+        return out[: keep_start + keep_len]
+
+    return out
+
+
+def _is_tail_pattern_candidate(line: str) -> bool:
+    stripped = str(line or "").strip()
+    if not stripped:
+        return False
+    return len(stripped) <= 48
+
+
+def _join_lines_with_compact_blank_runs(lines: list[str]) -> str:
+    out: list[str] = []
+    blank_run = 0
+    for line in lines:
+        if not line.strip():
+            blank_run += 1
+            if blank_run <= 1:
+                out.append("")
+            continue
+        blank_run = 0
+        out.append(line.rstrip())
+    return "\n".join(out).strip()
 
 
 def _decode_base64_image_payload(image_base64: str) -> bytes:
@@ -1159,7 +1325,12 @@ def pdf_to_html(
 
         selected = _select_best_pass_outcome(primary=primary_outcome, retry=retry_outcome)
         merged_text = selected.merged_text
-        page = page_from_ocr_markdown(page_number=page_number, markdown=merged_text)
+        normalized_text = _sanitize_ocr_markdown_text(merged_text)
+        normalized_text = _force_close_unclosed_table_markup(normalized_text)
+        if not normalized_text and merged_text.strip():
+            normalized_text = merged_text
+
+        page = page_from_ocr_markdown(page_number=page_number, markdown=normalized_text)
         page = _apply_page_postprocess(
             page=page,
             settings=settings,
@@ -1168,7 +1339,7 @@ def pdf_to_html(
             table_likelihood=primary_plan.table_likelihood,
         )
         section_html = render_page_html(page)
-        return page, section_html, merged_text
+        return page, section_html, normalized_text
 
     executor = ThreadPoolExecutor(max_workers=max_workers)
     should_wait_on_shutdown = True

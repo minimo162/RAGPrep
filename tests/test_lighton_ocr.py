@@ -64,6 +64,19 @@ def test_lighton_ocr_posts_openai_compatible_payload(monkeypatch: pytest.MonkeyP
     assert "messages" in payload
     assert capture["url"] == "http://127.0.0.1:8080/v1/chat/completions"
 
+    messages = payload.get("messages")
+    assert isinstance(messages, list) and messages
+    first = messages[0]
+    assert isinstance(first, dict)
+    content = first.get("content")
+    assert isinstance(content, list) and content
+    first_item = content[0]
+    assert isinstance(first_item, dict)
+    assert first_item.get("type") == "text"
+    text_prompt = str(first_item.get("text") or "")
+    assert "return only extracted content" in text_prompt.lower()
+    assert "do not add explanations" in text_prompt.lower()
+
 
 def test_lighton_ocr_reads_list_content(monkeypatch: pytest.MonkeyPatch) -> None:
     settings = get_settings()
