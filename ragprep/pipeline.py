@@ -550,6 +550,112 @@ def _correct_text_blocks_locally_with_pymupdf(
     return Page(page_number=page.page_number, blocks=tuple(updated_blocks))
 
 
+def _correct_table_blocks_locally_with_pymupdf(
+    *,
+    page: Page,
+    pymupdf_words: list[Word],
+    min_grid_confidence: float = 0.30,
+) -> Page:
+    if not pymupdf_words:
+        return page
+
+    updated_blocks = list(page.blocks)
+    changed_tables = 0
+    reference_rows_by_col_count: dict[int, tuple[tuple[str, ...], ...] | None] = {}
+
+    for index, block in enumerate(updated_blocks):
+        if not isinstance(block, Table):
+            continue
+        if block.grid is None:
+            continue
+
+        source_rows = tuple(tuple(str(cell) for cell in row) for row in block.grid)
+        if not source_rows:
+            continue
+        column_count = max((len(row) for row in source_rows), default=0)
+        if column_count <= 0:
+            continue
+
+        if column_count not in reference_rows_by_col_count:
+            grid_result = build_table_grid(pymupdf_words, column_count=column_count)
+            if (
+                not grid_result.ok
+                or grid_result.grid is None
+                or grid_result.confidence < float(min_grid_confidence)
+            ):
+                reference_rows_by_col_count[column_count] = None
+            else:
+                reference_rows_by_col_count[column_count] = tuple(
+                    tuple(str(cell) for cell in row) for row in grid_result.grid.rows
+                )
+
+        reference_rows = reference_rows_by_col_count[column_count]
+        if reference_rows is None:
+            continue
+        if len(reference_rows) != len(source_rows):
+            continue
+
+        changed_cells = 0
+        next_rows: list[tuple[str, ...]] = []
+        for row_index, source_row in enumerate(source_rows):
+            source_padded = source_row + ("",) * (column_count - len(source_row))
+            reference_row = reference_rows[row_index]
+            reference_padded = reference_row + ("",) * (column_count - len(reference_row))
+            next_row = list(source_padded)
+
+            for col_index in range(column_count):
+                source_cell = normalize_extracted_text(source_padded[col_index]).strip()
+                reference_cell = normalize_extracted_text(reference_padded[col_index]).strip()
+                if not source_cell or not reference_cell:
+                    continue
+
+                merged_cell, _ = merge_ocr_with_pymupdf(
+                    source_cell,
+                    reference_cell,
+                )
+                if merged_cell == source_cell:
+                    merged_fallback, _ = merge_ocr_with_pymupdf(
+                        source_cell,
+                        reference_cell,
+                        policy="aggressive",
+                        max_changed_ratio=0.45,
+                    )
+                    if merged_fallback != source_cell:
+                        merged_cell = merged_fallback
+                if merged_cell == source_cell:
+                    continue
+                if not _is_safe_table_cell_merge(ocr_cell=source_cell, merged_cell=merged_cell):
+                    continue
+
+                next_row[col_index] = merged_cell
+                changed_cells += 1
+
+            next_rows.append(tuple(next_row))
+
+        if changed_cells <= 0:
+            continue
+
+        new_grid = tuple(next_rows)
+        updated_blocks[index] = Table(
+            text="\n".join("\t".join(row) for row in new_grid),
+            grid=new_grid,
+            cells=block.cells,
+        )
+        changed_tables += 1
+
+    if changed_tables <= 0:
+        return page
+    return Page(page_number=page.page_number, blocks=tuple(updated_blocks))
+
+
+def _is_safe_table_cell_merge(*, ocr_cell: str, merged_cell: str) -> bool:
+    if "\n" in merged_cell or "\r" in merged_cell:
+        return False
+    if "|" in merged_cell and "|" not in ocr_cell:
+        return False
+    return True
+
+
 def _extract_pymupdf_preface_for_table_page(pymupdf_text: str) -> str:
     lines = [line.strip() for line in pymupdf_text.splitlines()]
     preface: list[str] = []
@@ -678,6 +784,10 @@ def pdf_to_html(
         page = _correct_text_blocks_locally_with_pymupdf(
             page=page,
             pymupdf_text=pymupdf_text,
+        )
+        page = _correct_table_blocks_locally_with_pymupdf(
+            page=page,
+            pymupdf_words=pymupdf_words,
         )
         if pymupdf_words:
             fallback_table = _best_table_from_pymupdf_words(pymupdf_words)
