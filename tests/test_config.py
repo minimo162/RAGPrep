@@ -62,3 +62,18 @@ def test_lighton_n_gpu_layers_rejects_less_than_minus_one(
     monkeypatch.setenv("RAGPREP_LIGHTON_N_GPU_LAYERS", "-2")
     with pytest.raises(ValueError, match="RAGPREP_LIGHTON_N_GPU_LAYERS"):
         config.get_settings()
+
+
+def test_recommended_lighton_defaults_are_applied_when_unset(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("RAGPREP_LIGHTON_START_TIMEOUT_SECONDS", raising=False)
+    monkeypatch.delenv("RAGPREP_LIGHTON_REQUEST_TIMEOUT_SECONDS", raising=False)
+    monkeypatch.delenv("RAGPREP_LIGHTON_PAGE_CONCURRENCY", raising=False)
+    monkeypatch.delenv("RAGPREP_LIGHTON_PARALLEL", raising=False)
+
+    settings = config.get_settings()
+    assert settings.lighton_start_timeout_seconds == 300
+    assert settings.lighton_request_timeout_seconds == 600
+    assert settings.lighton_page_concurrency == 1
+    assert settings.lighton_parallel == 1

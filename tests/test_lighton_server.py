@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import io
+import os
 import subprocess
 from pathlib import Path
 from typing import Any
@@ -71,11 +72,73 @@ def test_resolve_llama_server_executable_requires_binary(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.delenv("RAGPREP_LLAMA_SERVER_PATH", raising=False)
-    monkeypatch.setattr(lighton_server.shutil, "which", lambda _name: None)
+    monkeypatch.setattr(lighton_server, "_auto_discover_llama_server_executable", lambda _s: None)
+    monkeypatch.setattr(lighton_server, "_auto_install_llama_server_executable", lambda _s: None)
     settings = get_settings()
 
     with pytest.raises(RuntimeError, match="llama-server not found"):
         _ = lighton_server._resolve_llama_server_executable(settings)
+
+
+def test_resolve_llama_server_executable_auto_detects_and_sets_env(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    discovered = tmp_path / "llama-server.exe"
+    discovered.write_bytes(b"")
+    monkeypatch.delenv("RAGPREP_LLAMA_SERVER_PATH", raising=False)
+    monkeypatch.setattr(
+        lighton_server,
+        "_auto_discover_llama_server_executable",
+        lambda _s: str(discovered),
+    )
+    settings = get_settings()
+
+    resolved = lighton_server._resolve_llama_server_executable(settings)
+    assert resolved == str(discovered)
+    assert str(os.getenv("RAGPREP_LLAMA_SERVER_PATH")) == str(discovered)
+
+
+def test_resolve_llama_server_executable_auto_installs_when_missing(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    discovered = tmp_path / "auto" / "llama-server.exe"
+    discovered.parent.mkdir(parents=True, exist_ok=True)
+    discovered.write_bytes(b"")
+    monkeypatch.delenv("RAGPREP_LLAMA_SERVER_PATH", raising=False)
+    monkeypatch.setattr(lighton_server, "_auto_discover_llama_server_executable", lambda _s: None)
+    monkeypatch.setattr(
+        lighton_server,
+        "_auto_install_llama_server_executable",
+        lambda _s: str(discovered),
+    )
+    settings = get_settings()
+
+    resolved = lighton_server._resolve_llama_server_executable(settings)
+    assert resolved == str(discovered)
+    assert str(os.getenv("RAGPREP_LLAMA_SERVER_PATH")) == str(discovered)
+
+
+def test_select_prebuilt_asset_prefers_windows_avx2() -> None:
+    assets: list[dict[str, object]] = [
+        {
+            "name": "llama-b9999-bin-win-cuda-12.4-x64.zip",
+            "browser_download_url": "https://example.com/cuda.zip",
+        },
+        {
+            "name": "llama-b9999-bin-win-avx2-x64.zip",
+            "browser_download_url": "https://example.com/avx2.zip",
+        },
+        {
+            "name": "llama-b9999-bin-win-openblas-x64.zip",
+            "browser_download_url": "https://example.com/openblas.zip",
+        },
+    ]
+
+    picked = lighton_server._select_prebuilt_asset(assets, platform_name="win32")
+    assert picked is not None
+    assert picked["name"] == "llama-b9999-bin-win-avx2-x64.zip"
 
 
 def test_start_command_contains_required_flags(
