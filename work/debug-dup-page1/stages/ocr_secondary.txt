@@ -1,0 +1,141 @@
+<table>
+  <thead>
+    <tr>
+      <th>2026年3月期中間期</th>
+      <th>△71.82</th>
+      <th>—</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>2025年3月期中間期</td>
+      <td>56.07</td>
+      <td>56.03</td>
+    </tr>
+  </tbody>
+</table>
+
+
+### （2）連結財政状態
+
+<table>
+  <thead>
+    <tr>
+      <th></th>
+      <th>総資産</th>
+      <th>純資産</th>
+      <th>自己資本比率</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td></td>
+      <td>百万円</td>
+      <td>百万円</td>
+      <td>%</td>
+    </tr>
+    <tr>
+      <td>2026年3月期中間期</td>
+      <td>4,027,895</td>
+      <td>1,758,627</td>
+      <td>43.2</td>
+    </tr>
+    <tr>
+      <td>2025年3月期</td>
+      <td>4,090,081</td>
+      <td>1,810,029</td>
+      <td>43.8</td>
+    </tr>
+  </tbody>
+</table>
+
+（参考）自己資本　2026年3月期中間期　1,740,928百万円　2025年3月期　1,792,282百万円
+
+## 2．配当の状況
+
+<table>
+  <thead>
+    <tr>
+      <th rowspan="2"></th>
+      <th colspan="5">年間配当金</th>
+    </tr>
+    <tr>
+      <th>第1四半期末</th>
+      <th>第2四半期末</th>
+      <th>第3四半期末</th>
+      <th>期末</th>
+      <th>合計</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>2025年3月期</td>
+      <td>円 縦<br>—</td>
+      <td>円 縦<br>25.00</td>
+      <td>円 縦<br>—</td>
+      <td>円 縦<br>30.00</td>
+      <td>円 縦<br>55.00</td>
+    </tr>
+    <tr>
+      <td>2026年3月期</td>
+      <td>—</td>
+      <td>25.00</td>
+      <td></td>
+      <td></td>
+      <td></td>
+    </tr>
+    <tr>
+      <td>2026年3月期（予想）</td>
+      <td></td>
+      <td></td>
+      <td>—</td>
+      <td>30.00</td>
+      <td>55.00</td>
+    </tr>
+  </tbody>
+</table>
+
+（注）直近に公表されている配当予想からの修正の有無　： 有
+
+## 3．2026年3月期の連結業績予想（2025年4月1日～2026年3月31日）
+
+（%表示は、対前期増減率）
+
+<table>
+  <thead>
+    <tr>
+      <th rowspan="2"></th>
+      <th colspan="2">売上高</th>
+      <th colspan="2">営業利益</th>
+      <th colspan="2">経常利益</th>
+      <th colspan="2">親会社株主に帰属する当期純利益</th>
+      <th rowspan="2">1株当たり当期純利益</th>
+    </tr>
+    <tr>
+      <th>百万円</th>
+      <th>%</th>
+      <th>百万円</th>
+      <th>%</th>
+      <th>百万円</th>
+      <th>%</th>
+      <th>百万円</th>
+      <th>%</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>通期</td>
+      <td>4,900,000</td>
+      <td>△2.4</td>
+      <td>50,000</td>
+      <td>△73.1</td>
+      <td>68,000</td>
+      <td>△64.0</td>
+      <td>20,000</td>
+      <td>△82.5</td>
+      <td>円 縦<br>31.71</td>
+    </tr>
+  </tbody>
+</table>
+
+（注）直近に公表されている業績予想からの修正の有無　： 有

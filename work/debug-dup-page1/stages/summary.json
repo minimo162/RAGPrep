@@ -1,0 +1,13 @@
+{
+  "ocr_raw_len": 4013,
+  "merged_len": 4013,
+  "table_merged_len": 4013,
+  "ocr_raw_has_dup_row_2026": 0,
+  "merged_has_dup_row_2026": 0,
+  "table_merged_has_dup_row_2026": 0,
+  "ocr_raw_small_table_header_count": 0,
+  "merged_small_table_header_count": 0,
+  "table_merged_small_table_header_count": 0,
+  "table_merge_applied": false,
+  "table_merge_reason": "no_table"
+}

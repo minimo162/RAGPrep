@@ -68,6 +68,11 @@ _RAW_TABLE_OPEN_RE = re.compile(r"<\s*table\b", re.IGNORECASE)
 _RAW_TABLE_CLOSE_RE = re.compile(r"</\s*table\s*>", re.IGNORECASE)
 _ESCAPED_TABLE_OPEN_RE = re.compile(r"&lt;\s*table\b", re.IGNORECASE)
 _ESCAPED_TABLE_CLOSE_RE = re.compile(r"&lt;\s*/\s*table\s*&gt;", re.IGNORECASE)
+_RAW_COMPLETE_TABLE_RE = re.compile(r"<\s*table\b.*?</\s*table\s*>", re.IGNORECASE | re.DOTALL)
+_ESCAPED_COMPLETE_TABLE_RE = re.compile(
+    r"&lt;\s*table\b.*?&lt;\s*/\s*table\s*&gt;",
+    re.IGNORECASE | re.DOTALL,
+)
 
 
 def _has_unclosed_table_markup(text: str) -> bool:
@@ -98,23 +103,53 @@ def _find_last_unclosed_table_start(text: str) -> int | None:
     return None
 
 
-def _extract_first_complete_table_tail(text: str) -> str | None:
+def _iter_complete_table_spans(text: str) -> list[tuple[int, int]]:
     content = str(text or "")
-    match_open = _RAW_TABLE_OPEN_RE.search(content)
-    if match_open is not None:
-        start = match_open.start()
-        match_close = _RAW_TABLE_CLOSE_RE.search(content, pos=start)
-        if match_close is not None:
-            return content[start:].strip()
+    raw_spans = [(m.start(), m.end()) for m in _RAW_COMPLETE_TABLE_RE.finditer(content)]
+    if raw_spans:
+        return raw_spans
+    return [(m.start(), m.end()) for m in _ESCAPED_COMPLETE_TABLE_RE.finditer(content)]
 
-    match_open = _ESCAPED_TABLE_OPEN_RE.search(content)
-    if match_open is not None:
-        start = match_open.start()
-        match_close = _ESCAPED_TABLE_CLOSE_RE.search(content, pos=start)
-        if match_close is not None:
-            return content[start:].strip()
 
-    return None
+def _compact_markup_for_prefix_match(text: str) -> str:
+    normalized = html_unescape(str(text or ""))
+    return re.sub(r"\s+", "", normalized)
+
+
+def _common_prefix_length(left: str, right: str) -> int:
+    limit = min(len(left), len(right))
+    index = 0
+    while index < limit and left[index] == right[index]:
+        index += 1
+    return index
+
+
+def _extract_best_complete_table_tail(
+    *,
+    text: str,
+    anchor_unclosed_table: str,
+) -> str | None:
+    content = str(text or "")
+    spans = _iter_complete_table_spans(content)
+    if not spans:
+        return None
+    if len(spans) == 1:
+        return content[spans[0][0] :].strip()
+
+    anchor_compact = _compact_markup_for_prefix_match(anchor_unclosed_table)
+    best_start = spans[0][0]
+    best_prefix_len = -1
+
+    for start, end in spans:
+        candidate_compact = _compact_markup_for_prefix_match(content[start:end])
+        if not candidate_compact:
+            continue
+        prefix_len = _common_prefix_length(anchor_compact, candidate_compact)
+        if prefix_len > best_prefix_len:
+            best_prefix_len = prefix_len
+            best_start = start
+
+    return content[best_start:].strip()
 
 
 def _repair_truncated_ocr_tail_with_secondary(
@@ -132,7 +167,10 @@ def _repair_truncated_ocr_tail_with_secondary(
     if not prefix:
         return ocr_text
 
-    secondary_tail = _extract_first_complete_table_tail(secondary_ocr_text)
+    secondary_tail = _extract_best_complete_table_tail(
+        text=secondary_ocr_text,
+        anchor_unclosed_table=ocr_text[cut_index:],
+    )
     if not secondary_tail:
         return ocr_text
 

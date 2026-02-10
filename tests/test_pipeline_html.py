@@ -516,3 +516,91 @@ def test_pdf_to_html_repairs_unclosed_table_with_secondary_ocr(
     assert "<td>10</td>" in html
     assert "<td>11</td>" in html
     assert "重要な後発事象" in html
+
+
+def test_pdf_to_html_secondary_tail_skips_leading_duplicate_table(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def _fake_iter_pages(
+        _pdf_bytes: bytes,
+        *,
+        dpi: int | None = None,
+        max_edge: int | None = None,
+        max_pages: int | None = None,
+        max_bytes: int | None = None,
+    ) -> tuple[int, Iterator[str]]:
+        _ = dpi, max_edge, max_pages, max_bytes
+        return 1, iter(["P1"])
+
+    primary_ocr = "\n".join(
+        [
+            "Summary",
+            "<table>",
+            "<tr><th>Label</th><th>Value</th></tr>",
+            "<tr><td>Prev</td><td>100</td></tr>",
+            "</table>",
+            "(2) Financial position",
+            "<table>",
+            "<thead>",
+            "<tr>",
+            "<th></th>",
+        ]
+    )
+    secondary_ocr = "\n".join(
+        [
+            "<table>",
+            "<thead>",
+            "<tr>",
+            "<th>2026 interim</th>",
+            "<th>-71.82</th>",
+            "<th>--</th>",
+            "</tr>",
+            "</thead>",
+            "<tbody>",
+            "<tr><td>2025 interim</td><td>56.07</td><td>56.03</td></tr>",
+            "</tbody>",
+            "</table>",
+            "### (2) Financial position",
+            "<table>",
+            "<thead>",
+            "<tr>",
+            "<th></th>",
+            "<th>Total assets</th>",
+            "<th>Net assets</th>",
+            "</tr>",
+            "</thead>",
+            "<tbody>",
+            "<tr><td>2026</td><td>400</td><td>200</td></tr>",
+            "<tr><td>2025</td><td>390</td><td>210</td></tr>",
+            "</tbody>",
+            "</table>",
+        ]
+    )
+
+    monkeypatch.setattr("ragprep.pipeline.iter_pdf_page_png_base64", _fake_iter_pages)
+    monkeypatch.setattr(
+        "ragprep.pipeline.extract_pymupdf_page_texts",
+        lambda _pdf: ["Summary\n(2) Financial position"],
+    )
+    monkeypatch.setattr("ragprep.pipeline.extract_pymupdf_page_words", lambda _pdf: [[]])
+    monkeypatch.setattr(
+        "ragprep.pipeline._crop_image_base64_to_bottom",
+        lambda _image_base64, *, top_ratio=0.45: "CROPPED",
+    )
+
+    def _fake_ocr(image_b64: str, *, settings: object) -> str:
+        _ = settings
+        if image_b64 == "P1":
+            return primary_ocr
+        if image_b64 == "CROPPED":
+            return secondary_ocr
+        return primary_ocr
+
+    monkeypatch.setattr("ragprep.pipeline.lighton_ocr.ocr_image_base64", _fake_ocr)
+
+    html = pdf_to_html(b"%PDF", full_document=False)
+    assert html.count('<table data-kind="table">') == 2
+    assert "Total assets" in html
+    assert "2026 interim" not in html
+    assert "56.07" not in html
+    assert "56.03" not in html
