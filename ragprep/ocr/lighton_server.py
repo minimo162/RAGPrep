@@ -23,6 +23,7 @@ _ACTIVE_BASE_URL: str | None = None
 _AUTO_DOWNLOAD_ENV = "RAGPREP_LLAMA_SERVER_AUTO_DOWNLOAD"
 _INSTALL_DIR_ENV = "RAGPREP_LLAMA_SERVER_INSTALL_DIR"
 _GITHUB_RELEASE_API = "https://api.github.com/repos/ggml-org/llama.cpp/releases/latest"
+_MMPROJ_FALLBACK_FILES: tuple[str, ...] = ("mmproj-F32.gguf",)
 
 
 @dataclass(frozen=True)
@@ -53,33 +54,37 @@ def ensure_server_base_url(settings: Settings) -> str:
             _ACTIVE_BASE_URL = base_url
             return base_url
 
-        assets = ensure_lighton_assets(settings)
+        assets_by_mmproj, asset_errors = _resolve_assets_by_mmproj(settings)
+        if not assets_by_mmproj:
+            joined = "; ".join(asset_errors) if asset_errors else "unknown error"
+            raise RuntimeError(f"Failed to resolve LightOn assets. {joined}")
         executable = _resolve_llama_server_executable(settings)
         attempts = _build_attempts(settings)
 
-        errors: list[str] = []
-        for attempt in attempts:
-            process = _start_llama_server_process(
-                executable=executable,
-                assets=assets,
-                settings=settings,
-                attempt=attempt,
-            )
-            ok, error = _wait_for_server_ready(
-                process=process,
-                base_url=base_url,
-                timeout_seconds=float(settings.lighton_start_timeout_seconds),
-            )
-            if ok:
-                _ACTIVE_PROCESS = process
-                _ACTIVE_BASE_URL = base_url
-                return base_url
+        errors: list[str] = list(asset_errors)
+        for mmproj_name, assets in assets_by_mmproj:
+            for attempt in attempts:
+                process = _start_llama_server_process(
+                    executable=executable,
+                    assets=assets,
+                    settings=settings,
+                    attempt=attempt,
+                )
+                ok, error = _wait_for_server_ready(
+                    process=process,
+                    base_url=base_url,
+                    timeout_seconds=float(settings.lighton_start_timeout_seconds),
+                )
+                if ok:
+                    _ACTIVE_PROCESS = process
+                    _ACTIVE_BASE_URL = base_url
+                    return base_url
 
-            _terminate_process(process)
-            if error is not None:
-                errors.append(f"{attempt.name}: {error}")
-            else:
-                errors.append(f"{attempt.name}: unknown error")
+                _terminate_process(process)
+                if error is not None:
+                    errors.append(f"mmproj={mmproj_name}/{attempt.name}: {error}")
+                else:
+                    errors.append(f"mmproj={mmproj_name}/{attempt.name}: unknown error")
 
         joined = "; ".join(errors) if errors else "unknown error"
         raise RuntimeError(f"Failed to start llama-server after retries. {joined}")
@@ -87,6 +92,37 @@ def ensure_server_base_url(settings: Settings) -> str:
 
 def prewarm_lighton_server(*, settings: Settings) -> None:
     _ = ensure_server_base_url(settings)
+
+
+def _build_mmproj_candidates(settings: Settings) -> list[str]:
+    unique: list[str] = []
+    seen: set[str] = set()
+    candidates = [str(settings.lighton_mmproj_file or "").strip(), *_MMPROJ_FALLBACK_FILES]
+    for raw in candidates:
+        name = str(raw or "").strip()
+        if not name:
+            continue
+        key = name.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        unique.append(name)
+    return unique
+
+
+def _resolve_assets_by_mmproj(
+    settings: Settings,
+) -> tuple[list[tuple[str, LightOnAssetPaths]], list[str]]:
+    assets_by_mmproj: list[tuple[str, LightOnAssetPaths]] = []
+    errors: list[str] = []
+    for mmproj_name in _build_mmproj_candidates(settings):
+        try:
+            assets = ensure_lighton_assets(settings, mmproj_file=mmproj_name)
+        except Exception as exc:  # noqa: BLE001
+            errors.append(f"mmproj={mmproj_name}: {exc}")
+            continue
+        assets_by_mmproj.append((mmproj_name, assets))
+    return assets_by_mmproj, errors
 
 
 def _build_attempts(settings: Settings) -> list[_StartAttempt]:

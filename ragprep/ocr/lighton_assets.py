@@ -21,10 +21,17 @@ class LightOnAssetPaths:
     mmproj_path: Path
 
 
-def ensure_lighton_assets(settings: Settings) -> LightOnAssetPaths:
+def ensure_lighton_assets(
+    settings: Settings,
+    *,
+    mmproj_file: str | None = None,
+) -> LightOnAssetPaths:
     root = Path(settings.lighton_model_dir).expanduser()
     model_path = root / settings.lighton_model_file
-    mmproj_path = root / settings.lighton_mmproj_file
+    mmproj_name = str(mmproj_file or settings.lighton_mmproj_file).strip()
+    if not mmproj_name:
+        raise RuntimeError("LightOn mmproj filename must be non-empty.")
+    mmproj_path = root / mmproj_name
     root.mkdir(parents=True, exist_ok=True)
 
     missing = [p for p in (model_path, mmproj_path) if not p.exists()]

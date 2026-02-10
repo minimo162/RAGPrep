@@ -169,6 +169,7 @@ def test_pdf_to_html_fails_fast_without_waiting_all_workers(
 
 
 def test_pdf_to_html_uses_lighton_render_settings(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("RAGPREP_LIGHTON_FAST_PASS", "0")
     monkeypatch.setenv("RAGPREP_LIGHTON_RENDER_DPI", "123")
     monkeypatch.setenv("RAGPREP_LIGHTON_RENDER_MAX_EDGE", "456")
 
@@ -456,6 +457,8 @@ def test_pdf_to_html_preface_typo_fix_is_localized(
 def test_pdf_to_html_repairs_unclosed_table_with_secondary_ocr(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    monkeypatch.setenv("RAGPREP_LIGHTON_SECONDARY_TABLE_REPAIR", "1")
+
     def _fake_iter_pages(
         _pdf_bytes: bytes,
         *,
@@ -521,6 +524,8 @@ def test_pdf_to_html_repairs_unclosed_table_with_secondary_ocr(
 def test_pdf_to_html_secondary_tail_skips_leading_duplicate_table(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    monkeypatch.setenv("RAGPREP_LIGHTON_SECONDARY_TABLE_REPAIR", "1")
+
     def _fake_iter_pages(
         _pdf_bytes: bytes,
         *,

@@ -35,6 +35,23 @@ ENV_LIGHTON_PAGE_CONCURRENCY: Final[str] = "RAGPREP_LIGHTON_PAGE_CONCURRENCY"
 ENV_LIGHTON_RENDER_DPI: Final[str] = "RAGPREP_LIGHTON_RENDER_DPI"
 ENV_LIGHTON_RENDER_MAX_EDGE: Final[str] = "RAGPREP_LIGHTON_RENDER_MAX_EDGE"
 ENV_LIGHTON_MERGE_POLICY: Final[str] = "RAGPREP_LIGHTON_MERGE_POLICY"
+ENV_LIGHTON_FAST_PASS: Final[str] = "RAGPREP_LIGHTON_FAST_PASS"
+ENV_LIGHTON_FAST_RENDER_DPI: Final[str] = "RAGPREP_LIGHTON_FAST_RENDER_DPI"
+ENV_LIGHTON_FAST_RENDER_MAX_EDGE: Final[str] = "RAGPREP_LIGHTON_FAST_RENDER_MAX_EDGE"
+ENV_LIGHTON_FAST_RETRY: Final[str] = "RAGPREP_LIGHTON_FAST_RETRY"
+ENV_LIGHTON_SECONDARY_TABLE_REPAIR: Final[str] = "RAGPREP_LIGHTON_SECONDARY_TABLE_REPAIR"
+ENV_LIGHTON_RETRY_RENDER_DPI: Final[str] = "RAGPREP_LIGHTON_RETRY_RENDER_DPI"
+ENV_LIGHTON_RETRY_RENDER_MAX_EDGE: Final[str] = "RAGPREP_LIGHTON_RETRY_RENDER_MAX_EDGE"
+ENV_LIGHTON_RETRY_MIN_QUALITY: Final[str] = "RAGPREP_LIGHTON_RETRY_MIN_QUALITY"
+ENV_LIGHTON_RETRY_QUALITY_GAP: Final[str] = "RAGPREP_LIGHTON_RETRY_QUALITY_GAP"
+ENV_LIGHTON_RETRY_MIN_PYM_TEXT_LEN: Final[str] = "RAGPREP_LIGHTON_RETRY_MIN_PYM_TEXT_LEN"
+ENV_LIGHTON_FAST_NON_TABLE_MAX_EDGE: Final[str] = "RAGPREP_LIGHTON_FAST_NON_TABLE_MAX_EDGE"
+ENV_LIGHTON_FAST_TABLE_LIKELIHOOD_THRESHOLD: Final[str] = (
+    "RAGPREP_LIGHTON_FAST_TABLE_LIKELIHOOD_THRESHOLD"
+)
+ENV_LIGHTON_FAST_MAX_TOKENS_TEXT: Final[str] = "RAGPREP_LIGHTON_FAST_MAX_TOKENS_TEXT"
+ENV_LIGHTON_FAST_MAX_TOKENS_TABLE: Final[str] = "RAGPREP_LIGHTON_FAST_MAX_TOKENS_TABLE"
+ENV_LIGHTON_FAST_POSTPROCESS_MODE: Final[str] = "RAGPREP_LIGHTON_FAST_POSTPROCESS_MODE"
 
 DEFAULT_MAX_UPLOAD_BYTES: Final[int] = 10 * 1024 * 1024
 DEFAULT_MAX_PAGES: Final[int] = 50
@@ -56,18 +73,34 @@ DEFAULT_LIGHTON_START_TIMEOUT_SECONDS: Final[int] = 300
 DEFAULT_LIGHTON_REQUEST_TIMEOUT_SECONDS: Final[int] = 600
 DEFAULT_LIGHTON_CTX_SIZE: Final[int] = 8192
 DEFAULT_LIGHTON_N_GPU_LAYERS: Final[int] = -1
-DEFAULT_LIGHTON_PARALLEL: Final[int] = 1
+DEFAULT_LIGHTON_PARALLEL: Final[int] = 2
 DEFAULT_LIGHTON_THREADS: Final[int] = max(1, int(os.cpu_count() or 4))
 DEFAULT_LIGHTON_THREADS_BATCH: Final[int] = max(1, int(os.cpu_count() or 4))
 DEFAULT_LIGHTON_FLASH_ATTN: Final[bool] = True
 DEFAULT_LIGHTON_MAX_TOKENS: Final[int] = 8192
 DEFAULT_LIGHTON_TEMPERATURE: Final[float] = 0.0
 DEFAULT_LIGHTON_TOP_P: Final[float] = 1.0
-DEFAULT_LIGHTON_PAGE_CONCURRENCY: Final[int] = 1
+DEFAULT_LIGHTON_PAGE_CONCURRENCY: Final[int] = 2
 DEFAULT_LIGHTON_RENDER_DPI: Final[int] = 220
 DEFAULT_LIGHTON_RENDER_MAX_EDGE: Final[int] = 1280
 DEFAULT_LIGHTON_MERGE_POLICY: Final[str] = "strict"
+DEFAULT_LIGHTON_FAST_PASS: Final[bool] = True
+DEFAULT_LIGHTON_FAST_RENDER_DPI: Final[int] = 200
+DEFAULT_LIGHTON_FAST_RENDER_MAX_EDGE: Final[int] = 1100
+DEFAULT_LIGHTON_FAST_RETRY: Final[bool] = False
+DEFAULT_LIGHTON_SECONDARY_TABLE_REPAIR: Final[bool] = False
+DEFAULT_LIGHTON_RETRY_RENDER_DPI: Final[int] = 220
+DEFAULT_LIGHTON_RETRY_RENDER_MAX_EDGE: Final[int] = 1280
+DEFAULT_LIGHTON_RETRY_MIN_QUALITY: Final[float] = 0.40
+DEFAULT_LIGHTON_RETRY_QUALITY_GAP: Final[float] = 0.22
+DEFAULT_LIGHTON_RETRY_MIN_PYM_TEXT_LEN: Final[int] = 80
+DEFAULT_LIGHTON_FAST_NON_TABLE_MAX_EDGE: Final[int] = 960
+DEFAULT_LIGHTON_FAST_TABLE_LIKELIHOOD_THRESHOLD: Final[float] = 0.60
+DEFAULT_LIGHTON_FAST_MAX_TOKENS_TEXT: Final[int] = 4096
+DEFAULT_LIGHTON_FAST_MAX_TOKENS_TABLE: Final[int] = 8192
+DEFAULT_LIGHTON_FAST_POSTPROCESS_MODE: Final[str] = "light"
 SUPPORTED_LIGHTON_MERGE_POLICIES: Final[tuple[str, ...]] = ("strict", "aggressive")
+SUPPORTED_LIGHTON_FAST_POSTPROCESS_MODES: Final[tuple[str, ...]] = ("full", "light", "off")
 
 
 @dataclass(frozen=True)
@@ -104,6 +137,21 @@ class Settings:
     lighton_render_dpi: int
     lighton_render_max_edge: int
     lighton_merge_policy: str
+    lighton_fast_pass: bool
+    lighton_fast_render_dpi: int
+    lighton_fast_render_max_edge: int
+    lighton_fast_retry: bool
+    lighton_secondary_table_repair: bool
+    lighton_retry_render_dpi: int
+    lighton_retry_render_max_edge: int
+    lighton_retry_min_quality: float
+    lighton_retry_quality_gap: float
+    lighton_retry_min_pym_text_len: int
+    lighton_fast_non_table_max_edge: int
+    lighton_fast_table_likelihood_threshold: float
+    lighton_fast_max_tokens_text: int
+    lighton_fast_max_tokens_table: int
+    lighton_fast_postprocess_mode: str
 
 
 def _get_positive_int(name: str, default: int) -> int:
@@ -204,6 +252,19 @@ def _get_lighton_merge_policy() -> str:
     return value
 
 
+def _get_lighton_fast_postprocess_mode() -> str:
+    raw = os.getenv(ENV_LIGHTON_FAST_POSTPROCESS_MODE)
+    if raw is None or not raw.strip():
+        return DEFAULT_LIGHTON_FAST_POSTPROCESS_MODE
+    value = raw.strip().lower()
+    if value not in SUPPORTED_LIGHTON_FAST_POSTPROCESS_MODES:
+        raise ValueError(
+            f"{ENV_LIGHTON_FAST_POSTPROCESS_MODE} must be one of "
+            f"{', '.join(SUPPORTED_LIGHTON_FAST_POSTPROCESS_MODES)}, got: {raw!r}"
+        )
+    return value
+
+
 def get_settings() -> Settings:
     ocr_backend = _get_pdf_backend()
     return Settings(
@@ -261,4 +322,59 @@ def get_settings() -> Settings:
             DEFAULT_LIGHTON_RENDER_MAX_EDGE,
         ),
         lighton_merge_policy=_get_lighton_merge_policy(),
+        lighton_fast_pass=_get_bool(ENV_LIGHTON_FAST_PASS, DEFAULT_LIGHTON_FAST_PASS),
+        lighton_fast_render_dpi=_get_positive_int(
+            ENV_LIGHTON_FAST_RENDER_DPI,
+            DEFAULT_LIGHTON_FAST_RENDER_DPI,
+        ),
+        lighton_fast_render_max_edge=_get_positive_int(
+            ENV_LIGHTON_FAST_RENDER_MAX_EDGE,
+            DEFAULT_LIGHTON_FAST_RENDER_MAX_EDGE,
+        ),
+        lighton_fast_retry=_get_bool(ENV_LIGHTON_FAST_RETRY, DEFAULT_LIGHTON_FAST_RETRY),
+        lighton_secondary_table_repair=_get_bool(
+            ENV_LIGHTON_SECONDARY_TABLE_REPAIR,
+            DEFAULT_LIGHTON_SECONDARY_TABLE_REPAIR,
+        ),
+        lighton_retry_render_dpi=_get_positive_int(
+            ENV_LIGHTON_RETRY_RENDER_DPI,
+            DEFAULT_LIGHTON_RETRY_RENDER_DPI,
+        ),
+        lighton_retry_render_max_edge=_get_positive_int(
+            ENV_LIGHTON_RETRY_RENDER_MAX_EDGE,
+            DEFAULT_LIGHTON_RETRY_RENDER_MAX_EDGE,
+        ),
+        lighton_retry_min_quality=_get_float_with_min(
+            ENV_LIGHTON_RETRY_MIN_QUALITY,
+            DEFAULT_LIGHTON_RETRY_MIN_QUALITY,
+            min_value=0.0,
+        ),
+        lighton_retry_quality_gap=_get_float_with_min(
+            ENV_LIGHTON_RETRY_QUALITY_GAP,
+            DEFAULT_LIGHTON_RETRY_QUALITY_GAP,
+            min_value=0.0,
+        ),
+        lighton_retry_min_pym_text_len=_get_positive_int(
+            ENV_LIGHTON_RETRY_MIN_PYM_TEXT_LEN,
+            DEFAULT_LIGHTON_RETRY_MIN_PYM_TEXT_LEN,
+        ),
+        lighton_fast_non_table_max_edge=_get_int_with_min(
+            ENV_LIGHTON_FAST_NON_TABLE_MAX_EDGE,
+            DEFAULT_LIGHTON_FAST_NON_TABLE_MAX_EDGE,
+            min_value=0,
+        ),
+        lighton_fast_table_likelihood_threshold=_get_float_with_min(
+            ENV_LIGHTON_FAST_TABLE_LIKELIHOOD_THRESHOLD,
+            DEFAULT_LIGHTON_FAST_TABLE_LIKELIHOOD_THRESHOLD,
+            min_value=0.0,
+        ),
+        lighton_fast_max_tokens_text=_get_positive_int(
+            ENV_LIGHTON_FAST_MAX_TOKENS_TEXT,
+            DEFAULT_LIGHTON_FAST_MAX_TOKENS_TEXT,
+        ),
+        lighton_fast_max_tokens_table=_get_positive_int(
+            ENV_LIGHTON_FAST_MAX_TOKENS_TABLE,
+            DEFAULT_LIGHTON_FAST_MAX_TOKENS_TABLE,
+        ),
+        lighton_fast_postprocess_mode=_get_lighton_fast_postprocess_mode(),
     )

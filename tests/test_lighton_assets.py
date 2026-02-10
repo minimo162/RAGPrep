@@ -71,3 +71,33 @@ def test_ensure_lighton_assets_rejects_missing_when_auto_download_disabled(
 
     with pytest.raises(RuntimeError, match="auto-download is disabled"):
         _ = lighton_assets.ensure_lighton_assets(settings)
+
+
+def test_ensure_lighton_assets_accepts_mmproj_override(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setenv("RAGPREP_LIGHTON_MODEL_DIR", str(tmp_path))
+    monkeypatch.setenv("RAGPREP_LIGHTON_AUTO_DOWNLOAD", "1")
+    settings = get_settings()
+    (tmp_path / settings.lighton_model_file).write_bytes(b"model")
+
+    downloaded: list[str] = []
+
+    def _fake_download_hf_file(
+        *,
+        repo_id: str,
+        filename: str,
+        target_path: Path,
+        token: str | None,
+        timeout_seconds: float,
+    ) -> None:
+        _ = repo_id, token, timeout_seconds
+        downloaded.append(filename)
+        target_path.write_bytes(b"ok")
+
+    monkeypatch.setattr(lighton_assets, "_download_hf_file", _fake_download_hf_file)
+
+    result = lighton_assets.ensure_lighton_assets(settings, mmproj_file="mmproj-F32.gguf")
+    assert result.mmproj_path.name == "mmproj-F32.gguf"
+    assert "mmproj-F32.gguf" in downloaded

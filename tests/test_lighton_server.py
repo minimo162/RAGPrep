@@ -234,7 +234,7 @@ def test_ensure_server_retries_and_falls_back_to_cpu(
     monkeypatch.setattr(
         lighton_server,
         "ensure_lighton_assets",
-        lambda _s: _asset_paths(tmp_path),
+        lambda _s, **_kwargs: _asset_paths(tmp_path),
     )
     monkeypatch.setattr(
         lighton_server,
@@ -277,7 +277,7 @@ def test_ensure_server_raises_when_all_attempts_fail(
     monkeypatch.setattr(
         lighton_server,
         "ensure_lighton_assets",
-        lambda _s: _asset_paths(tmp_path),
+        lambda _s, **_kwargs: _asset_paths(tmp_path),
     )
     monkeypatch.setattr(
         lighton_server,
@@ -296,4 +296,136 @@ def test_ensure_server_raises_when_all_attempts_fail(
     )
 
     with pytest.raises(RuntimeError, match="Failed to start llama-server"):
+        _ = lighton_server.ensure_server_base_url(settings)
+
+
+def test_build_mmproj_candidates_includes_fallback_once(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("RAGPREP_LIGHTON_MMPROJ_FILE", "mmproj-BF16.gguf")
+    settings = get_settings()
+
+    candidates = lighton_server._build_mmproj_candidates(settings)
+    assert candidates == ["mmproj-BF16.gguf", "mmproj-F32.gguf"]
+
+
+def test_ensure_server_tries_mmproj_fallback_when_primary_fails(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setenv("RAGPREP_LIGHTON_MMPROJ_FILE", "mmproj-BF16.gguf")
+    settings = get_settings()
+    tried_mmproj: list[str] = []
+
+    monkeypatch.setattr(lighton_server, "_ACTIVE_PROCESS", None)
+    monkeypatch.setattr(lighton_server, "_ACTIVE_BASE_URL", None)
+    monkeypatch.setattr(lighton_server, "_is_server_healthy", lambda _base: False)
+    monkeypatch.setattr(
+        lighton_server,
+        "_resolve_llama_server_executable",
+        lambda _s: "llama-server",
+    )
+    monkeypatch.setattr(
+        lighton_server,
+        "_build_attempts",
+        lambda _s: [
+            lighton_server._StartAttempt(
+                name="gpu-aggressive",
+                ngl=0,
+                parallel=1,
+                flash_attn=False,
+            )
+        ],
+    )
+
+    def _fake_assets(
+        _settings: object,
+        *,
+        mmproj_file: str | None = None,
+    ) -> LightOnAssetPaths:
+        assert mmproj_file is not None
+        model = tmp_path / "model.gguf"
+        mmproj_path = tmp_path / mmproj_file
+        model.write_bytes(b"m")
+        mmproj_path.write_bytes(b"p")
+        return LightOnAssetPaths(model_path=model, mmproj_path=mmproj_path)
+
+    def _fake_start_llama_server_process(
+        *,
+        executable: str,
+        assets: LightOnAssetPaths,
+        settings: object,
+        attempt: lighton_server._StartAttempt,
+    ) -> _DummyProcess:
+        _ = executable, settings, attempt
+        tried_mmproj.append(assets.mmproj_path.name)
+        return _DummyProcess(exit_code=None)
+
+    outcomes = iter([(False, "bf16 failed"), (True, None)])
+    monkeypatch.setattr(lighton_server, "ensure_lighton_assets", _fake_assets)
+    monkeypatch.setattr(
+        lighton_server,
+        "_start_llama_server_process",
+        _fake_start_llama_server_process,
+    )
+    monkeypatch.setattr(lighton_server, "_wait_for_server_ready", lambda **_kwargs: next(outcomes))
+
+    base = lighton_server.ensure_server_base_url(settings)
+    assert base == f"http://{settings.lighton_server_host}:{settings.lighton_server_port}"
+    assert tried_mmproj == ["mmproj-BF16.gguf", "mmproj-F32.gguf"]
+
+
+def test_ensure_server_error_includes_mmproj_names_when_all_fail(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setenv("RAGPREP_LIGHTON_MMPROJ_FILE", "mmproj-BF16.gguf")
+    settings = get_settings()
+
+    monkeypatch.setattr(lighton_server, "_ACTIVE_PROCESS", None)
+    monkeypatch.setattr(lighton_server, "_ACTIVE_BASE_URL", None)
+    monkeypatch.setattr(lighton_server, "_is_server_healthy", lambda _base: False)
+    monkeypatch.setattr(
+        lighton_server,
+        "_resolve_llama_server_executable",
+        lambda _s: "llama-server",
+    )
+    monkeypatch.setattr(
+        lighton_server,
+        "_build_attempts",
+        lambda _s: [
+            lighton_server._StartAttempt(
+                name="gpu-aggressive",
+                ngl=0,
+                parallel=1,
+                flash_attn=False,
+            )
+        ],
+    )
+
+    def _fake_assets(
+        _settings: object,
+        *,
+        mmproj_file: str | None = None,
+    ) -> LightOnAssetPaths:
+        assert mmproj_file is not None
+        model = tmp_path / "model.gguf"
+        mmproj_path = tmp_path / mmproj_file
+        model.write_bytes(b"m")
+        mmproj_path.write_bytes(b"p")
+        return LightOnAssetPaths(model_path=model, mmproj_path=mmproj_path)
+
+    monkeypatch.setattr(lighton_server, "ensure_lighton_assets", _fake_assets)
+    monkeypatch.setattr(
+        lighton_server,
+        "_start_llama_server_process",
+        lambda **_kwargs: _DummyProcess(exit_code=None),
+    )
+    monkeypatch.setattr(
+        lighton_server,
+        "_wait_for_server_ready",
+        lambda **_kwargs: (False, "health check timed out"),
+    )
+
+    with pytest.raises(RuntimeError, match="mmproj=mmproj-BF16.gguf"):
         _ = lighton_server.ensure_server_base_url(settings)

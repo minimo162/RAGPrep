@@ -7,16 +7,16 @@ import io
 import re
 from collections.abc import Callable
 from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from enum import Enum
 from html import unescape as html_unescape
 from pathlib import Path
 
-from ragprep.config import get_settings
+from ragprep.config import Settings, get_settings
 from ragprep.html_render import render_document_html, render_page_html, wrap_html_document
 from ragprep.ocr import lighton_ocr
 from ragprep.ocr_html import page_from_ocr_markdown
-from ragprep.pdf_render import iter_pdf_page_png_base64
+from ragprep.pdf_render import iter_pdf_page_png_base64, render_pdf_page_image
 from ragprep.pdf_text import (
     Word,
     estimate_table_likelihood,
@@ -48,6 +48,21 @@ HtmlProgressCallback = Callable[[PdfToHtmlProgress], None]
 PageCallback = Callable[[int, str], None]
 
 
+@dataclass(frozen=True)
+class _OcrPassOutcome:
+    ocr_text: str
+    merged_text: str
+    merged_quality: float
+    has_unclosed_table: bool
+
+
+@dataclass(frozen=True)
+class _PrimaryOcrPlan:
+    image_base64: str
+    max_tokens: int
+    table_likelihood: float
+
+
 def _notify_html_progress(
     on_progress: HtmlProgressCallback | None,
     update: PdfToHtmlProgress,
@@ -73,6 +88,8 @@ _ESCAPED_COMPLETE_TABLE_RE = re.compile(
     r"&lt;\s*table\b.*?&lt;\s*/\s*table\s*&gt;",
     re.IGNORECASE | re.DOTALL,
 )
+_RAW_TAG_RE = re.compile(r"<\s*(/?)\s*([a-zA-Z0-9]+)(?:\s+[^>]*)?>", re.IGNORECASE)
+_TABLE_TAGS: set[str] = {"table", "thead", "tbody", "tr", "th", "td"}
 
 
 def _has_unclosed_table_markup(text: str) -> bool:
@@ -182,6 +199,34 @@ def _repair_truncated_ocr_tail_with_secondary(
     return repaired
 
 
+def _force_close_unclosed_table_markup(text: str) -> str:
+    content = str(text or "")
+    if not content or not _has_unclosed_table_markup(content):
+        return content
+
+    stack: list[str] = []
+    for match in _RAW_TAG_RE.finditer(content):
+        is_close = str(match.group(1) or "") == "/"
+        name = str(match.group(2) or "").lower()
+        if name not in _TABLE_TAGS:
+            continue
+        if not is_close:
+            stack.append(name)
+            continue
+        while stack:
+            current = stack.pop()
+            if current == name:
+                break
+
+    if not stack:
+        return content
+
+    suffix = "".join(f"</{name}>" for name in reversed(stack))
+    if not suffix:
+        return content
+    return content.rstrip() + "\n" + suffix
+
+
 def _decode_base64_image_payload(image_base64: str) -> bytes:
     raw = str(image_base64 or "").strip()
     if not raw:
@@ -225,6 +270,272 @@ def _crop_image_base64_to_bottom(image_base64: str, *, top_ratio: float = 0.45) 
             return base64.b64encode(out.getvalue()).decode("ascii")
     except Exception:  # noqa: BLE001
         return None
+
+
+def _encode_image_to_base64_png(image: object) -> str:
+    try:
+        from PIL import Image
+    except Exception as exc:  # noqa: BLE001
+        raise RuntimeError("Pillow is required for PNG encoding.") from exc
+
+    if not isinstance(image, Image.Image):
+        raise TypeError("image must be a PIL.Image.Image")
+
+    out = io.BytesIO()
+    image.save(out, format="PNG")
+    return base64.b64encode(out.getvalue()).decode("ascii")
+
+
+def _downscale_image_base64_to_max_edge(image_base64: str, *, max_edge: int) -> str | None:
+    target_edge = int(max_edge)
+    if target_edge <= 0:
+        return None
+
+    payload = _decode_base64_image_payload(image_base64)
+    if not payload:
+        return None
+
+    try:
+        from PIL import Image
+    except Exception:  # noqa: BLE001
+        return None
+
+    try:
+        with Image.open(io.BytesIO(payload)) as image:
+            width, height = image.size
+            if width <= 1 or height <= 1:
+                return None
+
+            longest = max(width, height)
+            if longest <= target_edge:
+                return None
+
+            ratio = float(target_edge) / float(longest)
+            resized_width = max(1, int(round(float(width) * ratio)))
+            resized_height = max(1, int(round(float(height) * ratio)))
+            resampling_enum = getattr(Image, "Resampling", None)
+            bilinear_name = "BILINEAR"
+            if resampling_enum is not None:
+                resampling = getattr(resampling_enum, bilinear_name)
+            else:
+                resampling = getattr(Image, bilinear_name)
+            resized = image.resize((resized_width, resized_height), resample=resampling)
+            out = io.BytesIO()
+            resized.save(out, format="PNG")
+            return base64.b64encode(out.getvalue()).decode("ascii")
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def _estimate_page_table_likelihood(pymupdf_words: list[Word]) -> float:
+    if not pymupdf_words:
+        return 0.0
+    try:
+        return float(estimate_table_likelihood(pymupdf_words))
+    except Exception:  # noqa: BLE001
+        return 0.0
+
+
+def _build_primary_ocr_plan(
+    *,
+    image_base64: str,
+    settings: Settings,
+    pymupdf_words: list[Word],
+) -> _PrimaryOcrPlan:
+    table_likelihood = _estimate_page_table_likelihood(pymupdf_words)
+    threshold = max(0.0, float(settings.lighton_fast_table_likelihood_threshold))
+    is_table_like = table_likelihood >= threshold
+
+    if not settings.lighton_fast_pass:
+        return _PrimaryOcrPlan(
+            image_base64=image_base64,
+            max_tokens=max(1, int(settings.lighton_max_tokens)),
+            table_likelihood=table_likelihood,
+        )
+
+    base_budget = (
+        int(settings.lighton_fast_max_tokens_table)
+        if is_table_like
+        else int(settings.lighton_fast_max_tokens_text)
+    )
+    max_tokens = max(1, min(base_budget, int(settings.lighton_max_tokens)))
+
+    selected_image = image_base64
+    non_table_target_edge = int(settings.lighton_fast_non_table_max_edge)
+    if not is_table_like and non_table_target_edge > 0:
+        downscaled = _downscale_image_base64_to_max_edge(
+            image_base64,
+            max_edge=non_table_target_edge,
+        )
+        if downscaled:
+            selected_image = downscaled
+
+    return _PrimaryOcrPlan(
+        image_base64=selected_image,
+        max_tokens=max_tokens,
+        table_likelihood=table_likelihood,
+    )
+
+
+def _apply_table_fallback_with_pymupdf(
+    *,
+    page: Page,
+    pymupdf_text: str,
+    pymupdf_words: list[Word],
+) -> Page:
+    if not pymupdf_words:
+        return page
+    fallback_table = _best_table_from_pymupdf_words(pymupdf_words)
+    if fallback_table is None:
+        return page
+    return _replace_truncated_table_with_pymupdf(
+        page=page,
+        fallback_table=fallback_table,
+        pymupdf_text=pymupdf_text,
+    )
+
+
+def _apply_page_postprocess(
+    *,
+    page: Page,
+    settings: Settings,
+    pymupdf_text: str,
+    pymupdf_words: list[Word],
+    table_likelihood: float,
+) -> Page:
+    if not settings.lighton_fast_pass:
+        mode = "full"
+    else:
+        mode = str(settings.lighton_fast_postprocess_mode or "full").strip().lower()
+
+    if mode == "off":
+        return page
+
+    if mode == "light":
+        threshold = max(0.0, float(settings.lighton_fast_table_likelihood_threshold))
+        has_table_block = any(isinstance(block, Table) for block in page.blocks)
+        if table_likelihood < threshold and not has_table_block:
+            return page
+        page = _replace_table_preface_with_pymupdf(page=page, pymupdf_text=pymupdf_text)
+        page = _correct_table_blocks_locally_with_pymupdf(
+            page=page,
+            pymupdf_words=pymupdf_words,
+        )
+        return _apply_table_fallback_with_pymupdf(
+            page=page,
+            pymupdf_text=pymupdf_text,
+            pymupdf_words=pymupdf_words,
+        )
+
+    page = _replace_table_preface_with_pymupdf(
+        page=page,
+        pymupdf_text=pymupdf_text,
+    )
+    page = _correct_text_blocks_locally_with_pymupdf(
+        page=page,
+        pymupdf_text=pymupdf_text,
+    )
+    page = _correct_table_blocks_locally_with_pymupdf(
+        page=page,
+        pymupdf_words=pymupdf_words,
+    )
+    return _apply_table_fallback_with_pymupdf(
+        page=page,
+        pymupdf_text=pymupdf_text,
+        pymupdf_words=pymupdf_words,
+    )
+
+
+def _run_ocr_pass(
+    *,
+    image_base64: str,
+    settings: Settings,
+    pymupdf_text: str,
+    pymupdf_words: list[Word],
+    merge_policy: str,
+    max_tokens: int | None = None,
+) -> _OcrPassOutcome:
+    ocr_settings = settings
+    if max_tokens is not None:
+        bounded_tokens = max(1, int(max_tokens))
+        if bounded_tokens != int(settings.lighton_max_tokens):
+            ocr_settings = replace(settings, lighton_max_tokens=bounded_tokens)
+
+    ocr_text = lighton_ocr.ocr_image_base64(image_base64, settings=ocr_settings)
+    raw_has_unclosed_table = _has_unclosed_table_markup(ocr_text)
+    if settings.lighton_secondary_table_repair and raw_has_unclosed_table:
+        cropped_image = _crop_image_base64_to_bottom(image_base64, top_ratio=0.45)
+        if cropped_image:
+            try:
+                secondary_ocr_text = lighton_ocr.ocr_image_base64(
+                    cropped_image,
+                    settings=ocr_settings,
+                )
+                ocr_text = _repair_truncated_ocr_tail_with_secondary(
+                    ocr_text=ocr_text,
+                    secondary_ocr_text=secondary_ocr_text,
+                )
+            except Exception:  # noqa: BLE001
+                pass
+    ocr_text = _force_close_unclosed_table_markup(ocr_text)
+
+    merged_text = _merge_text_with_pymupdf_fallback(
+        ocr_text=ocr_text,
+        pymupdf_text=pymupdf_text,
+        policy=merge_policy,
+    )
+    if pymupdf_words:
+        try:
+            merged_table_text, table_stats = merge_markdown_tables_with_pymupdf_words(
+                merged_text,
+                pymupdf_words,
+            )
+            if table_stats.applied:
+                merged_text = merged_table_text
+        except Exception:  # noqa: BLE001
+            pass
+
+    return _OcrPassOutcome(
+        ocr_text=ocr_text,
+        merged_text=merged_text,
+        merged_quality=score_text_quality(merged_text).score,
+        has_unclosed_table=raw_has_unclosed_table,
+    )
+
+
+def _should_retry_high_res(
+    *,
+    primary: _OcrPassOutcome,
+    pymupdf_text: str,
+    retry_min_quality: float,
+    retry_quality_gap: float,
+    retry_min_pym_text_len: int,
+) -> bool:
+    if primary.has_unclosed_table:
+        return True
+    if primary.merged_quality < float(retry_min_quality):
+        return True
+
+    pym_quality = score_text_quality(pymupdf_text).score
+    return (
+        pym_quality >= 0.55
+        and (pym_quality - primary.merged_quality) >= float(retry_quality_gap)
+        and len(pymupdf_text.strip()) >= int(retry_min_pym_text_len)
+    )
+
+
+def _select_best_pass_outcome(
+    *,
+    primary: _OcrPassOutcome,
+    retry: _OcrPassOutcome | None,
+) -> _OcrPassOutcome:
+    if retry is None:
+        return primary
+    if retry.merged_quality >= (primary.merged_quality + 0.03):
+        return retry
+    if primary.has_unclosed_table and not retry.has_unclosed_table:
+        return retry
+    return primary
 
 
 def _merge_text_with_pymupdf_fallback(
@@ -743,10 +1054,21 @@ def pdf_to_html(
     if not pdf_bytes.lstrip().startswith(b"%PDF"):
         raise ValueError("Invalid PDF data")
 
+    first_pass_dpi = (
+        int(settings.lighton_fast_render_dpi)
+        if settings.lighton_fast_pass
+        else int(settings.lighton_render_dpi)
+    )
+    first_pass_max_edge = (
+        int(settings.lighton_fast_render_max_edge)
+        if settings.lighton_fast_pass
+        else int(settings.lighton_render_max_edge)
+    )
+
     total_pages, encoded_pages_iter = iter_pdf_page_png_base64(
         pdf_bytes,
-        dpi=settings.lighton_render_dpi,
-        max_edge=settings.lighton_render_max_edge,
+        dpi=first_pass_dpi,
+        max_edge=first_pass_max_edge,
         max_pages=settings.max_pages,
         max_bytes=settings.max_upload_bytes,
     )
@@ -782,59 +1104,69 @@ def pdf_to_html(
     future_to_page: dict[Future[tuple[Page, str, str]], int] = {}
 
     def _process_page(page_number: int, image_base64: str) -> tuple[Page, str, str]:
-        ocr_text = lighton_ocr.ocr_image_base64(image_base64, settings=settings)
-        if _has_unclosed_table_markup(ocr_text):
-            cropped_image = _crop_image_base64_to_bottom(image_base64, top_ratio=0.45)
-            if cropped_image:
-                try:
-                    secondary_ocr_text = lighton_ocr.ocr_image_base64(
-                        cropped_image,
-                        settings=settings,
-                    )
-                    ocr_text = _repair_truncated_ocr_tail_with_secondary(
-                        ocr_text=ocr_text,
-                        secondary_ocr_text=secondary_ocr_text,
-                    )
-                except Exception:  # noqa: BLE001
-                    pass
         pymupdf_text = pymupdf_texts[page_number - 1]
         pymupdf_words = pymupdf_words_by_page[page_number - 1]
-        merged_text = _merge_text_with_pymupdf_fallback(
-            ocr_text=ocr_text,
-            pymupdf_text=pymupdf_text,
-            policy=settings.lighton_merge_policy,
-        )
-        if pymupdf_words:
-            try:
-                merged_table_text, table_stats = merge_markdown_tables_with_pymupdf_words(
-                    merged_text,
-                    pymupdf_words,
-                )
-                if table_stats.applied:
-                    merged_text = merged_table_text
-            except Exception:  # noqa: BLE001
-                pass
-        page = page_from_ocr_markdown(page_number=page_number, markdown=merged_text)
-        page = _replace_table_preface_with_pymupdf(
-            page=page,
-            pymupdf_text=pymupdf_text,
-        )
-        page = _correct_text_blocks_locally_with_pymupdf(
-            page=page,
-            pymupdf_text=pymupdf_text,
-        )
-        page = _correct_table_blocks_locally_with_pymupdf(
-            page=page,
+        primary_plan = _build_primary_ocr_plan(
+            image_base64=image_base64,
+            settings=settings,
             pymupdf_words=pymupdf_words,
         )
-        if pymupdf_words:
-            fallback_table = _best_table_from_pymupdf_words(pymupdf_words)
-            if fallback_table is not None:
-                page = _replace_truncated_table_with_pymupdf(
-                    page=page,
-                    fallback_table=fallback_table,
-                    pymupdf_text=pymupdf_text,
+
+        primary_outcome = _run_ocr_pass(
+            image_base64=primary_plan.image_base64,
+            settings=settings,
+            pymupdf_text=pymupdf_text,
+            pymupdf_words=pymupdf_words,
+            merge_policy=settings.lighton_merge_policy,
+            max_tokens=primary_plan.max_tokens,
+        )
+        retry_outcome: _OcrPassOutcome | None = None
+
+        if settings.lighton_fast_pass and settings.lighton_fast_retry and _should_retry_high_res(
+            primary=primary_outcome,
+            pymupdf_text=pymupdf_text,
+            retry_min_quality=float(settings.lighton_retry_min_quality),
+            retry_quality_gap=float(settings.lighton_retry_quality_gap),
+            retry_min_pym_text_len=int(settings.lighton_retry_min_pym_text_len),
+        ):
+            try:
+                retry_image = render_pdf_page_image(
+                    pdf_bytes,
+                    page_index=page_number - 1,
+                    dpi=int(settings.lighton_retry_render_dpi),
+                    max_edge=int(settings.lighton_retry_render_max_edge),
+                    max_pages=int(settings.max_pages),
+                    max_bytes=int(settings.max_upload_bytes),
                 )
+                try:
+                    retry_image_base64 = _encode_image_to_base64_png(retry_image)
+                finally:
+                    try:
+                        retry_image.close()
+                    except Exception:  # noqa: BLE001
+                        pass
+
+                retry_outcome = _run_ocr_pass(
+                    image_base64=retry_image_base64,
+                    settings=settings,
+                    pymupdf_text=pymupdf_text,
+                    pymupdf_words=pymupdf_words,
+                    merge_policy=settings.lighton_merge_policy,
+                    max_tokens=int(settings.lighton_max_tokens),
+                )
+            except Exception:  # noqa: BLE001
+                pass
+
+        selected = _select_best_pass_outcome(primary=primary_outcome, retry=retry_outcome)
+        merged_text = selected.merged_text
+        page = page_from_ocr_markdown(page_number=page_number, markdown=merged_text)
+        page = _apply_page_postprocess(
+            page=page,
+            settings=settings,
+            pymupdf_text=pymupdf_text,
+            pymupdf_words=pymupdf_words,
+            table_likelihood=primary_plan.table_likelihood,
+        )
         section_html = render_page_html(page)
         return page, section_html, merged_text
 
