@@ -11,6 +11,8 @@ from ragprep.pipeline import pdf_to_html
 def test_pdf_to_html_corrects_html_table_headers_and_item_names(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    monkeypatch.setenv("RAGPREP_LIGHTON_PROFILE", "balanced")
+
     def _fake_iter_pages(
         _pdf_bytes: bytes,
         *,

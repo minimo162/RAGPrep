@@ -259,6 +259,7 @@ def test_fast_pass_closes_unclosed_table_without_extra_ocr(
 
 def test_fast_pass_uses_page_type_token_budget(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("RAGPREP_LIGHTON_FAST_PASS", "1")
+    monkeypatch.setenv("RAGPREP_LIGHTON_MAX_TOKENS", "8192")
     monkeypatch.setenv("RAGPREP_LIGHTON_FAST_MAX_TOKENS_TEXT", "3333")
     monkeypatch.setenv("RAGPREP_LIGHTON_FAST_MAX_TOKENS_TABLE", "7777")
     monkeypatch.setenv("RAGPREP_LIGHTON_PAGE_CONCURRENCY", "1")
@@ -296,6 +297,43 @@ def test_fast_pass_uses_page_type_token_budget(monkeypatch: pytest.MonkeyPatch) 
     html = pdf_to_html(b"%PDF", full_document=False)
     assert "sample text" in html
     assert captured_tokens == [3333, 7777]
+
+
+def test_ocr_fastest_profile_still_uses_ocr_for_each_page(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("RAGPREP_LIGHTON_PROFILE", "ocr-fastest")
+    monkeypatch.setenv("RAGPREP_LIGHTON_FAST_RETRY", "0")
+    monkeypatch.setenv("RAGPREP_LIGHTON_PAGE_CONCURRENCY", "1")
+
+    def _iter_two_pages(
+        _pdf_bytes: bytes,
+        *,
+        dpi: int | None = None,
+        max_edge: int | None = None,
+        max_pages: int | None = None,
+        max_bytes: int | None = None,
+    ) -> tuple[int, Iterator[str]]:
+        _ = dpi, max_edge, max_pages, max_bytes
+        return 2, iter(["P1", "P2"])
+
+    monkeypatch.setattr("ragprep.pipeline.iter_pdf_page_png_base64", _iter_two_pages)
+    monkeypatch.setattr("ragprep.pipeline.extract_pymupdf_page_texts", lambda _pdf: ["one", "two"])
+    monkeypatch.setattr("ragprep.pipeline.extract_pymupdf_page_words", lambda _pdf: [[], []])
+
+    calls = {"ocr": 0}
+
+    def _fake_ocr(_image_b64: str, *, settings: object) -> str:
+        _ = settings
+        calls["ocr"] += 1
+        return f"ocr text {calls['ocr']}"
+
+    monkeypatch.setattr("ragprep.pipeline.lighton_ocr.ocr_image_base64", _fake_ocr)
+
+    html = pdf_to_html(b"%PDF", full_document=False)
+    assert "ocr text 1" in html
+    assert "ocr text 2" in html
+    assert calls["ocr"] == 2
 
 
 def test_fast_pass_downscales_non_table_page(monkeypatch: pytest.MonkeyPatch) -> None:

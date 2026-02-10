@@ -236,6 +236,8 @@ def test_pdf_to_html_falls_back_to_pymupdf_text_for_low_quality_ocr(
 def test_pdf_to_html_replaces_truncated_ocr_table_with_pymupdf_table(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    monkeypatch.setenv("RAGPREP_LIGHTON_PROFILE", "balanced")
+
     def _fake_iter_pages(
         _pdf_bytes: bytes,
         *,
@@ -354,6 +356,8 @@ def test_pdf_to_html_keeps_ocr_table_markup_even_when_pymupdf_quality_is_higher(
 def test_pdf_to_html_replaces_table_preface_with_pymupdf_text(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    monkeypatch.setenv("RAGPREP_LIGHTON_PROFILE", "balanced")
+
     def _fake_iter_pages(
         _pdf_bytes: bytes,
         *,

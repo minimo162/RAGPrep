@@ -17,6 +17,7 @@ ENV_LIGHTON_MODEL_FILE: Final[str] = "RAGPREP_LIGHTON_MODEL_FILE"
 ENV_LIGHTON_MMPROJ_FILE: Final[str] = "RAGPREP_LIGHTON_MMPROJ_FILE"
 ENV_LIGHTON_MODEL_DIR: Final[str] = "RAGPREP_LIGHTON_MODEL_DIR"
 ENV_LIGHTON_AUTO_DOWNLOAD: Final[str] = "RAGPREP_LIGHTON_AUTO_DOWNLOAD"
+ENV_LIGHTON_PROFILE: Final[str] = "RAGPREP_LIGHTON_PROFILE"
 ENV_LLAMA_SERVER_PATH: Final[str] = "RAGPREP_LLAMA_SERVER_PATH"
 ENV_LIGHTON_SERVER_HOST: Final[str] = "RAGPREP_LIGHTON_SERVER_HOST"
 ENV_LIGHTON_SERVER_PORT: Final[str] = "RAGPREP_LIGHTON_SERVER_PORT"
@@ -67,6 +68,7 @@ DEFAULT_LIGHTON_MODEL_FILE: Final[str] = "LightOnOCR-2-1B-IQ4_XS.gguf"
 DEFAULT_LIGHTON_MMPROJ_FILE: Final[str] = "mmproj-BF16.gguf"
 DEFAULT_LIGHTON_MODEL_DIR: Final[str] = os.path.join("~", ".ragprep", "models", "lighton")
 DEFAULT_LIGHTON_AUTO_DOWNLOAD: Final[bool] = True
+DEFAULT_LIGHTON_PROFILE: Final[str] = "ocr-fastest"
 DEFAULT_LIGHTON_SERVER_HOST: Final[str] = "127.0.0.1"
 DEFAULT_LIGHTON_SERVER_PORT: Final[int] = 8080
 DEFAULT_LIGHTON_START_TIMEOUT_SECONDS: Final[int] = 300
@@ -99,6 +101,19 @@ DEFAULT_LIGHTON_FAST_TABLE_LIKELIHOOD_THRESHOLD: Final[float] = 0.60
 DEFAULT_LIGHTON_FAST_MAX_TOKENS_TEXT: Final[int] = 4096
 DEFAULT_LIGHTON_FAST_MAX_TOKENS_TABLE: Final[int] = 8192
 DEFAULT_LIGHTON_FAST_POSTPROCESS_MODE: Final[str] = "light"
+DEFAULT_OCR_FASTEST_LIGHTON_PARALLEL: Final[int] = 1
+DEFAULT_OCR_FASTEST_LIGHTON_PAGE_CONCURRENCY: Final[int] = 1
+DEFAULT_OCR_FASTEST_LIGHTON_MAX_TOKENS: Final[int] = 1024
+DEFAULT_OCR_FASTEST_LIGHTON_FAST_PASS: Final[bool] = True
+DEFAULT_OCR_FASTEST_LIGHTON_FAST_RENDER_DPI: Final[int] = 96
+DEFAULT_OCR_FASTEST_LIGHTON_FAST_RENDER_MAX_EDGE: Final[int] = 640
+DEFAULT_OCR_FASTEST_LIGHTON_FAST_RETRY: Final[bool] = False
+DEFAULT_OCR_FASTEST_LIGHTON_SECONDARY_TABLE_REPAIR: Final[bool] = False
+DEFAULT_OCR_FASTEST_LIGHTON_FAST_NON_TABLE_MAX_EDGE: Final[int] = 520
+DEFAULT_OCR_FASTEST_LIGHTON_FAST_MAX_TOKENS_TEXT: Final[int] = 512
+DEFAULT_OCR_FASTEST_LIGHTON_FAST_MAX_TOKENS_TABLE: Final[int] = 1024
+DEFAULT_OCR_FASTEST_LIGHTON_FAST_POSTPROCESS_MODE: Final[str] = "off"
+SUPPORTED_LIGHTON_PROFILES: Final[tuple[str, ...]] = ("balanced", "ocr-fastest")
 SUPPORTED_LIGHTON_MERGE_POLICIES: Final[tuple[str, ...]] = ("strict", "aggressive")
 SUPPORTED_LIGHTON_FAST_POSTPROCESS_MODES: Final[tuple[str, ...]] = ("full", "light", "off")
 
@@ -113,6 +128,7 @@ class Settings:
     model_cache_dir: str
     ocr_backend: str
     pdf_backend: str
+    lighton_profile: str
 
     lighton_repo_id: str
     lighton_model_file: str
@@ -239,6 +255,19 @@ def _get_model_cache_dir() -> str:
     return raw.strip()
 
 
+def _get_lighton_profile() -> str:
+    raw = os.getenv(ENV_LIGHTON_PROFILE)
+    if raw is None or not raw.strip():
+        return DEFAULT_LIGHTON_PROFILE
+    value = raw.strip().lower()
+    if value not in SUPPORTED_LIGHTON_PROFILES:
+        raise ValueError(
+            f"{ENV_LIGHTON_PROFILE} must be one of "
+            f"{', '.join(SUPPORTED_LIGHTON_PROFILES)}, got: {raw!r}"
+        )
+    return value
+
+
 def _get_lighton_merge_policy() -> str:
     raw = os.getenv(ENV_LIGHTON_MERGE_POLICY)
     if raw is None or not raw.strip():
@@ -252,10 +281,10 @@ def _get_lighton_merge_policy() -> str:
     return value
 
 
-def _get_lighton_fast_postprocess_mode() -> str:
+def _get_lighton_fast_postprocess_mode(default: str = DEFAULT_LIGHTON_FAST_POSTPROCESS_MODE) -> str:
     raw = os.getenv(ENV_LIGHTON_FAST_POSTPROCESS_MODE)
     if raw is None or not raw.strip():
-        return DEFAULT_LIGHTON_FAST_POSTPROCESS_MODE
+        return default
     value = raw.strip().lower()
     if value not in SUPPORTED_LIGHTON_FAST_POSTPROCESS_MODES:
         raise ValueError(
@@ -267,6 +296,36 @@ def _get_lighton_fast_postprocess_mode() -> str:
 
 def get_settings() -> Settings:
     ocr_backend = _get_pdf_backend()
+    profile = _get_lighton_profile()
+
+    default_lighton_parallel = DEFAULT_LIGHTON_PARALLEL
+    default_lighton_page_concurrency = DEFAULT_LIGHTON_PAGE_CONCURRENCY
+    default_lighton_max_tokens = DEFAULT_LIGHTON_MAX_TOKENS
+    default_lighton_fast_pass = DEFAULT_LIGHTON_FAST_PASS
+    default_lighton_fast_render_dpi = DEFAULT_LIGHTON_FAST_RENDER_DPI
+    default_lighton_fast_render_max_edge = DEFAULT_LIGHTON_FAST_RENDER_MAX_EDGE
+    default_lighton_fast_retry = DEFAULT_LIGHTON_FAST_RETRY
+    default_lighton_secondary_table_repair = DEFAULT_LIGHTON_SECONDARY_TABLE_REPAIR
+    default_lighton_fast_non_table_max_edge = DEFAULT_LIGHTON_FAST_NON_TABLE_MAX_EDGE
+    default_lighton_fast_max_tokens_text = DEFAULT_LIGHTON_FAST_MAX_TOKENS_TEXT
+    default_lighton_fast_max_tokens_table = DEFAULT_LIGHTON_FAST_MAX_TOKENS_TABLE
+    default_lighton_fast_postprocess_mode = DEFAULT_LIGHTON_FAST_POSTPROCESS_MODE
+    if profile == "ocr-fastest":
+        default_lighton_parallel = DEFAULT_OCR_FASTEST_LIGHTON_PARALLEL
+        default_lighton_page_concurrency = DEFAULT_OCR_FASTEST_LIGHTON_PAGE_CONCURRENCY
+        default_lighton_max_tokens = DEFAULT_OCR_FASTEST_LIGHTON_MAX_TOKENS
+        default_lighton_fast_pass = DEFAULT_OCR_FASTEST_LIGHTON_FAST_PASS
+        default_lighton_fast_render_dpi = DEFAULT_OCR_FASTEST_LIGHTON_FAST_RENDER_DPI
+        default_lighton_fast_render_max_edge = DEFAULT_OCR_FASTEST_LIGHTON_FAST_RENDER_MAX_EDGE
+        default_lighton_fast_retry = DEFAULT_OCR_FASTEST_LIGHTON_FAST_RETRY
+        default_lighton_secondary_table_repair = DEFAULT_OCR_FASTEST_LIGHTON_SECONDARY_TABLE_REPAIR
+        default_lighton_fast_non_table_max_edge = (
+            DEFAULT_OCR_FASTEST_LIGHTON_FAST_NON_TABLE_MAX_EDGE
+        )
+        default_lighton_fast_max_tokens_text = DEFAULT_OCR_FASTEST_LIGHTON_FAST_MAX_TOKENS_TEXT
+        default_lighton_fast_max_tokens_table = DEFAULT_OCR_FASTEST_LIGHTON_FAST_MAX_TOKENS_TABLE
+        default_lighton_fast_postprocess_mode = DEFAULT_OCR_FASTEST_LIGHTON_FAST_POSTPROCESS_MODE
+
     return Settings(
         max_upload_bytes=_get_positive_int(ENV_MAX_UPLOAD_BYTES, DEFAULT_MAX_UPLOAD_BYTES),
         max_pages=_get_positive_int(ENV_MAX_PAGES, DEFAULT_MAX_PAGES),
@@ -276,6 +335,7 @@ def get_settings() -> Settings:
         model_cache_dir=_get_model_cache_dir(),
         ocr_backend=ocr_backend,
         pdf_backend=ocr_backend,
+        lighton_profile=profile,
         lighton_repo_id=_get_trimmed_str(ENV_LIGHTON_REPO_ID, DEFAULT_LIGHTON_REPO_ID),
         lighton_model_file=_get_trimmed_str(ENV_LIGHTON_MODEL_FILE, DEFAULT_LIGHTON_MODEL_FILE),
         lighton_mmproj_file=_get_trimmed_str(ENV_LIGHTON_MMPROJ_FILE, DEFAULT_LIGHTON_MMPROJ_FILE),
@@ -298,14 +358,14 @@ def get_settings() -> Settings:
             DEFAULT_LIGHTON_N_GPU_LAYERS,
             min_value=-1,
         ),
-        lighton_parallel=_get_positive_int(ENV_LIGHTON_PARALLEL, DEFAULT_LIGHTON_PARALLEL),
+        lighton_parallel=_get_positive_int(ENV_LIGHTON_PARALLEL, default_lighton_parallel),
         lighton_threads=_get_positive_int(ENV_LIGHTON_THREADS, DEFAULT_LIGHTON_THREADS),
         lighton_threads_batch=_get_positive_int(
             ENV_LIGHTON_THREADS_BATCH,
             DEFAULT_LIGHTON_THREADS_BATCH,
         ),
         lighton_flash_attn=_get_bool(ENV_LIGHTON_FLASH_ATTN, DEFAULT_LIGHTON_FLASH_ATTN),
-        lighton_max_tokens=_get_positive_int(ENV_LIGHTON_MAX_TOKENS, DEFAULT_LIGHTON_MAX_TOKENS),
+        lighton_max_tokens=_get_positive_int(ENV_LIGHTON_MAX_TOKENS, default_lighton_max_tokens),
         lighton_temperature=_get_float_with_min(
             ENV_LIGHTON_TEMPERATURE,
             DEFAULT_LIGHTON_TEMPERATURE,
@@ -314,7 +374,7 @@ def get_settings() -> Settings:
         lighton_top_p=_get_float_with_min(ENV_LIGHTON_TOP_P, DEFAULT_LIGHTON_TOP_P, min_value=0.0),
         lighton_page_concurrency=_get_positive_int(
             ENV_LIGHTON_PAGE_CONCURRENCY,
-            DEFAULT_LIGHTON_PAGE_CONCURRENCY,
+            default_lighton_page_concurrency,
         ),
         lighton_render_dpi=_get_positive_int(ENV_LIGHTON_RENDER_DPI, DEFAULT_LIGHTON_RENDER_DPI),
         lighton_render_max_edge=_get_positive_int(
@@ -322,19 +382,19 @@ def get_settings() -> Settings:
             DEFAULT_LIGHTON_RENDER_MAX_EDGE,
         ),
         lighton_merge_policy=_get_lighton_merge_policy(),
-        lighton_fast_pass=_get_bool(ENV_LIGHTON_FAST_PASS, DEFAULT_LIGHTON_FAST_PASS),
+        lighton_fast_pass=_get_bool(ENV_LIGHTON_FAST_PASS, default_lighton_fast_pass),
         lighton_fast_render_dpi=_get_positive_int(
             ENV_LIGHTON_FAST_RENDER_DPI,
-            DEFAULT_LIGHTON_FAST_RENDER_DPI,
+            default_lighton_fast_render_dpi,
         ),
         lighton_fast_render_max_edge=_get_positive_int(
             ENV_LIGHTON_FAST_RENDER_MAX_EDGE,
-            DEFAULT_LIGHTON_FAST_RENDER_MAX_EDGE,
+            default_lighton_fast_render_max_edge,
         ),
-        lighton_fast_retry=_get_bool(ENV_LIGHTON_FAST_RETRY, DEFAULT_LIGHTON_FAST_RETRY),
+        lighton_fast_retry=_get_bool(ENV_LIGHTON_FAST_RETRY, default_lighton_fast_retry),
         lighton_secondary_table_repair=_get_bool(
             ENV_LIGHTON_SECONDARY_TABLE_REPAIR,
-            DEFAULT_LIGHTON_SECONDARY_TABLE_REPAIR,
+            default_lighton_secondary_table_repair,
         ),
         lighton_retry_render_dpi=_get_positive_int(
             ENV_LIGHTON_RETRY_RENDER_DPI,
@@ -360,7 +420,7 @@ def get_settings() -> Settings:
         ),
         lighton_fast_non_table_max_edge=_get_int_with_min(
             ENV_LIGHTON_FAST_NON_TABLE_MAX_EDGE,
-            DEFAULT_LIGHTON_FAST_NON_TABLE_MAX_EDGE,
+            default_lighton_fast_non_table_max_edge,
             min_value=0,
         ),
         lighton_fast_table_likelihood_threshold=_get_float_with_min(
@@ -370,11 +430,13 @@ def get_settings() -> Settings:
         ),
         lighton_fast_max_tokens_text=_get_positive_int(
             ENV_LIGHTON_FAST_MAX_TOKENS_TEXT,
-            DEFAULT_LIGHTON_FAST_MAX_TOKENS_TEXT,
+            default_lighton_fast_max_tokens_text,
         ),
         lighton_fast_max_tokens_table=_get_positive_int(
             ENV_LIGHTON_FAST_MAX_TOKENS_TABLE,
-            DEFAULT_LIGHTON_FAST_MAX_TOKENS_TABLE,
+            default_lighton_fast_max_tokens_table,
         ),
-        lighton_fast_postprocess_mode=_get_lighton_fast_postprocess_mode(),
+        lighton_fast_postprocess_mode=_get_lighton_fast_postprocess_mode(
+            default_lighton_fast_postprocess_mode
+        ),
     )
