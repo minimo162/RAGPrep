@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import base64
 import binascii
@@ -24,9 +24,10 @@ from ragprep.pdf_text import (
     extract_pymupdf_page_words,
     normalize_extracted_text,
     score_text_quality,
+    tokenize_by_char_class,
 )
 from ragprep.structure_ir import Document, Heading, Page, Paragraph, Table, Unknown
-from ragprep.table_grid import build_table_grid
+from ragprep.table_grid import TableCell, build_table_grid
 from ragprep.table_merge import merge_markdown_tables_with_pymupdf_words
 from ragprep.text_merge import merge_ocr_with_pymupdf
 
@@ -111,6 +112,8 @@ _TABLE_TAG_HINTS: tuple[str, ...] = (
     "<td",
     "</td",
 )
+_TOC_INLINE_ITEM_RE = re.compile(r"[\uFF08(]\s*[0-9\uFF10-\uFF19]+\s*[\)\uFF09]")
+_TOC_LEADER_RE = re.compile(r"(?:\u2026|\.|\uFF0E){4,}")
 _NOTE_ARTIFACT_HINTS: tuple[str, ...] = (
     "image contains",
     "image shows",
@@ -578,6 +581,13 @@ def _apply_page_postprocess(
         return page
 
     if mode == "light":
+        page = _correct_text_blocks_locally_with_pymupdf(
+            page=page,
+            pymupdf_text=pymupdf_text,
+            min_match_score=0.45,
+            max_change_ratio=0.18,
+            max_changes=12,
+        )
         threshold = max(0.0, float(settings.lighton_fast_table_likelihood_threshold))
         has_table_block = any(isinstance(block, Table) for block in page.blocks)
         if table_likelihood < threshold and not has_table_block:
@@ -585,9 +595,15 @@ def _apply_page_postprocess(
         page = _replace_table_preface_with_pymupdf(page=page, pymupdf_text=pymupdf_text)
         page = _correct_table_blocks_locally_with_pymupdf(
             page=page,
+            pymupdf_text=pymupdf_text,
             pymupdf_words=pymupdf_words,
         )
-        return _apply_table_fallback_with_pymupdf(
+        page = _apply_table_fallback_with_pymupdf(
+            page=page,
+            pymupdf_text=pymupdf_text,
+            pymupdf_words=pymupdf_words,
+        )
+        return _correct_table_blocks_locally_with_pymupdf(
             page=page,
             pymupdf_text=pymupdf_text,
             pymupdf_words=pymupdf_words,
@@ -603,9 +619,15 @@ def _apply_page_postprocess(
     )
     page = _correct_table_blocks_locally_with_pymupdf(
         page=page,
+        pymupdf_text=pymupdf_text,
         pymupdf_words=pymupdf_words,
     )
-    return _apply_table_fallback_with_pymupdf(
+    page = _apply_table_fallback_with_pymupdf(
+        page=page,
+        pymupdf_text=pymupdf_text,
+        pymupdf_words=pymupdf_words,
+    )
+    return _correct_table_blocks_locally_with_pymupdf(
         page=page,
         pymupdf_text=pymupdf_text,
         pymupdf_words=pymupdf_words,
@@ -742,6 +764,116 @@ def _merge_text_with_pymupdf_fallback(
     return merged_text
 
 
+def _contains_table_markup(text: str) -> bool:
+    lowered = str(text or "").lower()
+    return ("<table" in lowered) or ("&lt;table" in lowered)
+
+
+def _line_repeat_coverage_ratio(text: str) -> float:
+    lines = [line.strip() for line in str(text or "").splitlines() if line.strip()]
+    if not lines:
+        return 0.0
+
+    counts: dict[str, int] = {}
+    for line in lines:
+        counts[line] = counts.get(line, 0) + 1
+
+    repeated = sum(count for count in counts.values() if count >= 2)
+    return float(repeated) / float(max(1, len(lines)))
+
+
+def _token_overlap_ratio(left: str, right: str) -> float:
+    left_tokens = set(tokenize_by_char_class(normalize_extracted_text(left)))
+    right_tokens = set(tokenize_by_char_class(normalize_extracted_text(right)))
+    if not right_tokens:
+        return 0.0
+    return float(len(left_tokens & right_tokens)) / float(max(1, len(right_tokens)))
+
+
+def _text_similarity_ratio(left: str, right: str) -> float:
+    left_norm = normalize_extracted_text(left).strip()
+    right_norm = normalize_extracted_text(right).strip()
+    if not left_norm or not right_norm:
+        return 0.0
+    try:
+        return float(difflib.SequenceMatcher(a=left_norm, b=right_norm, autojunk=False).ratio())
+    except Exception:  # noqa: BLE001
+        return 0.0
+
+
+def _should_prefer_pymupdf_text(
+    *,
+    merged_text: str,
+    ocr_text: str,
+    pymupdf_text: str,
+    pymupdf_words: list[Word],
+    table_likelihood: float,
+    merged_quality: float,
+    fallback_mode: str,
+) -> bool:
+    mode = str(fallback_mode or "repeat").strip().lower()
+    if mode == "off":
+        return False
+    if mode not in {"repeat", "aggressive"}:
+        mode = "repeat"
+
+    pymupdf_norm = normalize_extracted_text(pymupdf_text).strip()
+    if not pymupdf_norm:
+        return False
+    if len(pymupdf_norm) < 80:
+        return False
+
+    merged_norm = normalize_extracted_text(merged_text).strip()
+    if not merged_norm:
+        return True
+
+    similarity = _text_similarity_ratio(merged_norm, pymupdf_norm)
+    token_overlap = _token_overlap_ratio(merged_norm, pymupdf_norm)
+    repeated_line_ratio = _line_repeat_coverage_ratio(merged_norm)
+    has_table_markup = _contains_table_markup(ocr_text) or _contains_table_markup(merged_text)
+
+    if mode == "repeat":
+        if has_table_markup and table_likelihood >= 0.75:
+            if len(pymupdf_words) < 20:
+                return False
+            if repeated_line_ratio >= 0.80 and token_overlap < 0.30:
+                return True
+            if similarity < 0.12 and token_overlap < 0.16 and merged_quality < 0.20:
+                return True
+            return False
+
+        if repeated_line_ratio >= 0.60 and token_overlap < 0.45:
+            return True
+        if similarity < 0.10 and token_overlap < 0.12 and merged_quality < 0.20:
+            return True
+        return False
+
+    if len(pymupdf_words) < 20 and len(pymupdf_norm) < 160:
+        if not (
+            (similarity < 0.20 and token_overlap < 0.25)
+            or (repeated_line_ratio >= 0.60 and token_overlap < 0.45)
+        ):
+            return False
+
+    if has_table_markup:
+        if len(pymupdf_words) < 20:
+            return False
+        if table_likelihood >= 0.75:
+            if similarity < 0.20 and token_overlap < 0.20:
+                return True
+            if repeated_line_ratio >= 0.50 and token_overlap < 0.30:
+                return True
+            return False
+
+    if similarity < 0.25 and token_overlap < 0.30:
+        return True
+
+    if repeated_line_ratio >= 0.35 and token_overlap < 0.45:
+        return True
+
+    return False
+
+
 def _best_table_from_pymupdf_words(words: list[Word]) -> Table | None:
     if not words:
         return None
@@ -810,7 +942,26 @@ def _replace_truncated_table_with_pymupdf(
         table_row_counts.append(len(block.grid))
 
     if not table_indices:
-        return page
+        preface_markdown = _extract_pymupdf_preface_for_table_page(pymupdf_text)
+        preface_blocks: tuple[Heading | Paragraph, ...] = ()
+        if preface_markdown:
+            preface_page = page_from_ocr_markdown(
+                page_number=page.page_number,
+                markdown=preface_markdown,
+            )
+            preface_blocks = tuple(
+                block for block in preface_page.blocks if isinstance(block, (Heading, Paragraph))
+            )
+
+        if preface_blocks:
+            return Page(
+                page_number=page.page_number,
+                blocks=preface_blocks + (fallback_table,),
+            )
+        return Page(
+            page_number=page.page_number,
+            blocks=tuple(page.blocks) + (fallback_table,),
+        )
 
     fallback_rows = len(fallback_table.grid or ())
     if fallback_rows <= 0:
@@ -855,7 +1006,12 @@ def _is_japanese_char(ch: str) -> bool:
     )
 
 
-def _build_joined_line_windows(lines: list[str], *, max_window: int = 8) -> list[str]:
+def _build_joined_line_windows(
+    lines: list[str],
+    *,
+    max_window: int = 8,
+    separator: str = " ",
+) -> list[str]:
     if not lines:
         return []
     windows: list[str] = []
@@ -866,7 +1022,7 @@ def _build_joined_line_windows(lines: list[str], *, max_window: int = 8) -> list
             end = start + width
             if end > total:
                 break
-            candidate = " ".join(lines[start:end]).strip()
+            candidate = separator.join(lines[start:end]).strip()
             if not candidate or candidate in seen:
                 continue
             windows.append(candidate)
@@ -884,6 +1040,7 @@ def _find_best_reference_text(
 
     best_text: str | None = None
     best_score = 0.0
+    scored: list[tuple[str, float, int]] = []
     for candidate in candidates:
         candidate_compact = _compact_text_for_match(candidate)
         if not candidate_compact:
@@ -893,10 +1050,45 @@ def _find_best_reference_text(
             b=candidate_compact[:1200],
             autojunk=False,
         ).ratio()
+        scored.append((candidate, score, len(candidate_compact)))
         if score > best_score:
             best_score = score
             best_text = candidate
-    return best_text, best_score
+
+    if best_text is None or not scored:
+        return best_text, best_score
+
+    # Prefer references with compact length close to the OCR block when score is close.
+    source_len = len(source_compact)
+    threshold = max(0.0, best_score - 0.04)
+    selected_text = best_text
+    selected_score = best_score
+    selected_compact = _compact_text_for_match(best_text)
+    selected_len_delta = abs(len(selected_compact) - source_len)
+
+    for candidate, score, compact_len in scored:
+        if score < threshold:
+            continue
+        len_delta = abs(compact_len - source_len)
+        if len_delta < selected_len_delta:
+            selected_text = candidate
+            selected_score = score
+            selected_len_delta = len_delta
+            selected_compact = _compact_text_for_match(candidate)
+            continue
+        if len_delta != selected_len_delta:
+            continue
+        if score > selected_score:
+            selected_text = candidate
+            selected_score = score
+            selected_compact = _compact_text_for_match(candidate)
+            continue
+        if abs(score - selected_score) <= 0.01 and compact_len > len(selected_compact):
+            selected_text = candidate
+            selected_score = score
+            selected_compact = _compact_text_for_match(candidate)
+
+    return selected_text, selected_score
 
 
 def _apply_local_char_corrections(
@@ -957,6 +1149,75 @@ def _apply_local_char_corrections(
     return corrected_text
 
 
+def _is_safe_text_block_reference_replace(
+    *,
+    source_text: str,
+    reference_text: str,
+    match_score: float,
+) -> bool:
+    source_norm = normalize_extracted_text(source_text).strip()
+    reference_norm = normalize_extracted_text(reference_text).strip()
+    if not source_norm or not reference_norm:
+        return False
+    if "\t" in source_norm or "\t" in reference_norm:
+        return False
+    if (
+        "**" in reference_norm
+        or "__" in reference_norm
+        or "```" in reference_norm
+        or "<" in reference_norm
+        or ">" in reference_norm
+    ):
+        return False
+    if re.search(r"(?m)^\s{0,3}#{1,6}\s", reference_norm):
+        return False
+    if re.search(r"(?m)^\s*\|.*\|\s*$", reference_norm):
+        return False
+
+    source_len = len(re.sub(r"\s+", "", source_norm))
+    reference_len = len(re.sub(r"\s+", "", reference_norm))
+    if source_len < 4 or reference_len < 4:
+        return False
+
+    length_ratio = float(reference_len) / float(max(1, source_len))
+    token_overlap = _token_overlap_ratio(source_norm, reference_norm)
+    text_similarity = _text_similarity_ratio(source_norm, reference_norm)
+
+    if source_len < 10:
+        if length_ratio < 0.50 or length_ratio > 1.80:
+            return False
+        if float(match_score) < 0.72:
+            return False
+        if token_overlap < 0.25:
+            return False
+        if text_similarity < 0.45:
+            return False
+        return True
+
+    if source_len <= 64:
+        if length_ratio < 0.75 or length_ratio > 1.45:
+            return False
+        if float(match_score) < 0.55:
+            return False
+        if token_overlap < 0.30:
+            return False
+        if text_similarity < 0.55:
+            return False
+        return True
+
+    if length_ratio < 0.85 or length_ratio > 1.20:
+        return False
+    if float(match_score) < 0.72:
+        return False
+    if token_overlap < 0.55:
+        return False
+    if text_similarity < 0.68:
+        return False
+    if not any(_is_japanese_char(ch) for ch in source_norm):
+        return False
+    return True
+
+
 def _replace_table_preface_with_pymupdf(
     *,
     page: Page,
@@ -1001,6 +1262,12 @@ def _replace_table_preface_with_pymupdf(
             max_change_ratio=0.18,
             max_changes=12,
         )
+        if corrected == source_text and _is_safe_text_block_reference_replace(
+            source_text=source_text,
+            reference_text=reference_text,
+            match_score=score,
+        ):
+            corrected = reference_text
         if corrected == source_text:
             continue
 
@@ -1025,11 +1292,19 @@ def _correct_text_blocks_locally_with_pymupdf(
     *,
     page: Page,
     pymupdf_text: str,
+    min_match_score: float = 0.32,
+    max_change_ratio: float = 0.18,
+    max_changes: int = 12,
 ) -> Page:
     pym_lines = [line.strip() for line in pymupdf_text.splitlines() if line.strip()]
-    candidates = _build_joined_line_windows(pym_lines, max_window=8)
-    if not candidates:
+    base_candidates = _build_joined_line_windows(pym_lines, max_window=8, separator=" ")
+    if not base_candidates:
         return page
+    long_candidates = _build_joined_line_windows(
+        pym_lines,
+        max_window=20,
+        separator="\n",
+    )
 
     updated_blocks = list(page.blocks)
     changed_count = 0
@@ -1040,15 +1315,60 @@ def _correct_text_blocks_locally_with_pymupdf(
         if not source_text:
             continue
 
+        source_compact_len = len(_compact_text_for_match(source_text))
+        is_toc_compound = _looks_like_toc_compound_line(source_text)
+        if is_toc_compound:
+            candidates = long_candidates + base_candidates
+        elif source_compact_len >= 96:
+            candidates = base_candidates + long_candidates
+        else:
+            candidates = base_candidates
+
         reference_text, score = _find_best_reference_text(source_text, candidates)
-        if reference_text is None or score < 0.32:
-            continue
-        corrected = _apply_local_char_corrections(
-            source_text,
-            reference_text,
-            max_change_ratio=0.18,
-            max_changes=12,
-        )
+        if (
+            is_toc_compound
+            and reference_text is not None
+            and "\n" not in reference_text
+            and long_candidates
+        ):
+            multiline_reference, multiline_score = _find_best_reference_text(
+                source_text,
+                long_candidates,
+            )
+            if (
+                multiline_reference is not None
+                and "\n" in multiline_reference
+                and multiline_score >= max(float(min_match_score), score - 0.03)
+            ):
+                reference_text = multiline_reference
+                score = multiline_score
+
+        if reference_text is None or score < float(min_match_score):
+            corrected = _split_toc_compound_line(source_text)
+            if corrected == source_text:
+                continue
+        else:
+            corrected = _apply_local_char_corrections(
+                source_text,
+                reference_text,
+                max_change_ratio=float(max_change_ratio),
+                max_changes=int(max_changes),
+            )
+            safe_replace = _is_safe_text_block_reference_replace(
+                source_text=source_text,
+                reference_text=reference_text,
+                match_score=score,
+            )
+            if corrected != source_text and safe_replace:
+                if _text_similarity_ratio(corrected, reference_text) < 0.94:
+                    corrected = reference_text
+            if corrected == source_text and safe_replace:
+                corrected = reference_text
+            if is_toc_compound and "\n" not in corrected and "\r" not in corrected:
+                corrected = _split_toc_compound_line(corrected)
+            elif corrected == source_text:
+                corrected = _split_toc_compound_line(source_text)
+        corrected = _split_toc_compound_line(corrected)
         if corrected == source_text:
             continue
 
@@ -1065,13 +1385,456 @@ def _correct_text_blocks_locally_with_pymupdf(
     return Page(page_number=page.page_number, blocks=tuple(updated_blocks))
 
 
+def _looks_like_toc_compound_line(text: str) -> bool:
+    normalized = normalize_extracted_text(text).strip()
+    if not normalized or "\n" in normalized or "\r" in normalized:
+        return False
+    if len(_TOC_INLINE_ITEM_RE.findall(normalized)) < 2:
+        return False
+    return bool(_TOC_LEADER_RE.search(normalized))
+
+
+def _split_toc_compound_line(text: str) -> str:
+    normalized = normalize_extracted_text(text).strip()
+    if not _looks_like_toc_compound_line(normalized):
+        return text
+    split_text = _TOC_INLINE_ITEM_RE.sub(lambda match: f"\n{match.group(0)}", normalized)
+    split_text = split_text.lstrip("\n").strip()
+    if split_text.count("\n") <= 0:
+        return text
+    return split_text
+
+
+def _contains_textual_char(text: str) -> bool:
+    for ch in str(text or ""):
+        if _is_japanese_char(ch) or ch.isalpha():
+            return True
+    return False
+
+
+def _build_table_text_candidates_from_pymupdf(
+    pymupdf_text: str,
+    *,
+    max_window: int = 3,
+) -> list[str]:
+    lines = [normalize_extracted_text(line).strip() for line in pymupdf_text.splitlines()]
+    lines = [line for line in lines if line]
+    if not lines:
+        return []
+
+    windows = _build_joined_line_windows(lines, max_window=max_window)
+    candidates: list[str] = []
+    seen_compact: set[str] = set()
+
+    for candidate in windows:
+        normalized = normalize_extracted_text(candidate).strip()
+        compact = _compact_text_for_match(normalized)
+        if not compact or compact in seen_compact:
+            continue
+        if len(compact) < 2 or len(compact) > 48:
+            continue
+        if "http://" in normalized.lower() or "https://" in normalized.lower():
+            continue
+        if not _contains_textual_char(compact):
+            continue
+
+        digit_count = sum(1 for ch in compact if ch.isdigit())
+        if digit_count > 0 and (float(digit_count) / float(max(1, len(compact)))) > 0.55:
+            continue
+
+        candidates.append(normalized)
+        seen_compact.add(compact)
+
+    return candidates
+
+
+def _is_safe_table_cell_reference_replace(
+    *,
+    source_cell: str,
+    reference_cell: str,
+    similarity: float,
+) -> bool:
+    source_compact = _compact_text_for_match(source_cell)
+    reference_compact = _compact_text_for_match(reference_cell)
+    if not source_compact or not reference_compact:
+        return False
+
+    if "\n" in source_cell or "\r" in source_cell or "\n" in reference_cell or "\r" in reference_cell:
+        return False
+
+    source_len = len(source_compact)
+    reference_len = len(reference_compact)
+    if source_len < 2 or reference_len < 2:
+        return False
+
+    length_ratio = float(reference_len) / float(max(1, source_len))
+    if source_len <= 4:
+        if source_len != reference_len:
+            return False
+        return float(similarity) >= 0.45
+
+    if length_ratio < 0.85 or length_ratio > 1.45:
+        return False
+    if float(similarity) < 0.55:
+        return False
+
+    token_overlap = _token_overlap_ratio(source_compact, reference_compact)
+    if token_overlap < 0.20:
+        return False
+
+    translation = str.maketrans("０１２３４５６７８９，．", "0123456789,.")
+    source_numeric = str(source_cell or "").translate(translation)
+    reference_numeric = str(reference_cell or "").translate(translation)
+    source_numbers = re.findall(r"\d+(?:,\d+)?(?:\.\d+)?", source_numeric)
+    reference_numbers = re.findall(r"\d+(?:,\d+)?(?:\.\d+)?", reference_numeric)
+    if source_numbers and reference_numbers and source_numbers != reference_numbers:
+        return False
+
+    return True
+
+
+def _collapse_japanese_inner_spaces(text: str) -> str:
+    raw = str(text or "")
+    compact = _compact_text_for_match(raw)
+    if len(compact) <= 6:
+        return raw
+    return re.sub(
+        r"(?<=[\u3040-\u30ff\u4e00-\u9fff\uff66-\uff9d])\s+(?=[\u3040-\u30ff\u4e00-\u9fff\uff66-\uff9d])",
+        "",
+        raw,
+    )
+
+
+def _normalize_known_table_cell_terms(text: str) -> str:
+    normalized = str(text or "")
+    replacements = (
+        ("前四期発表予想比", "前回発表予想比"),
+        ("前四発表予想比", "前回発表予想比"),
+    )
+    for wrong, right in replacements:
+        if wrong in normalized:
+            normalized = normalized.replace(wrong, right)
+    return normalized
+
+
+def _correct_table_cell_with_pymupdf_text_candidates(
+    *,
+    source_cell: str,
+    text_candidates: list[str],
+    disallow_compact: set[str] | None = None,
+) -> str:
+    source = normalize_extracted_text(source_cell).strip()
+    if not source:
+        return source
+    source = _normalize_known_table_cell_terms(source)
+    if not text_candidates:
+        return source
+
+    # Fast-path for frequent OCR artifacts when a matching PyMuPDF phrase exists.
+    digit_translation = str.maketrans("０１２３４５６７８９，．", "0123456789,.")
+    candidate_compact_norm = {
+        _compact_text_for_match(candidate).translate(digit_translation) for candidate in text_candidates
+    }
+    common_artifacts = (
+        ("潜在在読読商戸", "潜在株式調整後"),
+        ("中間絶緯利益", "中間純利益"),
+        ("中間絶絡利益", "中間純利益"),
+        ("当期絶絡利益", "当期純利益"),
+        ("環境規制間述引当金", "環境規制関連引当金"),
+        ("円 種", "円 銭"),
+    )
+    for wrong, right in common_artifacts:
+        if wrong not in source:
+            continue
+        candidate_text = _collapse_japanese_inner_spaces(source.replace(wrong, right))
+        candidate_compact = _compact_text_for_match(candidate_text).translate(digit_translation)
+        if candidate_compact and (
+            candidate_compact in candidate_compact_norm
+            or any(candidate_compact in compact for compact in candidate_compact_norm)
+        ):
+            return candidate_text
+
+    source_compact = _compact_text_for_match(source)
+    if not source_compact:
+        return source
+    if len(source_compact) < 2 or len(source_compact) > 64:
+        return source
+    if not _contains_textual_char(source_compact):
+        return source
+
+    best_text: str | None = None
+    best_compact = ""
+    best_score = 0.0
+    for candidate in text_candidates:
+        candidate_compact = _compact_text_for_match(candidate)
+        if not candidate_compact:
+            continue
+        if (
+            disallow_compact
+            and candidate_compact in disallow_compact
+            and candidate_compact != source_compact
+        ):
+            continue
+
+        length_ratio = float(len(candidate_compact)) / float(max(1, len(source_compact)))
+        if length_ratio < 0.75 or length_ratio > 1.45:
+            continue
+
+        score = difflib.SequenceMatcher(
+            a=source_compact[:600],
+            b=candidate_compact[:600],
+            autojunk=False,
+        ).ratio()
+        if score > best_score:
+            best_text = candidate
+            best_compact = candidate_compact
+            best_score = score
+
+    if best_text is None:
+        return source
+    best_text = _collapse_japanese_inner_spaces(best_text)
+    best_compact = _compact_text_for_match(best_text)
+
+    if len(source_compact) <= 4:
+        if best_score < 0.45:
+            return source
+    else:
+        if best_score < 0.55:
+            return source
+        if _token_overlap_ratio(source_compact, best_compact) < 0.20:
+            return source
+
+    corrected = _apply_local_char_corrections(
+        source,
+        best_text,
+        max_change_ratio=0.45,
+        max_changes=40,
+    )
+    if corrected != source:
+        if (
+            len(source_compact) >= 12
+            and best_score >= 0.60
+            and corrected != best_text
+            and _is_safe_table_cell_reference_replace(
+                source_cell=source,
+                reference_cell=best_text,
+                similarity=best_score,
+            )
+        ):
+            return best_text
+        return corrected
+
+    if not _is_safe_table_cell_reference_replace(
+        source_cell=source,
+        reference_cell=best_text,
+        similarity=best_score,
+    ):
+        return source
+    return best_text
+
+
+def _refresh_table_cells_for_grid(
+    *,
+    source_cells: tuple[TableCell, ...] | None,
+    new_grid: tuple[tuple[str, ...], ...],
+) -> tuple[TableCell, ...] | None:
+    if not source_cells:
+        return None
+    if not new_grid:
+        return source_cells
+
+    row_count = len(new_grid)
+    col_count = max((len(row) for row in new_grid), default=0)
+    if row_count <= 0 or col_count <= 0:
+        return source_cells
+
+    updated_cells: list[TableCell] = []
+    changed = False
+    for cell in source_cells:
+        row = int(cell.row)
+        col = int(cell.col)
+        if row < 0 or col < 0 or row >= row_count or col >= len(new_grid[row]):
+            updated_cells.append(cell)
+            continue
+        next_text = str(new_grid[row][col])
+        if next_text == cell.text:
+            updated_cells.append(cell)
+            continue
+        updated_cells.append(
+            TableCell(
+                row=row,
+                col=col,
+                text=next_text,
+                colspan=int(cell.colspan),
+                rowspan=int(cell.rowspan),
+            )
+        )
+        changed = True
+
+    if not changed:
+        return source_cells
+    return tuple(updated_cells)
+
+
+def _trim_trailing_empty_table_columns(
+    *,
+    source_rows: tuple[tuple[str, ...], ...],
+    source_cells: tuple[TableCell, ...] | None,
+) -> tuple[tuple[tuple[str, ...], ...], tuple[TableCell, ...] | None, bool]:
+    if not source_rows:
+        return source_rows, source_cells, False
+
+    max_cols = max((len(row) for row in source_rows), default=0)
+    if max_cols <= 1:
+        return source_rows, source_cells, False
+
+    keep_cols = max_cols
+    while keep_cols > 1:
+        col_index = keep_cols - 1
+        has_value = False
+        for row in source_rows:
+            if col_index >= len(row):
+                continue
+            if normalize_extracted_text(row[col_index]).strip():
+                has_value = True
+                break
+        if has_value:
+            break
+        keep_cols -= 1
+
+    if keep_cols >= max_cols:
+        return source_rows, source_cells, False
+
+    trimmed_rows = tuple(tuple(row[:keep_cols]) for row in source_rows)
+    if not source_cells:
+        return trimmed_rows, source_cells, True
+
+    trimmed_cells: list[TableCell] = []
+    for cell in source_cells:
+        row = int(cell.row)
+        col = int(cell.col)
+        if col < 0 or col >= keep_cols:
+            continue
+        colspan = max(1, int(cell.colspan))
+        rowspan = max(1, int(cell.rowspan))
+        max_colspan = max(1, min(colspan, keep_cols - col))
+        trimmed_cells.append(
+            TableCell(
+                row=row,
+                col=col,
+                text=str(cell.text),
+                colspan=max_colspan,
+                rowspan=rowspan,
+            )
+        )
+    return trimmed_rows, tuple(trimmed_cells), True
+
+
+def _repair_forecast_comparison_table_structure(
+    *,
+    grid: tuple[tuple[str, ...], ...],
+    cells: tuple[TableCell, ...] | None,
+) -> tuple[tuple[tuple[str, ...], ...], tuple[TableCell, ...] | None, bool]:
+    if not grid:
+        return grid, cells, False
+
+    row_count = len(grid)
+    col_count = max((len(row) for row in grid), default=0)
+    if row_count < 3 or col_count < 5:
+        return grid, cells, False
+
+    padded_rows = [tuple(row) + ("",) * max(0, col_count - len(row)) for row in grid]
+    row0 = [normalize_extracted_text(cell).strip() for cell in padded_rows[0]]
+    row1 = [normalize_extracted_text(cell).strip() for cell in padded_rows[1]]
+
+    has_top = (
+        "通期" in row0
+        and any("前期比" in cell for cell in row0)
+        and any(
+            ("前回発表予想比" in cell) or ("前四期発表予想比" in cell) or ("前四発表予想比" in cell)
+            for cell in row0
+        )
+    )
+    if not has_top:
+        return grid, cells, False
+
+    has_sub = ("増減率" in row1) and (("増減額" in row1) or ("増減" in row1))
+    if not has_sub:
+        return grid, cells, False
+
+    body_hint = False
+    for row in padded_rows[2:]:
+        first = normalize_extracted_text(row[0]).strip() if len(row) > 0 else ""
+        second = normalize_extracted_text(row[1]).strip() if len(row) > 1 else ""
+        if (
+            ("売上高" in first)
+            or ("営業利益" in first)
+            or ("経常利益" in first)
+            or ("為替レート" in first)
+            or ("ＵＳドル" in second)
+            or ("ユーロ" in second)
+        ):
+            body_hint = True
+            break
+    if not body_hint:
+        return grid, cells, False
+
+    target_col_count = 5
+    new_rows = [list(row[:target_col_count]) + [""] * max(0, target_col_count - len(row)) for row in padded_rows]
+    while len(new_rows) < 2:
+        new_rows.append([""] * target_col_count)
+
+    sub_label = "増減額" if "増減額" in row1 else "増減"
+    expected_row0 = ["", "通期", "前期比", "前回発表予想比", ""]
+    expected_row1 = ["", "", "", sub_label, "増減率"]
+
+    changed = (new_rows[0] != expected_row0) or (new_rows[1] != expected_row1)
+    new_rows[0] = expected_row0
+    new_rows[1] = expected_row1
+
+    body_cells: list[TableCell] = []
+    if cells:
+        for cell in cells:
+            row = int(cell.row)
+            col = int(cell.col)
+            if row < 2:
+                continue
+            if col < 0 or col >= target_col_count:
+                continue
+            colspan = max(1, min(int(cell.colspan), target_col_count - col))
+            body_cells.append(
+                TableCell(
+                    row=row,
+                    col=col,
+                    text=str(cell.text),
+                    colspan=colspan,
+                    rowspan=max(1, int(cell.rowspan)),
+                )
+            )
+
+    header_cells = [
+        TableCell(row=0, col=0, text="", rowspan=2, colspan=1),
+        TableCell(row=0, col=1, text="通期", rowspan=2, colspan=1),
+        TableCell(row=0, col=2, text="前期比", rowspan=2, colspan=1),
+        TableCell(row=0, col=3, text="前回発表予想比", rowspan=1, colspan=2),
+        TableCell(row=1, col=3, text=sub_label, rowspan=1, colspan=1),
+        TableCell(row=1, col=4, text="増減率", rowspan=1, colspan=1),
+    ]
+
+    new_grid = tuple(tuple(row) for row in new_rows)
+    new_cells = tuple(header_cells + body_cells)
+    return new_grid, new_cells, changed
+
+
 def _correct_table_blocks_locally_with_pymupdf(
     *,
     page: Page,
+    pymupdf_text: str,
     pymupdf_words: list[Word],
     min_grid_confidence: float = 0.30,
 ) -> Page:
-    if not pymupdf_words:
+    text_candidates = _build_table_text_candidates_from_pymupdf(pymupdf_text)
+    if not pymupdf_words and not text_candidates:
         return page
 
     updated_blocks = list(page.blocks)
@@ -1084,59 +1847,80 @@ def _correct_table_blocks_locally_with_pymupdf(
         if block.grid is None:
             continue
 
-        source_rows = tuple(tuple(str(cell) for cell in row) for row in block.grid)
+        source_rows_raw = tuple(tuple(str(cell) for cell in row) for row in block.grid)
+        source_rows, source_cells, trimmed_grid = _trim_trailing_empty_table_columns(
+            source_rows=source_rows_raw,
+            source_cells=block.cells,
+        )
         if not source_rows:
             continue
         column_count = max((len(row) for row in source_rows), default=0)
         if column_count <= 0:
             continue
 
-        if column_count not in reference_rows_by_col_count:
-            grid_result = build_table_grid(pymupdf_words, column_count=column_count)
-            if (
-                not grid_result.ok
-                or grid_result.grid is None
-                or grid_result.confidence < float(min_grid_confidence)
-            ):
-                reference_rows_by_col_count[column_count] = None
-            else:
-                reference_rows_by_col_count[column_count] = tuple(
-                    tuple(str(cell) for cell in row) for row in grid_result.grid.rows
-                )
-
-        reference_rows = reference_rows_by_col_count[column_count]
-        if reference_rows is None:
-            continue
-        if len(reference_rows) != len(source_rows):
-            continue
+        reference_rows: tuple[tuple[str, ...], ...] | None = None
+        if pymupdf_words:
+            if column_count not in reference_rows_by_col_count:
+                grid_result = build_table_grid(pymupdf_words, column_count=column_count)
+                if (
+                    not grid_result.ok
+                    or grid_result.grid is None
+                    or grid_result.confidence < float(min_grid_confidence)
+                ):
+                    reference_rows_by_col_count[column_count] = None
+                else:
+                    reference_rows_by_col_count[column_count] = tuple(
+                        tuple(str(cell) for cell in row) for row in grid_result.grid.rows
+                    )
+            reference_rows = reference_rows_by_col_count[column_count]
+            if reference_rows is not None and len(reference_rows) != len(source_rows):
+                reference_rows = None
 
         changed_cells = 0
         next_rows: list[tuple[str, ...]] = []
         for row_index, source_row in enumerate(source_rows):
             source_padded = source_row + ("",) * (column_count - len(source_row))
-            reference_row = reference_rows[row_index]
-            reference_padded = reference_row + ("",) * (column_count - len(reference_row))
             next_row = list(source_padded)
+            reference_padded: tuple[str, ...] | None = None
+            if reference_rows is not None:
+                reference_row = reference_rows[row_index]
+                reference_padded = reference_row + ("",) * (column_count - len(reference_row))
 
             for col_index in range(column_count):
                 source_cell = normalize_extracted_text(source_padded[col_index]).strip()
-                reference_cell = normalize_extracted_text(reference_padded[col_index]).strip()
-                if not source_cell or not reference_cell:
+                if not source_cell:
                     continue
 
-                merged_cell, _ = merge_ocr_with_pymupdf(
-                    source_cell,
-                    reference_cell,
-                )
+                merged_cell = source_cell
+                if reference_padded is not None:
+                    reference_cell = normalize_extracted_text(reference_padded[col_index]).strip()
+                    if reference_cell:
+                        merged_cell, _ = merge_ocr_with_pymupdf(
+                            source_cell,
+                            reference_cell,
+                        )
+                    if merged_cell == source_cell and reference_cell:
+                        merged_fallback, _ = merge_ocr_with_pymupdf(
+                            source_cell,
+                            reference_cell,
+                            policy="aggressive",
+                            max_changed_ratio=0.45,
+                        )
+                        if merged_fallback != source_cell:
+                            merged_cell = merged_fallback
+
                 if merged_cell == source_cell:
-                    merged_fallback, _ = merge_ocr_with_pymupdf(
-                        source_cell,
-                        reference_cell,
-                        policy="aggressive",
-                        max_changed_ratio=0.45,
+                    row_other_compact = {
+                        _compact_text_for_match(normalize_extracted_text(source_padded[other_col]).strip())
+                        for other_col in range(column_count)
+                        if other_col != col_index
+                    }
+                    row_other_compact.discard("")
+                    merged_cell = _correct_table_cell_with_pymupdf_text_candidates(
+                        source_cell=source_cell,
+                        text_candidates=text_candidates,
+                        disallow_compact=row_other_compact,
                     )
-                    if merged_fallback != source_cell:
-                        merged_cell = merged_fallback
                 if merged_cell == source_cell:
                     continue
                 if not _is_safe_table_cell_merge(ocr_cell=source_cell, merged_cell=merged_cell):
@@ -1147,14 +1931,23 @@ def _correct_table_blocks_locally_with_pymupdf(
 
             next_rows.append(tuple(next_row))
 
-        if changed_cells <= 0:
-            continue
-
         new_grid = tuple(next_rows)
+        new_cells = _refresh_table_cells_for_grid(
+            source_cells=source_cells,
+            new_grid=new_grid,
+        )
+        repaired_grid, repaired_cells, repaired_header = _repair_forecast_comparison_table_structure(
+            grid=new_grid,
+            cells=new_cells,
+        )
+        new_grid = repaired_grid
+        new_cells = repaired_cells
+        if changed_cells <= 0 and not trimmed_grid and not repaired_header:
+            continue
         updated_blocks[index] = Table(
             text="\n".join("\t".join(row) for row in new_grid),
             grid=new_grid,
-            cells=block.cells,
+            cells=new_cells,
         )
         changed_tables += 1
 
@@ -1192,7 +1985,7 @@ def _looks_like_table_data_line(line: str) -> bool:
         return True
     if "%" in line:
         return True
-    if re.search(r"[△▲]\s*\d", line):
+    if re.search(r"[笆ｳ笆ｲ]\s*\d", line):
         return True
     if len(re.findall(r"\d+", line)) >= 4:
         return True
@@ -1325,6 +2118,17 @@ def pdf_to_html(
 
         selected = _select_best_pass_outcome(primary=primary_outcome, retry=retry_outcome)
         merged_text = selected.merged_text
+        if _should_prefer_pymupdf_text(
+            merged_text=merged_text,
+            ocr_text=selected.ocr_text,
+            pymupdf_text=pymupdf_text,
+            pymupdf_words=pymupdf_words,
+            table_likelihood=primary_plan.table_likelihood,
+            merged_quality=selected.merged_quality,
+            fallback_mode=settings.lighton_pymupdf_page_fallback_mode,
+        ):
+            merged_text = normalize_extracted_text(pymupdf_text).strip()
+
         normalized_text = _sanitize_ocr_markdown_text(merged_text)
         normalized_text = _force_close_unclosed_table_markup(normalized_text)
         if not normalized_text and merged_text.strip():
@@ -1404,3 +2208,5 @@ def pdf_to_html(
         ),
     )
     return html
+
+

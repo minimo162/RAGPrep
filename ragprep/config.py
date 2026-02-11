@@ -53,6 +53,9 @@ ENV_LIGHTON_FAST_TABLE_LIKELIHOOD_THRESHOLD: Final[str] = (
 ENV_LIGHTON_FAST_MAX_TOKENS_TEXT: Final[str] = "RAGPREP_LIGHTON_FAST_MAX_TOKENS_TEXT"
 ENV_LIGHTON_FAST_MAX_TOKENS_TABLE: Final[str] = "RAGPREP_LIGHTON_FAST_MAX_TOKENS_TABLE"
 ENV_LIGHTON_FAST_POSTPROCESS_MODE: Final[str] = "RAGPREP_LIGHTON_FAST_POSTPROCESS_MODE"
+ENV_LIGHTON_PYMUPDF_PAGE_FALLBACK_MODE: Final[str] = (
+    "RAGPREP_LIGHTON_PYMUPDF_PAGE_FALLBACK_MODE"
+)
 
 DEFAULT_MAX_UPLOAD_BYTES: Final[int] = 100 * 1024 * 1024
 DEFAULT_MAX_PAGES: Final[int] = 200
@@ -68,7 +71,7 @@ DEFAULT_LIGHTON_MODEL_FILE: Final[str] = "LightOnOCR-2-1B-IQ4_XS.gguf"
 DEFAULT_LIGHTON_MMPROJ_FILE: Final[str] = "mmproj-BF16.gguf"
 DEFAULT_LIGHTON_MODEL_DIR: Final[str] = os.path.join("~", ".ragprep", "models", "lighton")
 DEFAULT_LIGHTON_AUTO_DOWNLOAD: Final[bool] = True
-DEFAULT_LIGHTON_PROFILE: Final[str] = "ocr-fastest"
+DEFAULT_LIGHTON_PROFILE: Final[str] = "balanced"
 DEFAULT_LIGHTON_SERVER_HOST: Final[str] = "127.0.0.1"
 DEFAULT_LIGHTON_SERVER_PORT: Final[int] = 8080
 DEFAULT_LIGHTON_START_TIMEOUT_SECONDS: Final[int] = 300
@@ -101,6 +104,7 @@ DEFAULT_LIGHTON_FAST_TABLE_LIKELIHOOD_THRESHOLD: Final[float] = 0.60
 DEFAULT_LIGHTON_FAST_MAX_TOKENS_TEXT: Final[int] = 4096
 DEFAULT_LIGHTON_FAST_MAX_TOKENS_TABLE: Final[int] = 8192
 DEFAULT_LIGHTON_FAST_POSTPROCESS_MODE: Final[str] = "light"
+DEFAULT_LIGHTON_PYMUPDF_PAGE_FALLBACK_MODE: Final[str] = "repeat"
 DEFAULT_OCR_FASTEST_LIGHTON_PARALLEL: Final[int] = 1
 DEFAULT_OCR_FASTEST_LIGHTON_PAGE_CONCURRENCY: Final[int] = 1
 DEFAULT_OCR_FASTEST_LIGHTON_MAX_TOKENS: Final[int] = 1024
@@ -116,6 +120,11 @@ DEFAULT_OCR_FASTEST_LIGHTON_FAST_POSTPROCESS_MODE: Final[str] = "off"
 SUPPORTED_LIGHTON_PROFILES: Final[tuple[str, ...]] = ("balanced", "ocr-fastest")
 SUPPORTED_LIGHTON_MERGE_POLICIES: Final[tuple[str, ...]] = ("strict", "aggressive")
 SUPPORTED_LIGHTON_FAST_POSTPROCESS_MODES: Final[tuple[str, ...]] = ("full", "light", "off")
+SUPPORTED_LIGHTON_PYMUPDF_PAGE_FALLBACK_MODES: Final[tuple[str, ...]] = (
+    "off",
+    "repeat",
+    "aggressive",
+)
 
 
 @dataclass(frozen=True)
@@ -168,6 +177,7 @@ class Settings:
     lighton_fast_max_tokens_text: int
     lighton_fast_max_tokens_table: int
     lighton_fast_postprocess_mode: str
+    lighton_pymupdf_page_fallback_mode: str
 
 
 def _get_positive_int(name: str, default: int) -> int:
@@ -290,6 +300,21 @@ def _get_lighton_fast_postprocess_mode(default: str = DEFAULT_LIGHTON_FAST_POSTP
         raise ValueError(
             f"{ENV_LIGHTON_FAST_POSTPROCESS_MODE} must be one of "
             f"{', '.join(SUPPORTED_LIGHTON_FAST_POSTPROCESS_MODES)}, got: {raw!r}"
+        )
+    return value
+
+
+def _get_lighton_pymupdf_page_fallback_mode(
+    default: str = DEFAULT_LIGHTON_PYMUPDF_PAGE_FALLBACK_MODE,
+) -> str:
+    raw = os.getenv(ENV_LIGHTON_PYMUPDF_PAGE_FALLBACK_MODE)
+    if raw is None or not raw.strip():
+        return default
+    value = raw.strip().lower()
+    if value not in SUPPORTED_LIGHTON_PYMUPDF_PAGE_FALLBACK_MODES:
+        raise ValueError(
+            f"{ENV_LIGHTON_PYMUPDF_PAGE_FALLBACK_MODE} must be one of "
+            f"{', '.join(SUPPORTED_LIGHTON_PYMUPDF_PAGE_FALLBACK_MODES)}, got: {raw!r}"
         )
     return value
 
@@ -439,4 +464,5 @@ def get_settings() -> Settings:
         lighton_fast_postprocess_mode=_get_lighton_fast_postprocess_mode(
             default_lighton_fast_postprocess_mode
         ),
+        lighton_pymupdf_page_fallback_mode=_get_lighton_pymupdf_page_fallback_mode(),
     )

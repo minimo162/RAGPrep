@@ -233,6 +233,57 @@ def test_pdf_to_html_falls_back_to_pymupdf_text_for_low_quality_ocr(
     assert "売上高 100 営業利益 20" in html
 
 
+def test_pdf_to_html_prefers_pymupdf_when_ocr_is_repetitive_and_misaligned(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def _fake_iter_pages(
+        _pdf_bytes: bytes,
+        *,
+        dpi: int | None = None,
+        max_edge: int | None = None,
+        max_pages: int | None = None,
+        max_bytes: int | None = None,
+    ) -> tuple[int, Iterator[str]]:
+        _ = dpi, max_edge, max_pages, max_bytes
+        return 1, iter(["P1"])
+
+    pymupdf_text = (
+        "2026年3月期 第2四半期（中間期）決算短信〔日本基準〕(連結)\n"
+        "2025年11月7日\n"
+        "上場会社名 マツダ株式会社\n"
+        "上場取引所 東\n"
+        "コード番号 7261\n"
+        "問い合わせ先 財務本部経理部長 渡部 啓治\n"
+    )
+    noisy_ocr = "\n".join(["2 ページ"] * 49)
+
+    words = [
+        Word(
+            x0=float(i * 6),
+            y0=10.0,
+            x1=float((i * 6) + 5),
+            y1=18.0,
+            text=f"w{i}",
+            block_no=0,
+            line_no=0,
+            word_no=i,
+        )
+        for i in range(30)
+    ]
+
+    monkeypatch.setattr("ragprep.pipeline.iter_pdf_page_png_base64", _fake_iter_pages)
+    monkeypatch.setattr("ragprep.pipeline.extract_pymupdf_page_texts", lambda _pdf: [pymupdf_text])
+    monkeypatch.setattr("ragprep.pipeline.extract_pymupdf_page_words", lambda _pdf: [words])
+    monkeypatch.setattr(
+        "ragprep.pipeline.lighton_ocr.ocr_image_base64",
+        lambda _image_b64, *, settings: noisy_ocr,
+    )
+
+    html = pdf_to_html(b"%PDF", full_document=False)
+    assert "上場会社名 マツダ株式会社" in html
+    assert html.count("2 ページ") <= 2
+
+
 def test_pdf_to_html_replaces_truncated_ocr_table_with_pymupdf_table(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

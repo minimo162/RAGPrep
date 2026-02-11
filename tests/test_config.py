@@ -11,7 +11,7 @@ def test_default_backend_is_lighton(monkeypatch: pytest.MonkeyPatch) -> None:
     settings = config.get_settings()
     assert settings.ocr_backend == "lighton-ocr"
     assert settings.pdf_backend == "lighton-ocr"
-    assert settings.lighton_profile == "ocr-fastest"
+    assert settings.lighton_profile == "balanced"
     assert settings.lighton_repo_id == "noctrex/LightOnOCR-2-1B-GGUF"
     assert settings.lighton_model_file == "LightOnOCR-2-1B-IQ4_XS.gguf"
     assert settings.lighton_mmproj_file == "mmproj-BF16.gguf"
@@ -73,6 +73,7 @@ def test_ocr_fastest_profile_applies_speed_defaults(
     assert settings.lighton_fast_max_tokens_text == 512
     assert settings.lighton_fast_max_tokens_table == 1024
     assert settings.lighton_fast_postprocess_mode == "off"
+    assert settings.lighton_pymupdf_page_fallback_mode == "repeat"
 
 
 def test_ocr_fastest_profile_keeps_explicit_env_overrides(
@@ -163,15 +164,15 @@ def test_recommended_lighton_defaults_are_applied_when_unset(
     monkeypatch.delenv("RAGPREP_LIGHTON_FAST_POSTPROCESS_MODE", raising=False)
 
     settings = config.get_settings()
-    assert settings.lighton_profile == "ocr-fastest"
+    assert settings.lighton_profile == "balanced"
     assert settings.lighton_start_timeout_seconds == 300
     assert settings.lighton_request_timeout_seconds == 600
-    assert settings.lighton_page_concurrency == 1
-    assert settings.lighton_parallel == 1
-    assert settings.lighton_max_tokens == 1024
+    assert settings.lighton_page_concurrency == 2
+    assert settings.lighton_parallel == 2
+    assert settings.lighton_max_tokens == 8192
     assert settings.lighton_fast_pass is True
-    assert settings.lighton_fast_render_dpi == 96
-    assert settings.lighton_fast_render_max_edge == 640
+    assert settings.lighton_fast_render_dpi == 200
+    assert settings.lighton_fast_render_max_edge == 1100
     assert settings.lighton_fast_retry is False
     assert settings.lighton_secondary_table_repair is False
     assert settings.lighton_retry_render_dpi == 220
@@ -179,11 +180,12 @@ def test_recommended_lighton_defaults_are_applied_when_unset(
     assert settings.lighton_retry_min_quality == pytest.approx(0.40)
     assert settings.lighton_retry_quality_gap == pytest.approx(0.22)
     assert settings.lighton_retry_min_pym_text_len == 80
-    assert settings.lighton_fast_non_table_max_edge == 520
+    assert settings.lighton_fast_non_table_max_edge == 960
     assert settings.lighton_fast_table_likelihood_threshold == pytest.approx(0.60)
-    assert settings.lighton_fast_max_tokens_text == 512
-    assert settings.lighton_fast_max_tokens_table == 1024
-    assert settings.lighton_fast_postprocess_mode == "off"
+    assert settings.lighton_fast_max_tokens_text == 4096
+    assert settings.lighton_fast_max_tokens_table == 8192
+    assert settings.lighton_fast_postprocess_mode == "light"
+    assert settings.lighton_pymupdf_page_fallback_mode == "repeat"
 
 
 def test_balanced_profile_keeps_previous_default_tuning(
@@ -211,6 +213,7 @@ def test_balanced_profile_keeps_previous_default_tuning(
     assert settings.lighton_fast_max_tokens_text == 4096
     assert settings.lighton_fast_max_tokens_table == 8192
     assert settings.lighton_fast_postprocess_mode == "light"
+    assert settings.lighton_pymupdf_page_fallback_mode == "repeat"
 
 
 def test_lighton_fast_retry_env_overrides_are_applied(
@@ -255,4 +258,25 @@ def test_lighton_fast_postprocess_mode_rejects_invalid(
 ) -> None:
     monkeypatch.setenv("RAGPREP_LIGHTON_FAST_POSTPROCESS_MODE", "invalid")
     with pytest.raises(ValueError, match="RAGPREP_LIGHTON_FAST_POSTPROCESS_MODE"):
+        config.get_settings()
+
+
+def test_lighton_pymupdf_page_fallback_mode_accepts_supported_values(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("RAGPREP_LIGHTON_PYMUPDF_PAGE_FALLBACK_MODE", "off")
+    assert config.get_settings().lighton_pymupdf_page_fallback_mode == "off"
+
+    monkeypatch.setenv("RAGPREP_LIGHTON_PYMUPDF_PAGE_FALLBACK_MODE", "repeat")
+    assert config.get_settings().lighton_pymupdf_page_fallback_mode == "repeat"
+
+    monkeypatch.setenv("RAGPREP_LIGHTON_PYMUPDF_PAGE_FALLBACK_MODE", "aggressive")
+    assert config.get_settings().lighton_pymupdf_page_fallback_mode == "aggressive"
+
+
+def test_lighton_pymupdf_page_fallback_mode_rejects_invalid(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("RAGPREP_LIGHTON_PYMUPDF_PAGE_FALLBACK_MODE", "invalid")
+    with pytest.raises(ValueError, match="RAGPREP_LIGHTON_PYMUPDF_PAGE_FALLBACK_MODE"):
         config.get_settings()

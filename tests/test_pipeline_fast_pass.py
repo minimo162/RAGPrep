@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import base64
 import io
@@ -379,7 +379,7 @@ def test_fast_pass_downscales_non_table_page(monkeypatch: pytest.MonkeyPatch) ->
     assert max(captured_sizes[0]) <= 800
 
 
-def test_fast_postprocess_light_skips_heavy_corrections(
+def test_fast_postprocess_light_applies_text_correction_but_skips_table_correction_on_non_table_page(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setenv("RAGPREP_LIGHTON_FAST_PASS", "1")
@@ -393,9 +393,16 @@ def test_fast_postprocess_light_skips_heavy_corrections(
         "ragprep.pipeline.lighton_ocr.ocr_image_base64",
         lambda _image_b64, *, settings: "abc",
     )
+    called = {"text_correction": 0}
+
+    def _spy_text_correction(*, page: object, pymupdf_text: str, **kwargs: object) -> object:
+        _ = pymupdf_text, kwargs
+        called["text_correction"] += 1
+        return page
+
     monkeypatch.setattr(
         "ragprep.pipeline._correct_text_blocks_locally_with_pymupdf",
-        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("should not run")),
+        _spy_text_correction,
     )
     monkeypatch.setattr(
         "ragprep.pipeline._correct_table_blocks_locally_with_pymupdf",
@@ -404,6 +411,41 @@ def test_fast_postprocess_light_skips_heavy_corrections(
 
     html = pdf_to_html(b"%PDF", full_document=False)
     assert "abc" in html
+    assert called["text_correction"] == 1
+
+
+def test_fast_postprocess_light_corrects_split_name_tokens_with_pymupdf(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("RAGPREP_LIGHTON_FAST_PASS", "1")
+    monkeypatch.setenv("RAGPREP_LIGHTON_FAST_POSTPROCESS_MODE", "light")
+
+    monkeypatch.setattr("ragprep.pipeline.iter_pdf_page_png_base64", _iter_one_page)
+    monkeypatch.setattr(
+        "ragprep.pipeline.extract_pymupdf_page_texts",
+        lambda _pdf: [
+            "\n".join(
+                [
+                    "Representative",
+                    "Director",
+                    "(Unit: million yen)",
+                    "Representative Director",
+                    "Net sales",
+                ]
+            )
+        ],
+    )
+    monkeypatch.setattr("ragprep.pipeline.extract_pymupdf_page_words", lambda _pdf: [[]])
+    monkeypatch.setattr("ragprep.pipeline._estimate_page_table_likelihood", lambda _words: 0.0)
+    monkeypatch.setattr(
+        "ragprep.pipeline.lighton_ocr.ocr_image_base64",
+        lambda _image_b64, *, settings: "Representat1ve D1rector (Unlt: mllllon yen)",
+    )
+
+    html = pdf_to_html(b"%PDF", full_document=False)
+    assert "Representative Director" in html
+    assert "(Unit: million yen)" in html
+    assert "Representat1ve D1rector" not in html
 
 
 def test_legacy_mode_keeps_full_postprocess_even_if_fast_postprocess_is_off(
@@ -435,3 +477,38 @@ def test_legacy_mode_keeps_full_postprocess_even_if_fast_postprocess_is_off(
     html = pdf_to_html(b"%PDF", full_document=False)
     assert "abc" in html
     assert called["text_correction"] == 1
+
+def test_fast_postprocess_light_splits_compound_toc_line(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("RAGPREP_LIGHTON_FAST_PASS", "1")
+    monkeypatch.setenv("RAGPREP_LIGHTON_FAST_POSTPROCESS_MODE", "light")
+
+    monkeypatch.setattr("ragprep.pipeline.iter_pdf_page_png_base64", _iter_one_page)
+    monkeypatch.setattr(
+        "ragprep.pipeline.extract_pymupdf_page_texts",
+        lambda _pdf: [
+            "1. Overview .......... 2\n"
+            "(1) Revenue summary .......... 2\n"
+            "(2) Financial position .......... 2\n"
+            "(3) Forecast .......... 3"
+        ],
+    )
+    monkeypatch.setattr("ragprep.pipeline.extract_pymupdf_page_words", lambda _pdf: [[]])
+    monkeypatch.setattr("ragprep.pipeline._estimate_page_table_likelihood", lambda _words: 0.0)
+    monkeypatch.setattr(
+        "ragprep.pipeline.lighton_ocr.ocr_image_base64",
+        lambda _image_b64, *, settings: (
+            "1. Overview .......... 2 "
+            "(1) Revenue summary .......... 2 "
+            "(2) Financial position .......... 2 "
+            "(3) Forecast .......... 3"
+        ),
+    )
+
+    html = pdf_to_html(b"%PDF", full_document=False)
+    assert "Overview .......... 2 <br />" in html
+    assert "(1) Revenue summary" in html
+    assert "(2) Financial position" in html
+    assert "(3) Forecast" in html
+
