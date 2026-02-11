@@ -26,7 +26,7 @@ from ragprep.pdf_text import (
     score_text_quality,
     tokenize_by_char_class,
 )
-from ragprep.structure_ir import Document, Heading, Page, Paragraph, Table, Unknown
+from ragprep.structure_ir import Block, Document, Heading, Page, Paragraph, Table, Unknown
 from ragprep.table_grid import TableCell, build_table_grid
 from ragprep.table_merge import merge_markdown_tables_with_pymupdf_words
 from ragprep.text_merge import merge_ocr_with_pymupdf
@@ -130,6 +130,38 @@ _NOTE_ARTIFACT_HINTS: tuple[str, ...] = (
     "fictional",
     "this transcription is",
     "no additional text or structured data",
+)
+_PAGE_NUMBER_ONLY_RE = re.compile(r"^\s*[-‐‑‒–—―－−]?\s*([0-9\uFF10-\uFF19]{1,3})\s*[-‐‑‒–—―－−]?\s*$")
+_LEADING_PAGE_NUMBER_PREFIX_RE = re.compile(
+    r"^\s*([0-9\uFF10-\uFF19]{1,3})\s+(.+)$",
+    re.DOTALL,
+)
+_SECTION_BAR_HEADING_RE = re.compile(
+    r"^\s*(?P<section>[0-9\uFF10-\uFF19]{2})\s*[|\uFF5C]\s*(?P<title>\S(?:.*\S)?)\s*$",
+    re.DOTALL,
+)
+_BUSINESS_OVERVIEW_HEADING_RE = re.compile(
+    r"^\s*事業概要\s*[|\uFF5C]\s*(?P<title>\S(?:.*\S)?)\s*$",
+    re.DOTALL,
+)
+_HEADING_TAIL_SPLIT_RE = re.compile(r"\s+(?=(?:\*[0-9\uFF10-\uFF19]+|注[0-9\uFF10-\uFF19]+))")
+_BUSINESS_OVERVIEW_TITLE_SPLIT_RE = re.compile(r"^(?P<title>.{1,80}?事業)\s+(?P<tail>.+)$", re.DOTALL)
+_FOOTER_BRAND_RE = re.compile(r"^\s*kubell\s*$", re.IGNORECASE)
+_DECK_FOOTNOTE_LINE_RE = re.compile(r"^\s*\*")
+_CIRCLED_NUMBER_RE = re.compile(r"[①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮⑯⑰⑱⑲⑳]")
+_WIDE_DIGIT_TRANSLATION = str.maketrans(
+    {
+        "０": "0",
+        "１": "1",
+        "２": "2",
+        "３": "3",
+        "４": "4",
+        "５": "5",
+        "６": "6",
+        "７": "7",
+        "８": "8",
+        "９": "9",
+    }
 )
 
 
@@ -564,6 +596,334 @@ def _apply_table_fallback_with_pymupdf(
     )
 
 
+def _to_ascii_digits(text: str) -> str:
+    return str(text or "").translate(_WIDE_DIGIT_TRANSLATION)
+
+
+def _parse_ascii_int(text: str) -> int | None:
+    normalized = _to_ascii_digits(text).strip()
+    if not normalized.isdigit():
+        return None
+    try:
+        return int(normalized)
+    except Exception:
+        return None
+
+
+def _is_page_number_only_text(text: str, *, page_number: int) -> bool:
+    normalized = normalize_extracted_text(text).strip()
+    if not normalized:
+        return False
+    match = _PAGE_NUMBER_ONLY_RE.fullmatch(normalized)
+    if match is None:
+        return False
+    parsed = _parse_ascii_int(str(match.group(1) or ""))
+    if parsed is None:
+        return False
+    return parsed == int(page_number)
+
+
+def _strip_leading_page_number_prefix(text: str, *, page_number: int) -> str:
+    normalized = normalize_extracted_text(text).strip()
+    if not normalized:
+        return ""
+    match = _LEADING_PAGE_NUMBER_PREFIX_RE.match(normalized)
+    if match is None:
+        return normalized
+    parsed = _parse_ascii_int(str(match.group(1) or ""))
+    if parsed != int(page_number):
+        return normalized
+    remainder = str(match.group(2) or "").lstrip()
+    if remainder.startswith("|") or remainder.startswith("｜"):
+        # Preserve section headings like "01 | ...".
+        return normalized
+    return remainder
+
+
+def _extract_promoted_heading_and_tail(
+    text: str,
+    *,
+    page_number: int,
+) -> tuple[str, str | None] | None:
+    stripped = _strip_leading_page_number_prefix(text, page_number=page_number)
+    if not stripped:
+        return None
+
+    section_match = _SECTION_BAR_HEADING_RE.match(stripped)
+    if section_match is not None:
+        section = str(section_match.group("section") or "").strip()
+        title = str(section_match.group("title") or "").strip()
+        if not section or not title:
+            return None
+        return f"{section} | {title}", None
+
+    overview_match = _BUSINESS_OVERVIEW_HEADING_RE.match(stripped)
+    if overview_match is None:
+        return None
+
+    raw_title = str(overview_match.group("title") or "").strip()
+    if not raw_title:
+        return None
+
+    title = raw_title
+    tail: str | None = None
+    split_match = _HEADING_TAIL_SPLIT_RE.search(raw_title)
+    if split_match is not None:
+        title = raw_title[: split_match.start()].strip()
+        tail = raw_title[split_match.start() :].strip() or None
+    else:
+        title_split_match = _BUSINESS_OVERVIEW_TITLE_SPLIT_RE.match(raw_title)
+        if title_split_match is not None:
+            candidate_title = str(title_split_match.group("title") or "").strip()
+            candidate_tail = str(title_split_match.group("tail") or "").strip()
+            if candidate_tail and (
+                "。" in candidate_tail or "、" in candidate_tail or len(candidate_tail) >= 24
+            ):
+                title = candidate_title
+                tail = candidate_tail or None
+
+    if not title:
+        return None
+    if len(title) > 80 and tail is None:
+        # Avoid converting body-merged long paragraphs into headings.
+        return None
+    return f"事業概要｜{title}", tail
+
+
+def _strip_page_number_prefix_on_top_text_blocks(page: Page) -> Page:
+    updated_blocks = list(page.blocks)
+    changed = False
+    text_block_seen = 0
+
+    for index, block in enumerate(updated_blocks):
+        if isinstance(block, Table):
+            continue
+        if not isinstance(block, (Paragraph, Heading, Unknown)):
+            continue
+        text_block_seen += 1
+        if text_block_seen > 2:
+            break
+        source_text = str(getattr(block, "text", "")).strip()
+        if not source_text:
+            continue
+        stripped = _strip_leading_page_number_prefix(
+            source_text,
+            page_number=page.page_number,
+        )
+        if stripped == source_text:
+            continue
+        if isinstance(block, Paragraph):
+            updated_blocks[index] = Paragraph(text=stripped)
+        elif isinstance(block, Heading):
+            updated_blocks[index] = Heading(level=block.level, text=stripped)
+        else:
+            updated_blocks[index] = Unknown(text=stripped)
+        changed = True
+
+    if not changed:
+        return page
+    return Page(page_number=page.page_number, blocks=tuple(updated_blocks))
+
+
+def _remove_page_number_and_footer_blocks(page: Page) -> Page:
+    blocks = list(page.blocks)
+    if not blocks:
+        return page
+
+    next_blocks: list[Block] = []
+    total = len(blocks)
+    changed = False
+
+    for index, block in enumerate(blocks):
+        if not isinstance(block, (Paragraph, Heading, Unknown)):
+            next_blocks.append(block)
+            continue
+        text = str(getattr(block, "text", "")).strip()
+        if not text:
+            next_blocks.append(block)
+            continue
+        if _is_page_number_only_text(text, page_number=page.page_number):
+            changed = True
+            continue
+        if _FOOTER_BRAND_RE.fullmatch(text) and (index <= 1 or index >= (total - 2)):
+            changed = True
+            continue
+        next_blocks.append(block)
+
+    if not changed:
+        return page
+    return Page(page_number=page.page_number, blocks=tuple(next_blocks))
+
+
+def _promote_rule_based_headings(page: Page) -> Page:
+    if not page.blocks:
+        return page
+
+    next_blocks: list[Block] = []
+    changed = False
+    text_block_seen = 0
+
+    for block in page.blocks:
+        if not isinstance(block, (Paragraph, Unknown)):
+            next_blocks.append(block)
+            continue
+
+        text_block_seen += 1
+        source_text = str(getattr(block, "text", "")).strip()
+        if not source_text:
+            next_blocks.append(block)
+            continue
+
+        promoted = (
+            _extract_promoted_heading_and_tail(
+                source_text,
+                page_number=page.page_number,
+            )
+            if text_block_seen <= 3
+            else None
+        )
+        if promoted is None:
+            next_blocks.append(block)
+            continue
+
+        heading_text, tail_text = promoted
+        next_blocks.append(Heading(level=2, text=heading_text))
+        if tail_text:
+            next_blocks.append(Paragraph(text=tail_text))
+        changed = True
+
+    if not changed:
+        return page
+    return Page(page_number=page.page_number, blocks=tuple(next_blocks))
+
+
+def _is_short_heading_fragment_line(text: str) -> bool:
+    normalized = normalize_extracted_text(text).strip()
+    if not normalized:
+        return False
+    lowered = normalized.lower()
+    if "br />" in lowered or "br/>" in lowered or lowered.endswith("<br"):
+        return False
+    if _DECK_FOOTNOTE_LINE_RE.match(normalized):
+        return False
+    if normalized.startswith(("・", "-", "•", "※")):
+        return False
+    compact = _compact_text_for_match(normalized)
+    if not compact:
+        return False
+    if len(compact) > 20:
+        return False
+    if re.search(r"[0-9\uFF10-\uFF19]{3,}", normalized):
+        return False
+    return any(_is_japanese_char(ch) or ch.isalpha() for ch in compact)
+
+
+def _find_short_heading_cluster_end(lines: list[str], *, start: int) -> int | None:
+    if start < 0 or start >= len(lines):
+        return None
+    if (start + 1) >= len(lines):
+        return None
+    first_two = lines[start : start + 2]
+    if not all(_is_short_heading_fragment_line(line) for line in first_two):
+        return None
+    if "、" not in first_two[0]:
+        return None
+
+    end = start + 2
+    max_end = min(len(lines), start + 4)
+    while end < max_end and _is_short_heading_fragment_line(lines[end]):
+        end += 1
+
+    merged = "".join(lines[start:end])
+    compact_len = len(_compact_text_for_match(merged))
+    if compact_len < 8 or compact_len > 48:
+        return None
+    return end
+
+
+def _split_compound_issue_paragraph_into_blocks(text: str) -> list[Block] | None:
+    raw_lines = str(text or "").replace("\r\n", "\n").replace("\r", "\n").split("\n")
+    lines = [normalize_extracted_text(line).strip() for line in raw_lines if line.strip()]
+    if len(lines) < 6:
+        return None
+    if not any(_CIRCLED_NUMBER_RE.search(line) for line in lines):
+        return None
+    if not any(len(_compact_text_for_match(line)) >= 24 for line in lines):
+        return None
+
+    out: list[Block] = []
+    index = 0
+
+    first_line = lines[0]
+    first_compact_len = len(_compact_text_for_match(first_line))
+    if _CIRCLED_NUMBER_RE.search(first_line) and first_compact_len <= 40:
+        out.append(Heading(level=2, text=first_line))
+        index = 1
+
+    footnote_lines: list[str] = []
+    while index < len(lines) and _DECK_FOOTNOTE_LINE_RE.match(lines[index]):
+        footnote_lines.append(lines[index])
+        index += 1
+    if footnote_lines:
+        out.append(Paragraph(text="\n".join(footnote_lines)))
+
+    body_lines: list[str] = []
+    while index < len(lines):
+        cluster_end = _find_short_heading_cluster_end(lines, start=index)
+        if cluster_end is not None:
+            break
+        body_lines.append(lines[index])
+        index += 1
+    if body_lines:
+        out.append(Paragraph(text="\n".join(body_lines)))
+
+    while index < len(lines):
+        cluster_end = _find_short_heading_cluster_end(lines, start=index)
+        if cluster_end is not None:
+            out.append(Heading(level=2, text="".join(lines[index:cluster_end])))
+            index = cluster_end
+            continue
+        out.append(Paragraph(text=lines[index]))
+        index += 1
+
+    if len(out) <= 1:
+        return None
+    return out
+
+
+def _split_compound_issue_paragraph_blocks(page: Page) -> Page:
+    if not page.blocks:
+        return page
+
+    next_blocks: list[Block] = []
+    changed = False
+    for block in page.blocks:
+        if not isinstance(block, (Paragraph, Unknown)):
+            next_blocks.append(block)
+            continue
+        source_text = str(getattr(block, "text", "")).strip()
+        if not source_text:
+            next_blocks.append(block)
+            continue
+        replaced = _split_compound_issue_paragraph_into_blocks(source_text)
+        if replaced is None:
+            next_blocks.append(block)
+            continue
+        next_blocks.extend(replaced)
+        changed = True
+
+    if not changed:
+        return page
+    return Page(page_number=page.page_number, blocks=tuple(next_blocks))
+
+
+def _apply_page_cleanup_rules(page: Page) -> Page:
+    page = _strip_page_number_prefix_on_top_text_blocks(page)
+    page = _promote_rule_based_headings(page)
+    page = _split_compound_issue_paragraph_blocks(page)
+    return _remove_page_number_and_footer_blocks(page)
+
+
 def _apply_page_postprocess(
     *,
     page: Page,
@@ -578,7 +938,7 @@ def _apply_page_postprocess(
         mode = str(settings.lighton_fast_postprocess_mode or "full").strip().lower()
 
     if mode == "off":
-        return page
+        return _apply_page_cleanup_rules(page)
 
     if mode == "light":
         page = _correct_text_blocks_locally_with_pymupdf(
@@ -591,7 +951,7 @@ def _apply_page_postprocess(
         threshold = max(0.0, float(settings.lighton_fast_table_likelihood_threshold))
         has_table_block = any(isinstance(block, Table) for block in page.blocks)
         if table_likelihood < threshold and not has_table_block:
-            return page
+            return _apply_page_cleanup_rules(page)
         page = _replace_table_preface_with_pymupdf(page=page, pymupdf_text=pymupdf_text)
         page = _correct_table_blocks_locally_with_pymupdf(
             page=page,
@@ -603,11 +963,12 @@ def _apply_page_postprocess(
             pymupdf_text=pymupdf_text,
             pymupdf_words=pymupdf_words,
         )
-        return _correct_table_blocks_locally_with_pymupdf(
+        page = _correct_table_blocks_locally_with_pymupdf(
             page=page,
             pymupdf_text=pymupdf_text,
             pymupdf_words=pymupdf_words,
         )
+        return _apply_page_cleanup_rules(page)
 
     page = _replace_table_preface_with_pymupdf(
         page=page,
@@ -627,11 +988,12 @@ def _apply_page_postprocess(
         pymupdf_text=pymupdf_text,
         pymupdf_words=pymupdf_words,
     )
-    return _correct_table_blocks_locally_with_pymupdf(
+    page = _correct_table_blocks_locally_with_pymupdf(
         page=page,
         pymupdf_text=pymupdf_text,
         pymupdf_words=pymupdf_words,
     )
+    return _apply_page_cleanup_rules(page)
 
 
 def _run_ocr_pass(

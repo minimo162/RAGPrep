@@ -105,19 +105,7 @@ DEFAULT_LIGHTON_FAST_MAX_TOKENS_TEXT: Final[int] = 4096
 DEFAULT_LIGHTON_FAST_MAX_TOKENS_TABLE: Final[int] = 8192
 DEFAULT_LIGHTON_FAST_POSTPROCESS_MODE: Final[str] = "light"
 DEFAULT_LIGHTON_PYMUPDF_PAGE_FALLBACK_MODE: Final[str] = "repeat"
-DEFAULT_OCR_FASTEST_LIGHTON_PARALLEL: Final[int] = 1
-DEFAULT_OCR_FASTEST_LIGHTON_PAGE_CONCURRENCY: Final[int] = 1
-DEFAULT_OCR_FASTEST_LIGHTON_MAX_TOKENS: Final[int] = 1024
-DEFAULT_OCR_FASTEST_LIGHTON_FAST_PASS: Final[bool] = True
-DEFAULT_OCR_FASTEST_LIGHTON_FAST_RENDER_DPI: Final[int] = 96
-DEFAULT_OCR_FASTEST_LIGHTON_FAST_RENDER_MAX_EDGE: Final[int] = 640
-DEFAULT_OCR_FASTEST_LIGHTON_FAST_RETRY: Final[bool] = False
-DEFAULT_OCR_FASTEST_LIGHTON_SECONDARY_TABLE_REPAIR: Final[bool] = False
-DEFAULT_OCR_FASTEST_LIGHTON_FAST_NON_TABLE_MAX_EDGE: Final[int] = 520
-DEFAULT_OCR_FASTEST_LIGHTON_FAST_MAX_TOKENS_TEXT: Final[int] = 512
-DEFAULT_OCR_FASTEST_LIGHTON_FAST_MAX_TOKENS_TABLE: Final[int] = 1024
-DEFAULT_OCR_FASTEST_LIGHTON_FAST_POSTPROCESS_MODE: Final[str] = "off"
-SUPPORTED_LIGHTON_PROFILES: Final[tuple[str, ...]] = ("balanced", "ocr-fastest")
+SUPPORTED_LIGHTON_PROFILES: Final[tuple[str, ...]] = ("balanced",)
 SUPPORTED_LIGHTON_MERGE_POLICIES: Final[tuple[str, ...]] = ("strict", "aggressive")
 SUPPORTED_LIGHTON_FAST_POSTPROCESS_MODES: Final[tuple[str, ...]] = ("full", "light", "off")
 SUPPORTED_LIGHTON_PYMUPDF_PAGE_FALLBACK_MODES: Final[tuple[str, ...]] = (
@@ -335,21 +323,6 @@ def get_settings() -> Settings:
     default_lighton_fast_max_tokens_text = DEFAULT_LIGHTON_FAST_MAX_TOKENS_TEXT
     default_lighton_fast_max_tokens_table = DEFAULT_LIGHTON_FAST_MAX_TOKENS_TABLE
     default_lighton_fast_postprocess_mode = DEFAULT_LIGHTON_FAST_POSTPROCESS_MODE
-    if profile == "ocr-fastest":
-        default_lighton_parallel = DEFAULT_OCR_FASTEST_LIGHTON_PARALLEL
-        default_lighton_page_concurrency = DEFAULT_OCR_FASTEST_LIGHTON_PAGE_CONCURRENCY
-        default_lighton_max_tokens = DEFAULT_OCR_FASTEST_LIGHTON_MAX_TOKENS
-        default_lighton_fast_pass = DEFAULT_OCR_FASTEST_LIGHTON_FAST_PASS
-        default_lighton_fast_render_dpi = DEFAULT_OCR_FASTEST_LIGHTON_FAST_RENDER_DPI
-        default_lighton_fast_render_max_edge = DEFAULT_OCR_FASTEST_LIGHTON_FAST_RENDER_MAX_EDGE
-        default_lighton_fast_retry = DEFAULT_OCR_FASTEST_LIGHTON_FAST_RETRY
-        default_lighton_secondary_table_repair = DEFAULT_OCR_FASTEST_LIGHTON_SECONDARY_TABLE_REPAIR
-        default_lighton_fast_non_table_max_edge = (
-            DEFAULT_OCR_FASTEST_LIGHTON_FAST_NON_TABLE_MAX_EDGE
-        )
-        default_lighton_fast_max_tokens_text = DEFAULT_OCR_FASTEST_LIGHTON_FAST_MAX_TOKENS_TEXT
-        default_lighton_fast_max_tokens_table = DEFAULT_OCR_FASTEST_LIGHTON_FAST_MAX_TOKENS_TABLE
-        default_lighton_fast_postprocess_mode = DEFAULT_OCR_FASTEST_LIGHTON_FAST_POSTPROCESS_MODE
 
     return Settings(
         max_upload_bytes=_get_positive_int(ENV_MAX_UPLOAD_BYTES, DEFAULT_MAX_UPLOAD_BYTES),

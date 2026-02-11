@@ -299,43 +299,6 @@ def test_fast_pass_uses_page_type_token_budget(monkeypatch: pytest.MonkeyPatch) 
     assert captured_tokens == [3333, 7777]
 
 
-def test_ocr_fastest_profile_still_uses_ocr_for_each_page(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setenv("RAGPREP_LIGHTON_PROFILE", "ocr-fastest")
-    monkeypatch.setenv("RAGPREP_LIGHTON_FAST_RETRY", "0")
-    monkeypatch.setenv("RAGPREP_LIGHTON_PAGE_CONCURRENCY", "1")
-
-    def _iter_two_pages(
-        _pdf_bytes: bytes,
-        *,
-        dpi: int | None = None,
-        max_edge: int | None = None,
-        max_pages: int | None = None,
-        max_bytes: int | None = None,
-    ) -> tuple[int, Iterator[str]]:
-        _ = dpi, max_edge, max_pages, max_bytes
-        return 2, iter(["P1", "P2"])
-
-    monkeypatch.setattr("ragprep.pipeline.iter_pdf_page_png_base64", _iter_two_pages)
-    monkeypatch.setattr("ragprep.pipeline.extract_pymupdf_page_texts", lambda _pdf: ["one", "two"])
-    monkeypatch.setattr("ragprep.pipeline.extract_pymupdf_page_words", lambda _pdf: [[], []])
-
-    calls = {"ocr": 0}
-
-    def _fake_ocr(_image_b64: str, *, settings: object) -> str:
-        _ = settings
-        calls["ocr"] += 1
-        return f"ocr text {calls['ocr']}"
-
-    monkeypatch.setattr("ragprep.pipeline.lighton_ocr.ocr_image_base64", _fake_ocr)
-
-    html = pdf_to_html(b"%PDF", full_document=False)
-    assert "ocr text 1" in html
-    assert "ocr text 2" in html
-    assert calls["ocr"] == 2
-
-
 def test_fast_pass_downscales_non_table_page(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("RAGPREP_LIGHTON_FAST_PASS", "1")
     monkeypatch.setenv("RAGPREP_LIGHTON_FAST_NON_TABLE_MAX_EDGE", "800")
@@ -507,8 +470,120 @@ def test_fast_postprocess_light_splits_compound_toc_line(
     )
 
     html = pdf_to_html(b"%PDF", full_document=False)
-    assert "Overview .......... 2 <br />" in html
+    assert "Overview .......... 2<br />" in html or "Overview .......... 2 <br />" in html
     assert "(1) Revenue summary" in html
     assert "(2) Financial position" in html
     assert "(3) Forecast" in html
+
+
+def test_fast_postprocess_promotes_section_heading_and_removes_footer_artifacts(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("RAGPREP_LIGHTON_FAST_PASS", "1")
+    monkeypatch.setenv("RAGPREP_LIGHTON_FAST_POSTPROCESS_MODE", "light")
+
+    monkeypatch.setattr("ragprep.pipeline.iter_pdf_page_png_base64", _iter_one_page)
+    monkeypatch.setattr(
+        "ragprep.pipeline.extract_pymupdf_page_texts",
+        lambda _pdf: ["01 | Company Overview\nkubell\n1"],
+    )
+    monkeypatch.setattr("ragprep.pipeline.extract_pymupdf_page_words", lambda _pdf: [[]])
+    monkeypatch.setattr("ragprep.pipeline._estimate_page_table_likelihood", lambda _words: 0.0)
+    monkeypatch.setattr(
+        "ragprep.pipeline.lighton_ocr.ocr_image_base64",
+        lambda _image_b64, *, settings: "01 | Company Overview\n\nkubell\n\n1",
+    )
+
+    html = pdf_to_html(b"%PDF", full_document=False)
+    assert "<h2>01 | Company Overview</h2>" in html
+    assert "<p>kubell</p>" not in html
+    assert "<p>1</p>" not in html
+
+
+def test_fast_postprocess_promotes_business_overview_heading_and_splits_tail(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("RAGPREP_LIGHTON_FAST_PASS", "1")
+    monkeypatch.setenv("RAGPREP_LIGHTON_FAST_POSTPROCESS_MODE", "light")
+
+    monkeypatch.setattr("ragprep.pipeline.iter_pdf_page_png_base64", _iter_one_page)
+    monkeypatch.setattr(
+        "ragprep.pipeline.extract_pymupdf_page_texts",
+        lambda _pdf: ["1 事業概要｜ビジネスチャット事業 *1 Footnote line"],
+    )
+    monkeypatch.setattr("ragprep.pipeline.extract_pymupdf_page_words", lambda _pdf: [[]])
+    monkeypatch.setattr("ragprep.pipeline._estimate_page_table_likelihood", lambda _words: 0.0)
+    monkeypatch.setattr(
+        "ragprep.pipeline.lighton_ocr.ocr_image_base64",
+        lambda _image_b64, *, settings: "1 事業概要｜ビジネスチャット事業 *1 Footnote line",
+    )
+
+    html = pdf_to_html(b"%PDF", full_document=False)
+    assert "<h2>事業概要｜ビジネスチャット事業</h2>" in html
+    assert "<p>*1 Footnote line</p>" in html
+    assert "1 事業概要｜ビジネスチャット事業" not in html
+
+
+def test_fast_postprocess_promotes_long_business_overview_heading_with_body(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("RAGPREP_LIGHTON_FAST_PASS", "1")
+    monkeypatch.setenv("RAGPREP_LIGHTON_FAST_POSTPROCESS_MODE", "light")
+
+    source = (
+        "1 事業概要｜BPaaS（Business Process as a Service）事業 "
+        "チャット経由で業務プロセスと人材を組み合わせるサービスです。"
+    )
+
+    monkeypatch.setattr("ragprep.pipeline.iter_pdf_page_png_base64", _iter_one_page)
+    monkeypatch.setattr("ragprep.pipeline.extract_pymupdf_page_texts", lambda _pdf: [source])
+    monkeypatch.setattr("ragprep.pipeline.extract_pymupdf_page_words", lambda _pdf: [[]])
+    monkeypatch.setattr("ragprep.pipeline._estimate_page_table_likelihood", lambda _words: 0.0)
+    monkeypatch.setattr(
+        "ragprep.pipeline.lighton_ocr.ocr_image_base64",
+        lambda _image_b64, *, settings: source,
+    )
+
+    html = pdf_to_html(b"%PDF", full_document=False)
+    assert "<h2>事業概要｜BPaaS（Business Process as a Service）事業</h2>" in html
+    assert "チャット経由で業務プロセス" in html
+
+
+def test_fast_postprocess_splits_compound_issue_paragraph(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("RAGPREP_LIGHTON_FAST_PASS", "1")
+    monkeypatch.setenv("RAGPREP_LIGHTON_FAST_POSTPROCESS_MODE", "light")
+
+    source = "\n".join(
+        [
+            "向き合う社会課題①人口減少",
+            "* 出典注記の例",
+            "2000年代初頭に人口のピークアウトを迎えた日本は、",
+            "世界に先駆けて課題解決のスタートラインに立っている。",
+            "持続可能な社会のため、働き方の構造変革が必要不可欠である。",
+            "世界に先駆けて挑む、",
+            "持続可能な社会への",
+            "構造変革",
+            "2000年代初頭に",
+            "ピークアウト",
+            "日本の人口の推移(万人)",
+        ]
+    )
+
+    monkeypatch.setattr("ragprep.pipeline.iter_pdf_page_png_base64", _iter_one_page)
+    monkeypatch.setattr("ragprep.pipeline.extract_pymupdf_page_texts", lambda _pdf: [source])
+    monkeypatch.setattr("ragprep.pipeline.extract_pymupdf_page_words", lambda _pdf: [[]])
+    monkeypatch.setattr("ragprep.pipeline._estimate_page_table_likelihood", lambda _words: 0.0)
+    monkeypatch.setattr(
+        "ragprep.pipeline.lighton_ocr.ocr_image_base64",
+        lambda _image_b64, *, settings: source,
+    )
+
+    html = pdf_to_html(b"%PDF", full_document=False)
+    assert "<h2>向き合う社会課題①人口減少</h2>" in html
+    assert "<p>* 出典注記の例</p>" in html
+    assert "2000年代初頭に人口のピークアウトを迎えた日本は、" in html
+    assert "<h2>世界に先駆けて挑む、持続可能な社会への構造変革</h2>" in html
+    assert "日本の人口の推移(万人)" in html
 

@@ -36,7 +36,7 @@ uv run python scripts/pdf_to_html.py --pdf .\path\to\input.pdf --out .\out\input
 
 If not explicitly set, these stable defaults are applied automatically:
 
-- `RAGPREP_LIGHTON_PROFILE=balanced` (`balanced` / `ocr-fastest`)
+- `RAGPREP_LIGHTON_PROFILE=balanced`
 - `RAGPREP_LIGHTON_START_TIMEOUT_SECONDS=300`
 - `RAGPREP_LIGHTON_REQUEST_TIMEOUT_SECONDS=600`
 - `RAGPREP_LIGHTON_PARALLEL=2`
@@ -59,33 +59,6 @@ If not explicitly set, these stable defaults are applied automatically:
 - `RAGPREP_LIGHTON_FAST_MAX_TOKENS_TEXT=4096`
 - `RAGPREP_LIGHTON_FAST_MAX_TOKENS_TABLE=8192`
 - `RAGPREP_LIGHTON_FAST_POSTPROCESS_MODE=light` (`full` / `light` / `off`)
-
-## OCR-Fastest Profile (OCR Required)
-
-`RAGPREP_LIGHTON_PROFILE=balanced` is the current default profile.
-If you need faster throughput and accept lower OCR quality, set `RAGPREP_LIGHTON_PROFILE=ocr-fastest`.
-
-PowerShell example:
-
-```powershell
-$env:RAGPREP_LIGHTON_PROFILE = "ocr-fastest"
-uv run python scripts/pdf_to_html.py --pdf .\path\to\input.pdf --out .\out\input.html --overwrite
-```
-
-The `ocr-fastest` preset changes defaults for:
-
-- `RAGPREP_LIGHTON_PARALLEL=1`
-- `RAGPREP_LIGHTON_PAGE_CONCURRENCY=1`
-- `RAGPREP_LIGHTON_MAX_TOKENS=1024`
-- `RAGPREP_LIGHTON_FAST_PASS=1`
-- `RAGPREP_LIGHTON_FAST_RENDER_DPI=96`
-- `RAGPREP_LIGHTON_FAST_RENDER_MAX_EDGE=640`
-- `RAGPREP_LIGHTON_FAST_NON_TABLE_MAX_EDGE=520`
-- `RAGPREP_LIGHTON_FAST_MAX_TOKENS_TEXT=512`
-- `RAGPREP_LIGHTON_FAST_MAX_TOKENS_TABLE=1024`
-- `RAGPREP_LIGHTON_FAST_POSTPROCESS_MODE=off`
-- `RAGPREP_LIGHTON_FAST_RETRY=0`
-- `RAGPREP_LIGHTON_SECONDARY_TABLE_REPAIR=0`
 
 To force balanced behavior explicitly:
 
@@ -110,7 +83,7 @@ Related variables:
 ## Model and OCR Configuration
 
 - `RAGPREP_PDF_BACKEND=lighton-ocr`
-- `RAGPREP_LIGHTON_PROFILE=balanced` (`balanced` or `ocr-fastest`)
+- `RAGPREP_LIGHTON_PROFILE=balanced`
 - `RAGPREP_LIGHTON_REPO_ID=noctrex/LightOnOCR-2-1B-GGUF`
 - `RAGPREP_LIGHTON_MODEL_FILE=LightOnOCR-2-1B-IQ4_XS.gguf`
 - `RAGPREP_LIGHTON_MMPROJ_FILE=mmproj-BF16.gguf`
