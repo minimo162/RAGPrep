@@ -1,49 +1,87 @@
 # RAGPrep
 
-RAGPrep is a PDF-to-HTML converter focused on financial/IR style documents.
-It uses LightOn OCR plus PyMuPDF-based correction to produce structured HTML tables and readable text.
+RAGPrep は、財務・IR系ドキュメント向けの PDF-to-HTML 変換ツールです。
+現在のパイプラインは LightOn OCR（`lighton-ocr`）と PyMuPDF ベースの補正を組み合わせ、構造化された HTML を生成します。
 
-## Quick Start (Windows / PowerShell)
+## 動作要件
+
+- Python `>=3.11,<3.13`
+- `uv`
+- `llama-server`（手動インストールまたは自動ダウンロード）
+
+## クイックスタート（Windows / PowerShell）
 
 ```powershell
-cd C:\Users\Administrator\RAGPrep
+cd <repo-root>
 uv sync --dev
 uv run python -m ragprep.desktop
 ```
 
-Web mode:
+Web モード:
 
 ```powershell
 uv run uvicorn ragprep.web.app:app --reload
 ```
 
-Open `http://127.0.0.1:8000`.
+`http://127.0.0.1:8000` を開きます。
 
-CLI conversion:
+CLI 変換:
 
 ```powershell
 uv run python scripts/pdf_to_html.py --pdf .\path\to\input.pdf --out .\out\input.html --overwrite
 ```
 
-## Runtime Behavior
+CLI オプション:
 
-- PDF pages are rendered to images, OCR'd with LightOn, then corrected with PyMuPDF text.
-- Truncated OCR table tails are repaired with a secondary lower-page OCR pass (best effort).
-- Table text may be corrected from PyMuPDF word geometry when confidence is high.
-- Output uses semantic HTML table tags (`<table>`, `<thead>`, `<tbody>`).
+- `--stdout`: HTML を標準出力に出力
+- `--fragment`: HTML フラグメントを出力（`<html>` ラッパーなし）
+- `--stdout` と `--out` は同時指定不可
 
-## Automatic Defaults
+## 実行時の動作
 
-If not explicitly set, these stable defaults are applied automatically:
+- PDF 各ページを画像化し、LightOn OCR を実行します。
+- OCR テキストは PyMuPDF のテキスト情報と表構造情報で補正されます。
+- Fast-pass モードは既定で有効です（`RAGPREP_LIGHTON_FAST_PASS=1`）。
+- 高解像度リトライと表末尾の二次 OCR 修復は任意で、ベストエフォートです。
+- Web/Desktop モードでは同時に 1 ジョブのみ変換します。
+- 出力はセマンティックな HTML テーブルタグ（`<table>`, `<thead>`, `<tbody>`）を使用します。
 
-- `RAGPREP_LIGHTON_PROFILE=balanced`
+## 設定
+
+基本制限とバックエンド:
+
+- `RAGPREP_MAX_UPLOAD_BYTES=104857600` (100 MB)
+- `RAGPREP_MAX_PAGES=200`
+- `RAGPREP_MAX_CONCURRENCY=1`
+- `RAGPREP_PDF_BACKEND=lighton-ocr`（対応バックエンドはこれのみ）
+- `RAGPREP_MODEL_CACHE_DIR=~/.ragprep/model-cache`
+
+LightOn モデル設定:
+
+- `RAGPREP_LIGHTON_REPO_ID=noctrex/LightOnOCR-2-1B-GGUF`
+- `RAGPREP_LIGHTON_MODEL_FILE=LightOnOCR-2-1B-IQ4_XS.gguf`
+- `RAGPREP_LIGHTON_MMPROJ_FILE=mmproj-BF16.gguf`
+- `RAGPREP_LIGHTON_MODEL_DIR=~/.ragprep/models/lighton`
+- `RAGPREP_LIGHTON_AUTO_DOWNLOAD=1`
+
+LightOn OCR/サーバー既定値:
+
+- `RAGPREP_LIGHTON_PROFILE=balanced`（対応プロファイルはこれのみ）
+- `RAGPREP_LIGHTON_SERVER_HOST=127.0.0.1`
+- `RAGPREP_LIGHTON_SERVER_PORT=8080`
 - `RAGPREP_LIGHTON_START_TIMEOUT_SECONDS=300`
 - `RAGPREP_LIGHTON_REQUEST_TIMEOUT_SECONDS=600`
-- `RAGPREP_LIGHTON_PARALLEL=2`
-- `RAGPREP_LIGHTON_PAGE_CONCURRENCY=2`
+- `RAGPREP_LIGHTON_CTX_SIZE=8192`
 - `RAGPREP_LIGHTON_N_GPU_LAYERS=-1`
+- `RAGPREP_LIGHTON_PARALLEL=2`
+- `RAGPREP_LIGHTON_THREADS=<cpu_count>`
+- `RAGPREP_LIGHTON_THREADS_BATCH=<cpu_count>`
 - `RAGPREP_LIGHTON_FLASH_ATTN=1`
 - `RAGPREP_LIGHTON_MAX_TOKENS=8192`
+- `RAGPREP_LIGHTON_PAGE_CONCURRENCY=2`
+- `RAGPREP_LIGHTON_RENDER_DPI=220`
+- `RAGPREP_LIGHTON_RENDER_MAX_EDGE=1280`
+- `RAGPREP_LIGHTON_MERGE_POLICY=strict` (`strict` or `aggressive`)
 - `RAGPREP_LIGHTON_FAST_PASS=1`
 - `RAGPREP_LIGHTON_FAST_RENDER_DPI=200`
 - `RAGPREP_LIGHTON_FAST_RENDER_MAX_EDGE=1100`
@@ -58,53 +96,44 @@ If not explicitly set, these stable defaults are applied automatically:
 - `RAGPREP_LIGHTON_FAST_TABLE_LIKELIHOOD_THRESHOLD=0.60`
 - `RAGPREP_LIGHTON_FAST_MAX_TOKENS_TEXT=4096`
 - `RAGPREP_LIGHTON_FAST_MAX_TOKENS_TABLE=8192`
-- `RAGPREP_LIGHTON_FAST_POSTPROCESS_MODE=light` (`full` / `light` / `off`)
+- `RAGPREP_LIGHTON_FAST_POSTPROCESS_MODE=light` (`full`, `light`, `off`)
+- `RAGPREP_LIGHTON_PYMUPDF_PAGE_FALLBACK_MODE=repeat` (`off`, `repeat`, `aggressive`)
 
-To force balanced behavior explicitly:
+`llama-server` の解決順:
+
+1. `RAGPREP_LLAMA_SERVER_PATH`（明示パス）
+2. PATH / 一般的なローカル配置先
+3. `ggml-org/llama.cpp` の最新リリースから自動ダウンロード（既定で有効）
+
+関連環境変数:
+
+- `RAGPREP_LLAMA_SERVER_PATH`
+- `RAGPREP_LLAMA_SERVER_AUTO_DOWNLOAD=1`
+- `RAGPREP_LLAMA_SERVER_INSTALL_DIR`（既定: LightOn モデルディレクトリの兄弟）
+
+Web 起動時 prewarm:
+
+- `RAGPREP_WEB_PREWARM_ON_STARTUP=1`
+- `RAGPREP_WEB_PREWARM_START_DELAY_SECONDS=0.35`
+- `RAGPREP_WEB_PREWARM_EXECUTOR=thread`（desktop モードでは `process` が自動選択）
+- `RAGPREP_WEB_PREWARM_TIMEOUT_SECONDS=120`
+
+## 失敗時の挙動
+
+- 1 次 OCR のページ処理が失敗した場合、ジョブは失敗します。
+- 表末尾の二次修復や retry OCR はベストエフォートであり、それ自体ではジョブ失敗にしません。
+- LightOn モデルファイルが不足していて `RAGPREP_LIGHTON_AUTO_DOWNLOAD=0` の場合、変換は失敗します。
+- `llama-server` を検出できない、または起動できない場合、明確なエラーで失敗します。
+
+## Standalone ビルドスクリプト（Windows）
 
 ```powershell
-$env:RAGPREP_LIGHTON_PROFILE = "balanced"
+.\scripts\build-standalone.ps1
+.\scripts\verify-standalone.ps1
+.\scripts\package-standalone.ps1
 ```
 
-## llama-server Auto Setup
-
-RAGPrep resolves `llama-server` in this order:
-
-1. `RAGPREP_LLAMA_SERVER_PATH` (if set)
-2. PATH / common local locations
-3. Auto-download and install (enabled by default)
-
-Related variables:
-
-- `RAGPREP_LLAMA_SERVER_PATH` (explicit binary path)
-- `RAGPREP_LLAMA_SERVER_AUTO_DOWNLOAD=1` (default)
-- `RAGPREP_LLAMA_SERVER_INSTALL_DIR` (optional install destination)
-
-## Model and OCR Configuration
-
-- `RAGPREP_PDF_BACKEND=lighton-ocr`
-- `RAGPREP_LIGHTON_PROFILE=balanced`
-- `RAGPREP_LIGHTON_REPO_ID=noctrex/LightOnOCR-2-1B-GGUF`
-- `RAGPREP_LIGHTON_MODEL_FILE=LightOnOCR-2-1B-IQ4_XS.gguf`
-- `RAGPREP_LIGHTON_MMPROJ_FILE=mmproj-BF16.gguf`
-- `RAGPREP_LIGHTON_MODEL_DIR=~/.ragprep/models/lighton`
-- `RAGPREP_LIGHTON_AUTO_DOWNLOAD=1`
-- `RAGPREP_LIGHTON_MERGE_POLICY=strict` (`strict` or `aggressive`)
-- `RAGPREP_LIGHTON_FAST_PASS=0` to disable fast-pass mode and use legacy single-pass OCR rendering.
-- `RAGPREP_LIGHTON_FAST_RETRY=1` to enable high-resolution retry OCR for low-quality pages.
-- `RAGPREP_LIGHTON_SECONDARY_TABLE_REPAIR=1` to enable secondary cropped OCR table-tail repair.
-- `RAGPREP_LIGHTON_FAST_NON_TABLE_MAX_EDGE=0` to disable non-table downscale in fast-pass.
-- `RAGPREP_LIGHTON_FAST_MAX_TOKENS_TEXT` / `RAGPREP_LIGHTON_FAST_MAX_TOKENS_TABLE` for page-type token budget.
-- `RAGPREP_LIGHTON_FAST_POSTPROCESS_MODE=off` for maximum throughput (least correction work).
-
-## Failure Model
-
-- If a primary page OCR call fails, the job fails.
-- Secondary table-tail OCR repair is best-effort and will not fail the job by itself.
-- If models are missing and auto-download is disabled, conversion fails.
-- If `llama-server` cannot be resolved (including auto-setup failure), conversion fails with a clear error.
-
-## Development
+## 開発
 
 ```bash
 uv run ruff check .
